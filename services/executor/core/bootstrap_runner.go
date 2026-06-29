@@ -78,7 +78,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 
     - name: Copy checkpoint callback plugin (enables task-level resume)
       copy:
-        src: /tmp/build/plugins/callback/praetor_checkpoint.py
+        src: /tmp/plugins/callback/praetor_checkpoint.py
         dest: /usr/local/share/praetor/plugins/callback/praetor_checkpoint.py
         mode: '0644'
 
