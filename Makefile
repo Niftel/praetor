@@ -1,9 +1,8 @@
-.PHONY: build test clean run-api run-scheduler run-controller run-ingestion migrate-up migrate-down
+.PHONY: build test clean run-api run-scheduler run-ingestion migrate-up migrate-down
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
 SCHEDULER_BINARY=$(BINARY_DIR)/praetor-scheduler
-CONTROLLER_BINARY=$(BINARY_DIR)/praetor-controller
 INGESTION_BINARY=$(BINARY_DIR)/praetor-ingestion
 
 build:
@@ -11,7 +10,6 @@ build:
 	mkdir -p $(BINARY_DIR)
 	go build -o $(API_BINARY) ./cmd/api
 	go build -o $(SCHEDULER_BINARY) ./cmd/scheduler
-	go build -o $(CONTROLLER_BINARY) ./cmd/controller
 	go build -o $(INGESTION_BINARY) ./cmd/ingestion
 	go build -o $(BINARY_DIR)/praetor-consumer ./cmd/consumer
 	go build -o $(BINARY_DIR)/praetor-executor ./cmd/executor
@@ -44,9 +42,6 @@ run-api:
 
 run-scheduler:
 	DATABASE_URL=$(DB_URL) go run ./cmd/scheduler
-
-run-controller:
-	PRAETOR_ORCHESTRATOR=docker PRAETOR_PROJECT_DIR=$(shell pwd)/playbooks_repo DATABASE_URL=$(DB_URL) go run ./cmd/controller
 
 run-ingestion:
 	DATABASE_URL=$(DB_URL) INGESTION_PORT=8081 go run ./cmd/ingestion
@@ -109,7 +104,6 @@ kind-load:
 	@echo "Loading images into Kind..."
 	$(KIND) load docker-image praetor-api:latest --name $(KIND_CLUSTER)
 	$(KIND) load docker-image praetor-scheduler:latest --name $(KIND_CLUSTER)
-	$(KIND) load docker-image praetor-controller:latest --name $(KIND_CLUSTER)
 	$(KIND) load docker-image praetor-executor:latest --name $(KIND_CLUSTER)
 	$(KIND) load docker-image praetor-consumer:latest --name $(KIND_CLUSTER)
 	$(KIND) load docker-image praetor-migrator:latest --name $(KIND_CLUSTER)
