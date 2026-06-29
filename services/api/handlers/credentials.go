@@ -10,15 +10,17 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
 
 type CredentialsResource struct {
 	DB *sqlx.DB
+	*Authorizer
 }
 
 func NewCredentialsResource(db *sqlx.DB) *CredentialsResource {
-	return &CredentialsResource{DB: db}
+	return &CredentialsResource{DB: db, Authorizer: NewAuthorizer(db)}
 }
 
 func (rs *CredentialsResource) Routes() chi.Router {
@@ -32,11 +34,28 @@ func (rs *CredentialsResource) Routes() chi.Router {
 }
 
 func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Request) {
+	uc := currentUser(r)
+
 	var creds []models.Credential
-	err := rs.DB.SelectContext(r.Context(), &creds, "SELECT * FROM credentials ORDER BY id ASC")
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		if err := rs.DB.SelectContext(r.Context(), &creds, "SELECT * FROM credentials ORDER BY id ASC"); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+	} else {
+		ids, err := rs.readableIDs(r, rbac.ContentTypeCredential)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if len(ids) > 0 {
+			q, args, _ := sqlx.In("SELECT * FROM credentials WHERE id IN (?) ORDER BY id ASC", ids)
+			q = rs.DB.Rebind(q)
+			if err := rs.DB.SelectContext(r.Context(), &creds, q, args...); err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+		}
 	}
 
 	// Mask secrets for list view is expensive if we do full logic,
@@ -60,6 +79,10 @@ func (rs *CredentialsResource) GetCredential(w http.ResponseWriter, r *http.Requ
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeCredential, id, actRead) {
 		return
 	}
 
@@ -90,6 +113,11 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 		input.OrganizationID = 1
 	}
 
+	// Creating a credential requires admin on its parent organization.
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+		return
+	}
+
 	if err := rs.processSecrets(&input, nil); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -110,6 +138,7 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeCredential, created.ID, currentUser(r))
 	rs.maskCredentialSecrets(&created)
 	render.Created(w, r, created)
 }
@@ -119,6 +148,10 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeCredential, id, actAdmin) {
 		return
 	}
 
@@ -167,6 +200,10 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeCredential, id, actAdmin) {
 		return
 	}
 

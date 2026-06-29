@@ -6,30 +6,44 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
-
-// ... (existing code omitted for brevity in thought, but I must preserve it or just replace the parts)
-// I better just replace the whole file content or use replace blocks carefully.
-// I'll replace the top block to add imports, and the bottom block to fix RemoveTeamMember.
-
-// Since I can't do multiple separate replacements in one go easily with replace_file_content unless I use multi_replace.
-// I will use multi_replace_file_content.
 
 // ListTeams GET /api/v1/teams
 func (h *ContentHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
+	uc := currentUser(r)
+
 	var teams []models.Team
-	query := `SELECT id, organization_id, name, description, created_at, modified_at FROM teams ORDER BY id LIMIT $1 OFFSET $2`
-	err := h.DB.Select(&teams, query, pg.Limit, pg.Offset)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
+	var total int64
+	const cols = `id, organization_id, name, description, created_at, modified_at`
+
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		if err := h.DB.Select(&teams, `SELECT `+cols+` FROM teams ORDER BY id LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		_ = h.DB.Get(&total, "SELECT count(*) FROM teams")
+	} else {
+		ids, err := h.readableIDs(r, rbac.ContentTypeTeam)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if len(ids) > 0 {
+			q, args, _ := sqlx.In(`SELECT `+cols+` FROM teams WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
+			q = h.DB.Rebind(q)
+			if err := h.DB.Select(&teams, q, args...); err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+			total = int64(len(ids))
+		}
 	}
 
-	var total int64
-	_ = h.DB.Get(&total, "SELECT count(*) FROM teams")
 	if teams == nil {
 		teams = []models.Team{}
 	}
@@ -55,8 +69,13 @@ func (h *ContentHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		input.OrganizationID = 1
 	}
 
+	// Creating a team requires admin on its parent organization.
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+		return
+	}
+
 	query := `
-		INSERT INTO teams (organization_id, name, description) 
+		INSERT INTO teams (organization_id, name, description)
 		VALUES (:organization_id, :name, :description) 
 		RETURNING id, organization_id, name, description, created_at, modified_at`
 
@@ -73,6 +92,8 @@ func (h *ContentHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
+		rows.Close()
+		h.grantCreatorAdmin(r.Context(), rbac.ContentTypeTeam, created.ID, currentUser(r))
 		render.Created(w, r, created)
 	} else {
 		render.ErrInternal(nil).Render(w, r)
@@ -82,6 +103,9 @@ func (h *ContentHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 // GetTeam GET /api/v1/teams/{id}
 func (h *ContentHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
+	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actRead) {
+		return
+	}
 	var team models.Team
 	err := h.DB.Get(&team, "SELECT id, organization_id, name, description, created_at, modified_at FROM teams WHERE id = $1", id)
 	if err != nil {
@@ -94,6 +118,9 @@ func (h *ContentHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 // UpdateTeam PUT /api/v1/teams/{id}
 func (h *ContentHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
+	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actAdmin) {
+		return
+	}
 	var input models.Team
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -129,6 +156,9 @@ func (h *ContentHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 // DeleteTeam DELETE /api/v1/teams/{id}
 func (h *ContentHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
+	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actAdmin) {
+		return
+	}
 	res, err := h.DB.Exec("DELETE FROM teams WHERE id = $1", id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -145,6 +175,9 @@ func (h *ContentHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 // AddTeamMember POST /api/v1/teams/{id}/members
 func (h *ContentHandler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
+	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actAdmin) {
+		return
+	}
 
 	type MemberRequest struct {
 		UserID int64 `json:"user_id"`
@@ -167,6 +200,9 @@ func (h *ContentHandler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 // ListTeamMembers GET /api/v1/teams/{id}/members
 func (h *ContentHandler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
+	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actRead) {
+		return
+	}
 
 	var members []models.User
 	// Join users and team_members
@@ -190,6 +226,9 @@ func (h *ContentHandler) ListTeamMembers(w http.ResponseWriter, r *http.Request)
 // RemoveTeamMember DELETE /api/v1/teams/{id}/members/{userID}
 func (h *ContentHandler) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
+	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actAdmin) {
+		return
+	}
 
 	userIDStr := chi.URLParam(r, "userID")
 	userID, err := strconv.ParseInt(userIDStr, 10, 64)

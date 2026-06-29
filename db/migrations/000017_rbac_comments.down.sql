@@ -1,0 +1,7 @@
+COMMENT ON TABLE roles IS NULL;
+COMMENT ON COLUMN roles.role_field IS NULL;
+COMMENT ON COLUMN roles.singleton_name IS NULL;
+COMMENT ON TABLE role_parents IS NULL;
+COMMENT ON TABLE role_ancestors IS NULL;
+COMMENT ON TABLE role_members IS NULL;
+COMMENT ON TABLE team_roles IS NULL;

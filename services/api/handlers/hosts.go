@@ -9,17 +9,31 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
 
 // HostsResource handles host operations within inventories
 type HostsResource struct {
 	DB *sqlx.DB
+	*Authorizer
 }
 
 // NewHostsResource creates a new hosts resource handler
 func NewHostsResource(db *sqlx.DB) *HostsResource {
-	return &HostsResource{DB: db}
+	return &HostsResource{DB: db, Authorizer: NewAuthorizer(db)}
+}
+
+// authorizeHost enforces access on a host via its parent inventory's roles
+// (hosts have no object-roles of their own). Returns false (and writes the
+// response) when denied or the host does not exist.
+func (rs *HostsResource) authorizeHost(w http.ResponseWriter, r *http.Request, hostID int64, action permAction) bool {
+	var invID int64
+	if err := rs.DB.GetContext(r.Context(), &invID, `SELECT inventory_id FROM hosts WHERE id = $1`, hostID); err != nil {
+		render.ErrNotFound(nil).Render(w, r)
+		return false
+	}
+	return rs.authorize(w, r, rbac.ContentTypeInventory, invID, action)
 }
 
 // Routes creates a REST router for hosts
@@ -51,6 +65,10 @@ func (rs *HostsResource) ListHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actRead) {
+		return
+	}
+
 	var hosts []models.Host
 	query := `SELECT * FROM hosts WHERE inventory_id = $1 ORDER BY name`
 	err = rs.DB.SelectContext(r.Context(), &hosts, query, inventoryId)
@@ -72,6 +90,10 @@ func (rs *HostsResource) CreateHost(w http.ResponseWriter, r *http.Request) {
 	inventoryId, err := strconv.ParseInt(inventoryIdStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actAdmin) {
 		return
 	}
 
@@ -121,6 +143,10 @@ func (rs *HostsResource) GetHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rs.authorizeHost(w, r, hostId, actRead) {
+		return
+	}
+
 	var host models.Host
 	query := `SELECT * FROM hosts WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &host, query, hostId)
@@ -139,6 +165,10 @@ func (rs *HostsResource) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	hostId, err := strconv.ParseInt(hostIdStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorizeHost(w, r, hostId, actAdmin) {
 		return
 	}
 
@@ -185,6 +215,10 @@ func (rs *HostsResource) DeleteHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rs.authorizeHost(w, r, hostId, actAdmin) {
+		return
+	}
+
 	query := `DELETE FROM hosts WHERE id = $1`
 	_, err = rs.DB.ExecContext(r.Context(), query, hostId)
 	if err != nil {
@@ -201,6 +235,10 @@ func (rs *HostsResource) GetHostGroups(w http.ResponseWriter, r *http.Request) {
 	hostId, err := strconv.ParseInt(hostIdStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorizeHost(w, r, hostId, actRead) {
 		return
 	}
 
@@ -229,6 +267,10 @@ func (rs *HostsResource) SetRunnerHost(w http.ResponseWriter, r *http.Request) {
 	hostId, err := strconv.ParseInt(hostIdStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorizeHost(w, r, hostId, actAdmin) {
 		return
 	}
 

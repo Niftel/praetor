@@ -2,11 +2,20 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/services/api/render"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// userInput is the create/update payload: the user fields plus a write-only
+// password (the User model itself never (de)serializes a password).
+type userInput struct {
+	models.User
+	Password string `json:"password"`
+}
 
 // ListUsers GET /api/v1/users
 func (h *ContentHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -37,20 +46,34 @@ func (h *ContentHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser POST /api/v1/users
 func (h *ContentHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	// Simplified user creation (no password hashing implemented yet for skeleton)
-	var input models.User
+	if uc := currentUser(r); !uc.IsSuperuser {
+		render.ErrForbidden(nil).Render(w, r)
+		return
+	}
+
+	var input userInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	if input.Username == "" || input.Password == "" {
+		render.ErrInvalidRequest(fmt.Errorf("username and password are required")).Render(w, r)
+		return
+	}
 
-	// Just assume password_hash is provided or empty for now
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	input.PasswordHash = string(hash)
+
 	query := `
-		INSERT INTO users (username, password_hash, email, first_name, last_name, is_superuser) 
-		VALUES (:username, 'placeholder_hash', :email, :first_name, :last_name, :is_superuser) 
+		INSERT INTO users (username, password_hash, email, first_name, last_name, is_superuser)
+		VALUES (:username, :password_hash, :email, :first_name, :last_name, :is_superuser)
 		RETURNING id, username, email, first_name, last_name, is_superuser, is_active, created_at, modified_at`
 
-	rows, err := h.DB.NamedQuery(query, input)
+	rows, err := h.DB.NamedQuery(query, input.User)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -83,22 +106,43 @@ func (h *ContentHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 // UpdateUser PUT /api/v1/users/{id}
 func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	// This endpoint can set is_superuser/is_active, so it is superuser-only.
+	// Self-service profile editing belongs in a separate, field-restricted route.
+	if uc := currentUser(r); !uc.IsSuperuser {
+		render.ErrForbidden(nil).Render(w, r)
+		return
+	}
+
 	id := render.GetIDParam(r)
-	var input models.User
+	var input userInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 	input.ID = id
 
-	// Only updating standard fields for now. Password reset would be separate or handled carefully.
+	// A non-empty password resets it; otherwise the password is left unchanged.
+	setPassword := input.Password != ""
+	if setPassword {
+		hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		input.PasswordHash = string(hash)
+	}
+
 	query := `
-		UPDATE users 
-		SET email=:email, first_name=:first_name, last_name=:last_name, is_superuser=:is_superuser, is_active=:is_active, modified_at=NOW()
+		UPDATE users
+		SET email=:email, first_name=:first_name, last_name=:last_name, is_superuser=:is_superuser, is_active=:is_active, modified_at=NOW()`
+	if setPassword {
+		query += `, password_hash=:password_hash`
+	}
+	query += `
 		WHERE id=:id
 		RETURNING id, username, email, first_name, last_name, is_superuser, is_active, created_at, modified_at`
 
-	rows, err := h.DB.NamedQuery(query, input)
+	rows, err := h.DB.NamedQuery(query, input.User)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -119,6 +163,11 @@ func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 // DeleteUser DELETE /api/v1/users/{id}
 func (h *ContentHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	if uc := currentUser(r); !uc.IsSuperuser {
+		render.ErrForbidden(nil).Render(w, r)
+		return
+	}
+
 	id := render.GetIDParam(r)
 	res, err := h.DB.Exec("DELETE FROM users WHERE id = $1", id)
 	if err != nil {

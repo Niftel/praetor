@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,14 +12,44 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 )
 
 type JobsResource struct {
 	DB *sqlx.DB
+	*Authorizer
 }
 
 func NewJobsResource(db *sqlx.DB) *JobsResource {
-	return &JobsResource{DB: db}
+	return &JobsResource{DB: db, Authorizer: NewAuthorizer(db)}
+}
+
+// templateIDForRun resolves the job_templates.id that owns a given execution
+// run, via unified_job -> unified_job_template_id. ok is false when the run has
+// no governing template (e.g. an ad-hoc job).
+func (rs *JobsResource) templateIDForRun(r *http.Request, runID uuid.UUID) (int64, bool) {
+	var jtID int64
+	err := rs.DB.GetContext(r.Context(), &jtID, `
+		SELECT jt.id
+		FROM execution_runs er
+		JOIN unified_jobs uj ON er.unified_job_id = uj.id
+		JOIN job_templates jt ON uj.unified_job_template_id = jt.unified_job_template_id
+		WHERE er.id = $1`, runID)
+	return jtID, err == nil
+}
+
+// authorizeRunRead allows reading a run/its events when the user can read the
+// governing template; runs with no template are visible only to superuser/auditor.
+func (rs *JobsResource) authorizeRunRead(w http.ResponseWriter, r *http.Request, runID uuid.UUID) bool {
+	if jtID, ok := rs.templateIDForRun(r, runID); ok {
+		return rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actRead)
+	}
+	uc := currentUser(r)
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		return true
+	}
+	render.Render(w, r, ErrForbidden)
+	return false
 }
 
 // Routes creates a REST router for the Jobs resource
@@ -34,11 +65,35 @@ func (rs *JobsResource) Routes() chi.Router {
 
 // ListUnifiedJobs returns a list of unified jobs
 func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) {
-	query := `SELECT * FROM unified_jobs ORDER BY created_at DESC LIMIT 50`
+	uc := currentUser(r)
 	jobs := []models.UnifiedJob{}
-	if err := rs.DB.SelectContext(r.Context(), &jobs, query); err != nil {
+
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		if err := rs.DB.SelectContext(r.Context(), &jobs, `SELECT * FROM unified_jobs ORDER BY created_at DESC LIMIT 50`); err != nil {
+			render.Render(w, r, ErrInternal(err))
+			return
+		}
+		render.JSON(w, r, jobs)
+		return
+	}
+
+	// Regular users see only jobs whose governing template they can read.
+	ids, err := rs.readableIDs(r, rbac.ContentTypeJobTemplate)
+	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
+	}
+	if len(ids) > 0 {
+		q, args, _ := sqlx.In(`
+			SELECT uj.* FROM unified_jobs uj
+			JOIN job_templates jt ON uj.unified_job_template_id = jt.unified_job_template_id
+			WHERE jt.id IN (?)
+			ORDER BY uj.created_at DESC LIMIT 50`, ids)
+		q = rs.DB.Rebind(q)
+		if err := rs.DB.SelectContext(r.Context(), &jobs, q, args...); err != nil {
+			render.Render(w, r, ErrInternal(err))
+			return
+		}
 	}
 	render.JSON(w, r, jobs)
 }
@@ -54,6 +109,19 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	var req LaunchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+
+	// Launching requires execute access on the job template. The launch payload
+	// carries the unified_job_template_id; map it to the job_templates row that
+	// owns the roles.
+	var jtID int64
+	if err := rs.DB.GetContext(r.Context(), &jtID,
+		`SELECT id FROM job_templates WHERE unified_job_template_id = $1`, req.UnifiedJobTemplateID); err != nil {
+		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job template")))
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actExecute) {
 		return
 	}
 
@@ -93,6 +161,10 @@ func (rs *JobsResource) GetExecutionRun(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if !rs.authorizeRunRead(w, r, runID) {
+		return
+	}
+
 	var run models.ExecutionRun
 	err = rs.DB.GetContext(r.Context(), &run, `SELECT * FROM execution_runs WHERE id = $1`, runID)
 	if err == sql.ErrNoRows {
@@ -112,6 +184,10 @@ func (rs *JobsResource) ListJobEvents(w http.ResponseWriter, r *http.Request) {
 	runID, err := uuid.Parse(runIDStr)
 	if err != nil {
 		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+
+	if !rs.authorizeRunRead(w, r, runID) {
 		return
 	}
 
@@ -209,6 +285,7 @@ func ErrInvalidRequest(err error) render.Renderer {
 }
 
 var ErrNotFound = &ErrResponse{HTTPStatusCode: 404, StatusText: "Resource not found"}
+var ErrForbidden = &ErrResponse{HTTPStatusCode: 403, StatusText: "Forbidden"}
 
 type ErrResponse struct {
 	Err            error  `json:"-"`

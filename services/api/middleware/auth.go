@@ -26,9 +26,10 @@ type AuthContextKey string
 const UserContextKey AuthContextKey = "user"
 
 type UserContext struct {
-	UserID      int64
-	Username    string
-	IsSuperuser bool
+	UserID          int64
+	Username        string
+	IsSuperuser     bool
+	IsSystemAuditor bool
 }
 
 // AuthMiddleware validates JWT tokens
@@ -69,11 +70,13 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		userIDFloat, _ := claims["user_id"].(float64)
 		username, _ := claims["username"].(string)
 		isSuperuser, _ := claims["is_superuser"].(bool)
+		isSystemAuditor, _ := claims["is_system_auditor"].(bool)
 
 		userCtx := UserContext{
-			UserID:      int64(userIDFloat),
-			Username:    username,
-			IsSuperuser: isSuperuser,
+			UserID:          int64(userIDFloat),
+			Username:        username,
+			IsSuperuser:     isSuperuser,
+			IsSystemAuditor: isSystemAuditor,
 		}
 
 		ctx := context.WithValue(r.Context(), UserContextKey, userCtx)

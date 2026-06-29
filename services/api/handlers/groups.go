@@ -8,17 +8,30 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
 
 // GroupsResource handles group operations within inventories
 type GroupsResource struct {
 	DB *sqlx.DB
+	*Authorizer
 }
 
 // NewGroupsResource creates a new groups resource handler
 func NewGroupsResource(db *sqlx.DB) *GroupsResource {
-	return &GroupsResource{DB: db}
+	return &GroupsResource{DB: db, Authorizer: NewAuthorizer(db)}
+}
+
+// authorizeGroup enforces access on a group via its parent inventory's roles
+// (groups have no object-roles of their own).
+func (rs *GroupsResource) authorizeGroup(w http.ResponseWriter, r *http.Request, groupID int64, action permAction) bool {
+	var invID int64
+	if err := rs.DB.GetContext(r.Context(), &invID, `SELECT inventory_id FROM groups WHERE id = $1`, groupID); err != nil {
+		render.ErrNotFound(nil).Render(w, r)
+		return false
+	}
+	return rs.authorize(w, r, rbac.ContentTypeInventory, invID, action)
 }
 
 // Routes creates a REST router for groups
@@ -50,6 +63,10 @@ func (rs *GroupsResource) ListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actRead) {
+		return
+	}
+
 	var groups []models.Group
 	query := `SELECT * FROM groups WHERE inventory_id = $1 ORDER BY name`
 	err = rs.DB.SelectContext(r.Context(), &groups, query, inventoryId)
@@ -71,6 +88,10 @@ func (rs *GroupsResource) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	inventoryId, err := strconv.ParseInt(inventoryIdStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actAdmin) {
 		return
 	}
 
@@ -118,6 +139,10 @@ func (rs *GroupsResource) GetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rs.authorizeGroup(w, r, groupId, actRead) {
+		return
+	}
+
 	var group models.Group
 	query := `SELECT * FROM groups WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &group, query, groupId)
@@ -138,6 +163,10 @@ func (rs *GroupsResource) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rs.authorizeGroup(w, r, groupId, actAdmin) {
+		return
+	}
+
 	var input models.Group
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -145,7 +174,7 @@ func (rs *GroupsResource) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		UPDATE groups 
+		UPDATE groups
 		SET name = $2, description = $3, variables = $4, modified_at = now()
 		WHERE id = $1 
 		RETURNING *`
@@ -172,6 +201,10 @@ func (rs *GroupsResource) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rs.authorizeGroup(w, r, groupId, actAdmin) {
+		return
+	}
+
 	query := `DELETE FROM groups WHERE id = $1`
 	_, err = rs.DB.ExecContext(r.Context(), query, groupId)
 	if err != nil {
@@ -188,6 +221,10 @@ func (rs *GroupsResource) AddHostToGroup(w http.ResponseWriter, r *http.Request)
 	groupId, err := strconv.ParseInt(groupIdStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorizeGroup(w, r, groupId, actAdmin) {
 		return
 	}
 
@@ -225,6 +262,10 @@ func (rs *GroupsResource) RemoveHostFromGroup(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if !rs.authorizeGroup(w, r, groupId, actAdmin) {
+		return
+	}
+
 	query := `DELETE FROM host_groups WHERE host_id = $1 AND group_id = $2`
 	_, err = rs.DB.ExecContext(r.Context(), query, hostId, groupId)
 	if err != nil {
@@ -241,6 +282,10 @@ func (rs *GroupsResource) ListGroupHosts(w http.ResponseWriter, r *http.Request)
 	groupId, err := strconv.ParseInt(groupIdStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorizeGroup(w, r, groupId, actRead) {
 		return
 	}
 

@@ -8,17 +8,19 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
 
 // InventoriesResource handles inventory operations
 type InventoriesResource struct {
 	DB *sqlx.DB
+	*Authorizer
 }
 
 // NewInventoriesResource creates a new inventories resource handler
 func NewInventoriesResource(db *sqlx.DB) *InventoriesResource {
-	return &InventoriesResource{DB: db}
+	return &InventoriesResource{DB: db, Authorizer: NewAuthorizer(db)}
 }
 
 // Routes creates a REST router for the Inventories resource
@@ -35,17 +37,33 @@ func (rs *InventoriesResource) Routes() chi.Router {
 // ListInventories GET /api/v1/inventories
 func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
+	uc := currentUser(r)
 
 	var inventories []models.Inventory
-	query := `SELECT * FROM inventories ORDER BY id DESC LIMIT $1 OFFSET $2`
-	err := rs.DB.SelectContext(r.Context(), &inventories, query, pg.Limit, pg.Offset)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
 	var total int64
-	_ = rs.DB.Get(&total, "SELECT count(*) FROM inventories")
+
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		if err := rs.DB.SelectContext(r.Context(), &inventories, `SELECT * FROM inventories ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		_ = rs.DB.Get(&total, "SELECT count(*) FROM inventories")
+	} else {
+		ids, err := rs.readableIDs(r, rbac.ContentTypeInventory)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if len(ids) > 0 {
+			q, args, _ := sqlx.In(`SELECT * FROM inventories WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
+			q = rs.DB.Rebind(q)
+			if err := rs.DB.SelectContext(r.Context(), &inventories, q, args...); err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+			total = int64(len(ids))
+		}
+	}
 
 	if inventories == nil {
 		inventories = []models.Inventory{}
@@ -78,6 +96,11 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 		input.OrganizationID = 1
 	}
 
+	// Creating an inventory requires admin on its parent organization.
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+		return
+	}
+
 	// Default kind
 	if input.Kind == "" {
 		input.Kind = "static"
@@ -99,6 +122,7 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeInventory, created.ID, currentUser(r))
 	render.Created(w, r, created)
 }
 
@@ -108,6 +132,10 @@ func (rs *InventoriesResource) GetInventory(w http.ResponseWriter, r *http.Reque
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actRead) {
 		return
 	}
 
@@ -131,6 +159,10 @@ func (rs *InventoriesResource) UpdateInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actAdmin) {
+		return
+	}
+
 	var input models.Inventory
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -138,7 +170,7 @@ func (rs *InventoriesResource) UpdateInventory(w http.ResponseWriter, r *http.Re
 	}
 
 	query := `
-		UPDATE inventories 
+		UPDATE inventories
 		SET name = $2, description = $3, content = $4, modified_at = now()
 		WHERE id = $1 
 		RETURNING *`
@@ -165,6 +197,10 @@ func (rs *InventoriesResource) DeleteInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actAdmin) {
+		return
+	}
+
 	query := `DELETE FROM inventories WHERE id = $1`
 	_, err = rs.DB.ExecContext(r.Context(), query, id)
 	if err != nil {
@@ -181,6 +217,10 @@ func (rs *InventoriesResource) GetInventoryByParam(w http.ResponseWriter, r *htt
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actRead) {
 		return
 	}
 
@@ -201,6 +241,10 @@ func (rs *InventoriesResource) UpdateInventoryByParam(w http.ResponseWriter, r *
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actAdmin) {
 		return
 	}
 
@@ -235,6 +279,10 @@ func (rs *InventoriesResource) DeleteInventoryByParam(w http.ResponseWriter, r *
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actAdmin) {
 		return
 	}
 
