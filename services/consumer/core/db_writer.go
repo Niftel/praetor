@@ -106,18 +106,24 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 	}
 
 	// The `state NOT IN (<terminal>)` guard makes the projection monotonic: once
-	// a run is terminal we never overwrite it. Combined with COALESCE/GREATEST
-	// this means an out-of-order or replayed event (e.g. a redelivered
-	// JOB_STARTED arriving after JOB_COMPLETED) cannot regress final state — so
-	// there is never a "job succeeded but the DB says running/failed" outcome.
+	// a run reaches a true terminal state we never overwrite it. Combined with
+	// COALESCE/GREATEST this means an out-of-order or replayed event (e.g. a
+	// redelivered JOB_STARTED arriving after JOB_COMPLETED) cannot regress final
+	// state. Crucially, 'lost' (run) and 'error' (job) are NOT terminal: they are
+	// the reconciler's provisional verdict for "the host stopped heartbeating".
+	// If that host reboots, resumes the play, and reports a real terminal event,
+	// it must win — so those provisional states are excluded from the guard and
+	// recoverable. finished_at uses COALESCE($3, finished_at) so a recovering
+	// terminal event replaces the reconciler's lost-detection timestamp with the
+	// actual completion time (events are deduped by seq, so no double-write).
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE execution_runs SET
 			state = $1,
 			started_at = COALESCE(started_at, $2),
-			finished_at = COALESCE(finished_at, $3),
+			finished_at = COALESCE($3, finished_at),
 			last_event_seq = GREATEST(last_event_seq, $4)
 		WHERE id = $5
-		  AND state NOT IN ('successful', 'failed', 'canceled', 'lost')`,
+		  AND state NOT IN ('successful', 'failed', 'canceled')`,
 		newState, evt.Timestamp, finishedAt, evt.Seq, evt.ExecutionRunID,
 	); err != nil {
 		log.Printf("Failed to update execution_run %s: %v", evt.ExecutionRunID, err)
@@ -128,9 +134,9 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 		UPDATE unified_jobs SET
 			status = $1,
 			started_at = COALESCE(started_at, $2),
-			finished_at = COALESCE(finished_at, $3)
+			finished_at = COALESCE($3, finished_at)
 		WHERE id = $4
-		  AND status NOT IN ('successful', 'failed', 'canceled', 'error')`,
+		  AND status NOT IN ('successful', 'failed', 'canceled')`,
 		newStatus, evt.Timestamp, finishedAt, evt.UnifiedJobID,
 	); err != nil {
 		log.Printf("Failed to update unified_job %d: %v", evt.UnifiedJobID, err)

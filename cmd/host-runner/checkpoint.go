@@ -31,23 +31,33 @@ func checkpointEnv(jobDir string) []string {
 	}
 }
 
+// fileExists reports whether path exists and is a regular file.
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
+}
+
 // resumeArgs returns the extra ansible-playbook arguments to resume an
 // interrupted play — `--start-at-task <name>` plus `-e @restored-vars.json` —
 // when a usable checkpoint exists in jobDir, or nil for a fresh run. The
 // returned slice always starts with "--start-at-task" followed by the task
 // name, so callers can log resume[1].
 func resumeArgs(jobDir string) []string {
-	data, err := os.ReadFile(filepath.Join(jobDir, "checkpoint.json"))
+	cpPath := filepath.Join(jobDir, "checkpoint.json")
+	data, err := os.ReadFile(cpPath)
 	if err != nil {
+		log.Printf("resume: no checkpoint at %s: %v", cpPath, err)
 		return nil
 	}
 	var cp struct {
 		ResumeAt string                     `json:"resume_at"`
 		Vars     map[string]json.RawMessage `json:"vars"`
 	}
-	if json.Unmarshal(data, &cp) != nil || cp.ResumeAt == "" {
+	if jerr := json.Unmarshal(data, &cp); jerr != nil || cp.ResumeAt == "" {
+		log.Printf("resume: checkpoint at %s unusable (err=%v resume_at=%q)", cpPath, jerr, cp.ResumeAt)
 		return nil
 	}
+	log.Printf("resume: checkpoint resume_at=%q (%d vars)", cp.ResumeAt, len(cp.Vars))
 
 	args := []string{"--start-at-task", cp.ResumeAt}
 

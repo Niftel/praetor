@@ -127,6 +127,16 @@ func (r *Runner) Execute() error {
 	cmd := exec.Command("ansible-playbook", playArgs...)
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
 	cmd.Env = append(cmd.Env, checkpointEnv(r.JobDir)...)
+	// A fresh run is launched by the bootstrap, whose nohup shell exports the
+	// SSH env. A resume after a host reboot is launched by the systemd unit,
+	// which exports nothing — so a resumed multi-host play would have no key to
+	// reach its targets. The bootstrap always copies the job's key into the job
+	// dir, so point Ansible at it ourselves (and disable host-key prompts),
+	// making both fresh and resumed runs self-sufficient.
+	cmd.Env = append(cmd.Env, "ANSIBLE_HOST_KEY_CHECKING=False")
+	if key := filepath.Join(r.JobDir, "id_rsa"); fileExists(key) {
+		cmd.Env = append(cmd.Env, "ANSIBLE_PRIVATE_KEY_FILE="+key)
+	}
 
 	// Append (not truncate): on a resume after interruption this preserves the
 	// earlier output and keeps the log syncer's byte cursor valid; the resumed
