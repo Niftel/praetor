@@ -11,22 +11,53 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/objectstore"
 )
 
 type EventPublisher interface {
 	PublishJobEvent(event *events.JobEvent) error
+	PublishLogChunk(chunk *events.LogChunk) error
 }
 
 type IngestionService struct {
 	DB        *sqlx.DB
 	Publisher EventPublisher
+	Store     objectstore.LogStore
 }
 
-func NewIngestionService(db *sqlx.DB, pub EventPublisher) *IngestionService {
+func NewIngestionService(db *sqlx.DB, pub EventPublisher, store objectstore.LogStore) *IngestionService {
 	return &IngestionService{
 		DB:        db,
 		Publisher: pub,
+		Store:     store,
 	}
+}
+
+// IngestLogChunk persists a raw stdout chunk to the object store and publishes a
+// LogChunk index notification. The bytes are written to durable storage first so
+// that, if the index publish fails and the host-runner retries the chunk, the
+// re-upload is an idempotent overwrite of the same key and the consumer dedups
+// the index row on (execution_run_id, seq).
+func (s *IngestionService) IngestLogChunk(ctx context.Context, runID uuid.UUID, seq int64, data []byte) error {
+	if s.Store == nil {
+		return fmt.Errorf("log store not configured")
+	}
+
+	key := objectstore.ChunkKey(runID.String(), seq)
+	if err := s.Store.Put(key, data); err != nil {
+		return fmt.Errorf("store log chunk: %w", err)
+	}
+
+	if err := s.Publisher.PublishLogChunk(&events.LogChunk{
+		ExecutionRunID: runID,
+		Seq:            seq,
+		StorageKey:     key,
+		ByteLength:     len(data),
+		Timestamp:      time.Now(),
+	}); err != nil {
+		return fmt.Errorf("publish log chunk: %w", err)
+	}
+	return nil
 }
 
 // IngestEvents persists a batch of events.

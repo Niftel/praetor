@@ -18,6 +18,23 @@ func NewDBWriter(db *sqlx.DB) *DBWriter {
 	return &DBWriter{DB: db}
 }
 
+// WriteLogChunk indexes a log-chunk reference into job_output_chunks. The chunk
+// bytes already live durably in the object store; this row is the pointer. The
+// ON CONFLICT makes it idempotent so a redelivered or re-uploaded chunk is a
+// no-op, which is what lets the consumer ack-after-commit.
+func (w *DBWriter) WriteLogChunk(ctx context.Context, chunk events.LogChunk) error {
+	_, err := w.DB.ExecContext(ctx, `
+		INSERT INTO job_output_chunks (execution_run_id, seq, storage_key, byte_length, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (execution_run_id, seq) DO NOTHING`,
+		chunk.ExecutionRunID, chunk.Seq, chunk.StorageKey, chunk.ByteLength, chunk.Timestamp,
+	)
+	if err != nil {
+		return fmt.Errorf("insert job_output_chunk failed: %w", err)
+	}
+	return nil
+}
+
 // WriteEvent projects a JobEvent into the database.
 func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	tx, err := w.DB.BeginTxx(ctx, nil)

@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"log"
 	"net/http"
@@ -106,71 +104,24 @@ func (r *Runner) Execute() error {
 		_ = os.WriteFile(inventoryPath, []byte("localhost ansible_connection=local"), 0644)
 	}
 
-	// 4. Run Ansible
-	// We use 'ansible-playbook' directly.
+	// 4. Run Ansible. Raw stdout/stderr is written to stdout.log on disk; the
+	// log syncer ships it to the object store in chunks. We deliberately no
+	// longer emit per-line stdout events into the WAL — bulk output belongs in
+	// the object store, not the control-plane database. Only structured
+	// lifecycle events (started/completed/failed) flow through the event WAL.
 	cmd := exec.Command("ansible-playbook", "-i", inventoryPath, playbookPath)
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
 
-	// ... [omitted stdout capture setup] ...
-
-	stdoutFile, _ := os.Create(filepath.Join(r.JobDir, "stdout.log"))
+	stdoutFile, err := os.Create(filepath.Join(r.JobDir, "stdout.log"))
+	if err != nil {
+		return fmt.Errorf("failed to create stdout.log: %w", err)
+	}
 	defer stdoutFile.Close()
-
-	// Create a pipe to capture output for streaming events
-	pr, pw := io.Pipe()
-
-	// Write to file, stdout, and our pipe
-	mw := io.MultiWriter(stdoutFile, os.Stdout, pw)
-	cmd.Stdout = mw
-	cmd.Stderr = mw
-
-	msgStart := "Host runner started playbook execution"
-	r.Wal.Append(&events.JobEvent{
-		UnifiedJobID:   req.UnifiedJobID, // Set UnifiedJobID
-		ExecutionRunID: req.ExecutionRunID,
-		EventType:      "JOB_STARTED",
-		Timestamp:      time.Now(),
-		Seq:            1,
-		StdoutSnippet:  &msgStart,
-	})
+	cmd.Stdout = io.MultiWriter(stdoutFile, os.Stdout)
+	cmd.Stderr = cmd.Stdout
 
 	start := time.Now()
-
-	// Run command in background so we can stream
-	cmdErrChan := make(chan error, 1)
-	go func() {
-		defer pw.Close()
-		cmdErrChan <- cmd.Run()
-	}()
-
-	// Stream logs
-	scanner := bufio.NewScanner(pr)
-
-	// Partition sequence space to avoid collisions between parallel runners
-	hostname, _ := os.Hostname()
-	h := fnv.New32a()
-	h.Write([]byte(hostname))
-	// Use top bits of hash to spread out? Or just modulo.
-	// 50 concurrent hosts max assumption?
-	// Offset = (hash % 100) * 1,000,000
-	bucket := int64(h.Sum32() % 100)
-	var currentSeq int64 = (bucket * 1000000) + 2
-
-	for scanner.Scan() {
-		text := fmt.Sprintf("[%s] %s", hostname, scanner.Text())
-		r.Wal.Append(&events.JobEvent{
-			UnifiedJobID:   req.UnifiedJobID, // Set UnifiedJobID
-			ExecutionRunID: req.ExecutionRunID,
-			EventType:      "JOB_STDOUT",
-			Timestamp:      time.Now(),
-			Seq:            currentSeq,
-			StdoutSnippet:  &text,
-		})
-		currentSeq++
-	}
-
-	// Wait for command to finish (it triggers pipe close)
-	err = <-cmdErrChan
+	err = cmd.Run()
 	duration := time.Since(start)
 
 	finalState := "successful"
@@ -181,13 +132,13 @@ func (r *Runner) Execute() error {
 		log.Printf("Ansible execution failed: %v", err)
 	}
 
-	msgEnd := fmt.Sprintf("[%s] Job finished in %v. State: %s", hostname, duration, finalState)
+	msgEnd := fmt.Sprintf("Job finished in %v. State: %s", duration, finalState)
 	r.Wal.Append(&events.JobEvent{
-		UnifiedJobID:   req.UnifiedJobID, // Set UnifiedJobID
+		UnifiedJobID:   req.UnifiedJobID,
 		ExecutionRunID: req.ExecutionRunID,
-		EventType:      eventType, // Correctly report failure
+		EventType:      eventType,
 		Timestamp:      time.Now(),
-		Seq:            currentSeq, // Use next seq
+		Seq:            2,
 		StdoutSnippet:  &msgEnd,
 	})
 

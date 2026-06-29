@@ -19,7 +19,7 @@ func TestIngestionHandler(t *testing.T) {
 	// We can't easily mock DB here without sqlmock.
 	// However, we can test that INVALID requests are rejected before hitting DB.
 
-	svc := core.NewIngestionService(nil, nil)
+	svc := core.NewIngestionService(nil, nil, nil)
 	h := handler.NewIngestionHandler(svc)
 	if h == nil {
 		t.Fatal("Handler is nil")

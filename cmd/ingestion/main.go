@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/objectstore"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/ingestion/core"
 	"github.com/praetordev/praetor/services/ingestion/handler"
@@ -38,8 +39,14 @@ func main() {
 	}
 	defer bus.Close()
 
-	// 3. Service & Handler
-	svc := core.NewIngestionService(database, bus)
+	// 3. Object store for bulk log output (JetStream Object Store)
+	logStore, err := objectstore.NewJetStreamLogStore(bus.JS, "")
+	if err != nil {
+		log.Fatalf("Failed to init log object store: %v", err)
+	}
+
+	// 4. Service & Handler
+	svc := core.NewIngestionService(database, bus, logStore)
 	h := handler.NewIngestionHandler(svc)
 
 	// 4. Router
@@ -48,6 +55,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 
 	r.Post("/api/v1/runs/{run_id}/events", h.Ingest)
+	r.Post("/api/v1/runs/{run_id}/logs", h.IngestLog)
 
 	// 5. Start
 	log.Printf("Ingestion listening on port %s", port)

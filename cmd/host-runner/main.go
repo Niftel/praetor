@@ -46,20 +46,31 @@ func run() error {
 	log.Printf("Starting Praetor Host Runner for job dir: %s", *jobDir)
 
 	if *apiURL != "" && *runID != "" {
+		// Two independent syncers: structured lifecycle events (events.jsonl) and
+		// bulk stdout (stdout.log -> object store). Each owns its own cursor.
 		syncer := NewSyncer(*jobDir, *apiURL, *runID)
+		logSyncer := NewLogSyncer(*jobDir, *apiURL, *runID)
 		done := make(chan bool, 1)
+		logDone := make(chan bool, 1)
 		finished := make(chan bool, 1)
+		logFinished := make(chan bool, 1)
 		go func() {
 			syncer.Start(done)
 			finished <- true
 		}()
+		go func() {
+			logSyncer.Start(logDone)
+			logFinished <- true
+		}()
 		defer func() {
-			log.Println("Waiting for Syncer to finish...")
-			// Safety: Give FS a moment to flush any pending writes from runner close
+			log.Println("Waiting for syncers to finish...")
+			// Safety: give the FS a moment to flush any pending writes.
 			time.Sleep(100 * time.Millisecond)
 			done <- true
+			logDone <- true
 			<-finished
-			log.Println("Syncer finished.")
+			<-logFinished
+			log.Println("Syncers finished.")
 		}()
 	}
 

@@ -7,11 +7,13 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 )
 
-// EventConsumer delivers job events to a handler and acknowledges each one
-// only when the handler returns nil. A non-nil return keeps the event in the
-// durable stream for redelivery, so the database is the gate on acknowledgement.
+// EventConsumer delivers job events and log-chunk references to handlers and
+// acknowledges each one only when its handler returns nil. A non-nil return
+// keeps the message in the durable stream for redelivery, so the database is
+// the gate on acknowledgement.
 type EventConsumer interface {
 	ConsumeJobEvents(handler func(events.JobEvent) error) error
+	ConsumeLogChunks(handler func(events.LogChunk) error) error
 }
 
 type Consumer struct {
@@ -32,15 +34,26 @@ func (c *Consumer) Start() error {
 	// The handler's error is the ack signal: returning nil acks the message,
 	// returning an error (e.g. the DB is unavailable) leaves it in the stream
 	// for redelivery once we recover.
-	err := c.Subscriber.ConsumeJobEvents(func(evt events.JobEvent) error {
+	if err := c.Subscriber.ConsumeJobEvents(func(evt events.JobEvent) error {
 		if err := c.processEvent(evt); err != nil {
 			log.Printf("Error processing event %d for run %s (will retry): %v", evt.Seq, evt.ExecutionRunID, err)
 			return err
 		}
 		log.Printf("Processed event %s (Seq: %d) for Job %d", evt.EventType, evt.Seq, evt.UnifiedJobID)
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
+		return err
+	}
+
+	// Log-chunk references are indexed on the same ack-after-commit contract.
+	if err := c.Subscriber.ConsumeLogChunks(func(chunk events.LogChunk) error {
+		if err := c.Writer.WriteLogChunk(context.Background(), chunk); err != nil {
+			log.Printf("Error indexing log chunk %d for run %s (will retry): %v", chunk.Seq, chunk.ExecutionRunID, err)
+			return err
+		}
+		log.Printf("Indexed log chunk (Seq: %d) for run %s", chunk.Seq, chunk.ExecutionRunID)
+		return nil
+	}); err != nil {
 		return err
 	}
 

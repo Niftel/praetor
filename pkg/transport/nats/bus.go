@@ -23,6 +23,7 @@ const (
 	// its last acknowledged message once the downstream recovers.
 	StreamEvents          = "PRAETOR_EVENTS"
 	DurableConsumerEvents = "praetor-event-consumer"
+	DurableConsumerLogs   = "praetor-logchunk-consumer"
 
 	// StreamRequests is a durable work-queue stream for job launches. Unlike
 	// core NATS (where a request published while no executor is connected is
@@ -225,6 +226,34 @@ func (b *NatsBus) ConsumeJobEvents(handler func(events.JobEvent) error) error {
 		_ = msg.Ack()
 	},
 		nats.Durable(DurableConsumerEvents),
+		nats.ManualAck(),
+		nats.AckExplicit(),
+		nats.DeliverAll(),
+		nats.AckWait(30*time.Second),
+		nats.MaxAckPending(256),
+	)
+	return err
+}
+
+// ConsumeLogChunks binds a durable, manual-ack consumer for log-chunk index
+// notifications (the bytes themselves already live in the object store). Same
+// ack-after-commit contract as ConsumeJobEvents: the index write into
+// job_output_chunks gates acknowledgement, so a DB outage is tolerated.
+func (b *NatsBus) ConsumeLogChunks(handler func(events.LogChunk) error) error {
+	_, err := b.JS.QueueSubscribe(SubjectLogChunk, QueueGroupConsumer, func(msg *nats.Msg) {
+		var chunk events.LogChunk
+		if err := json.Unmarshal(msg.Data, &chunk); err != nil {
+			log.Printf("[consumer] terminating undecodable log chunk: %v", err)
+			_ = msg.Term()
+			return
+		}
+		if err := handler(chunk); err != nil {
+			_ = msg.NakWithDelay(2 * time.Second)
+			return
+		}
+		_ = msg.Ack()
+	},
+		nats.Durable(DurableConsumerLogs),
 		nats.ManualAck(),
 		nats.AckExplicit(),
 		nats.DeliverAll(),
