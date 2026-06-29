@@ -234,6 +234,7 @@ func (s *Scheduler) processPendingJobs() error {
 			RunnerHost:      runnerHostName,
 			RunnerHostID:    runnerHostID,
 			APIURL:          os.Getenv("API_URL"),
+			GalaxyServers:   s.resolveGalaxyServers(ctx, template.OrganizationID),
 		}
 
 		req := &events.ExecutionRequest{

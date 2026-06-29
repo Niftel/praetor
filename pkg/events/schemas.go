@@ -38,6 +38,19 @@ type JobManifest struct {
 	// Credentials
 	SSHUser       string `json:"ssh_user,omitempty"`
 	SSHPrivateKey string `json:"ssh_private_key,omitempty"`
+
+	// GalaxyServers are the Ansible Galaxy / Automation Hub servers to install
+	// project requirements from. Empty means the public galaxy.ansible.com.
+	GalaxyServers []GalaxyServer `json:"galaxy_servers,omitempty"`
+}
+
+// GalaxyServer is a configured Ansible Galaxy / Automation Hub endpoint used to
+// resolve a project's role/collection requirements.
+type GalaxyServer struct {
+	Name    string `json:"name"`               // server id, e.g. "automation_hub"
+	URL     string `json:"url"`                // API URL
+	Token   string `json:"token,omitempty"`    // API token (secret)
+	AuthURL string `json:"auth_url,omitempty"` // SSO token-exchange URL (Automation Hub)
 }
 
 // JobEvent represents a single event emitted by the executor during execution.

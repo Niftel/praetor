@@ -157,6 +157,18 @@ func seedCredentialTypes(db *sqlx.DB) {
 				}
 			}`,
 		},
+		{
+			Name:        "Ansible Galaxy/Automation Hub API Token",
+			Description: "Authentication for a private Ansible Galaxy or Automation Hub server",
+			Inputs: `{
+				"fields": [
+					{"id": "url", "label": "Galaxy Server URL", "type": "text"},
+					{"id": "auth_url", "label": "Auth Server URL", "type": "text"},
+					{"id": "token", "label": "API Token", "type": "password", "secret": true}
+				]
+			}`,
+			Injectors: `{}`,
+		},
 	}
 
 	for _, t := range types {

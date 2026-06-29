@@ -84,6 +84,11 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 				r.Get("/projects", content.ListOrganizationProjects)
 				r.Get("/inventories", content.ListOrganizationInventories)
 				r.Get("/object_roles", content.ListOrganizationRoles)
+
+				// Galaxy / Automation Hub credentials for the org
+				r.Get("/galaxy-credentials", content.ListOrgGalaxyCredentials)
+				r.Post("/galaxy-credentials", content.AddOrgGalaxyCredential)
+				r.Delete("/galaxy-credentials/{credId}", content.RemoveOrgGalaxyCredential)
 			})
 		})
 
