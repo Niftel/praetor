@@ -36,12 +36,17 @@ func NewIngestionService(db *sqlx.DB, pub EventPublisher, store objectstore.LogS
 
 // RecordHeartbeat stamps a run's liveness. The reconciler reads
 // last_heartbeat_at to distinguish a live long-running job from a lost one. A
-// terminal run is left untouched (a late heartbeat can't revive it).
+// truly terminal run is left untouched (a late heartbeat can't revive it), but
+// a 'lost' run whose host has rebooted and resumed will start heartbeating
+// again — that revives it to 'running' so the control plane reflects reality
+// during the resumed run (its eventual terminal event then finalizes it).
 func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID) error {
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE execution_runs
-		SET last_heartbeat_at = now()
-		WHERE id = $1 AND state NOT IN ('successful', 'failed', 'canceled', 'lost')`, runID)
+		SET last_heartbeat_at = now(),
+		    state = CASE WHEN state = 'lost' THEN 'running' ELSE state END,
+		    finished_at = CASE WHEN state = 'lost' THEN NULL ELSE finished_at END
+		WHERE id = $1 AND state NOT IN ('successful', 'failed', 'canceled')`, runID)
 	if err != nil {
 		return fmt.Errorf("record heartbeat: %w", err)
 	}

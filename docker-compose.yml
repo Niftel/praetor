@@ -136,8 +136,15 @@ services:
     shm_size: 1gb
     volumes:
       - ./keys:/tmp/keys:ro
+      # The host-runner binary is served from ./build/linux/praetor-host-runner
+      # via this directory mount — a directory mount reflects rebuilds
+      # immediately, unlike a single-file bind mount, which pins the original
+      # inode and silently serves a stale binary.
       - ./build:/tmp/build:ro
-      - ./praetor-host-runner-linux:/tmp/build/linux/praetor-host-runner:ro
+      # Canonical checkpoint/resume callback plugin, from its source of truth in
+      # deployments/, so jobs bootstrap with task-level resume out of the box
+      # (no manual staging into build/). The bootstrap copies it from here.
+      - ./deployments/host-runner/plugins:/tmp/plugins:ro
     depends_on:
       nats:
         condition: service_started
