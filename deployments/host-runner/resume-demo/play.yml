@@ -1,0 +1,20 @@
+---
+# Resume demonstration. Task 1 registers a value; task 2 is slow (we "reboot"
+# the host by killing ansible during it); task 3 depends on the registered value
+# from task 1. On resume we --start-at-task task 2, so task 1 is skipped — the
+# registered value only survives if it was checkpointed and restored.
+- name: praetor resume demo
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: capture value before crash
+      command: echo "value-from-before-crash"
+      register: greeting
+
+    - name: slow task interrupted by reboot
+      command: sleep 8
+
+    - name: use registered value after resume
+      copy:
+        dest: "{{ outfile }}"
+        content: "greeting={{ greeting.stdout }}\n"

@@ -1,0 +1,16 @@
+[Unit]
+Description=Praetor host-runner — resume interrupted jobs after a restart
+# Run once the network is up so resumed jobs can sync back to the control plane.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Scans /var/lib/praetor/jobs for jobs with no terminal status.json and re-runs
+# them, then exits. Runs in the background so it does not block boot.
+Type=simple
+ExecStart=/usr/local/bin/praetor-host-runner --resume-root=/var/lib/praetor/jobs
+# Resume is best-effort; don't hold the boot transaction on it.
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
