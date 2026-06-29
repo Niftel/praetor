@@ -4,8 +4,20 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 )
+
+// GetIDParam parses the "id" URL parameter into an int64.
+// It returns 0 if the parameter is missing or invalid.
+func GetIDParam(r *http.Request) int64 {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
+}
 
 // PaginatedResponse is the standard envelope for list responses.
 type PaginatedResponse struct {
@@ -18,6 +30,11 @@ type PaginatedResponse struct {
 // Render implements the chi.Render interface.
 func (resp *PaginatedResponse) Render(w http.ResponseWriter, r *http.Request) error {
 	return nil
+}
+
+// Render is a wrapper around chi/render.Render
+func Render(w http.ResponseWriter, r *http.Request, v render.Renderer) error {
+	return render.Render(w, r, v)
 }
 
 // PaginationParams holds limit and offset.
@@ -60,6 +77,11 @@ func Created(w http.ResponseWriter, r *http.Request, v interface{}) {
 	render.JSON(w, r, v)
 }
 
+// NoContent responds with 204 No Content.
+func NoContent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ErrorResponse represents a standard error.
 type ErrorResponse struct {
 	Err            error `json:"-"` // low-level runtime error
@@ -70,14 +92,19 @@ type ErrorResponse struct {
 
 func (e *ErrorResponse) Render(w http.ResponseWriter, r *http.Request) error {
 	render.Status(r, e.HTTPStatusCode)
+	render.JSON(w, r, e)
 	return nil
 }
 
 func ErrInvalidRequest(err error) render.Renderer {
+	msg := "Invalid request"
+	if err != nil {
+		msg = err.Error()
+	}
 	return &ErrorResponse{
 		Err:            err,
 		HTTPStatusCode: http.StatusBadRequest,
-		ErrorText:      err.Error(),
+		ErrorText:      msg,
 	}
 }
 
@@ -102,5 +129,13 @@ func ErrUnauthorized(err error) render.Renderer {
 		Err:            err,
 		HTTPStatusCode: http.StatusUnauthorized,
 		ErrorText:      "Unauthorized",
+	}
+}
+
+func ErrForbidden(err error) render.Renderer {
+	return &ErrorResponse{
+		Err:            err,
+		HTTPStatusCode: http.StatusForbidden,
+		ErrorText:      "Permission denied",
 	}
 }

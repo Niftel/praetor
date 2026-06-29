@@ -20,6 +20,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/teambition/rrule-go"
 )
 
 type Scheduler struct {
@@ -47,6 +48,12 @@ func (s *Scheduler) Start() {
 		case <-s.Ticker.C:
 			if err := s.processPendingJobs(); err != nil {
 				log.Printf("Error processing jobs: %v", err)
+			}
+			if err := s.processSchedules(); err != nil {
+				log.Printf("Error processing schedules: %v", err)
+			}
+			if err := s.processTimedOutJobs(); err != nil {
+				log.Printf("Error processing timed out jobs: %v", err)
 			}
 		}
 	}
@@ -95,7 +102,7 @@ func (s *Scheduler) processPendingJobs() error {
 
 		if err != nil {
 			log.Printf("Failed to create run for job %d: %v", job.ID, err)
-			continue
+			return err // Rollback
 		}
 
 		// 4. Update Job
@@ -106,7 +113,7 @@ func (s *Scheduler) processPendingJobs() error {
 
 		if err != nil {
 			log.Printf("Failed to update job %d: %v", job.ID, err)
-			continue
+			return err // Rollback
 		}
 
 		// 5. Resolve Project from Template - REQUIRES a template with a project
@@ -186,6 +193,34 @@ func (s *Scheduler) processPendingJobs() error {
 			pbContent = *template.PlaybookContent
 		}
 
+		// 7. Find the designated runner host for this inventory
+		var runnerHostName string
+		var runnerHostID int64
+		if template.InventoryID != nil {
+			var runnerHost models.Host
+			err = tx.GetContext(ctx, &runnerHost, `
+				SELECT * FROM hosts 
+				WHERE inventory_id = $1 AND is_runner_host = true AND enabled = true
+				LIMIT 1`, *template.InventoryID)
+			if err == nil {
+				runnerHostName = runnerHost.Name
+				runnerHostID = runnerHost.ID
+				log.Printf("Using runner host '%s' (ID %d) for job %d", runnerHostName, runnerHostID, job.ID)
+			} else {
+				// Fallback to first enabled host if no explicit runner host is set
+				var firstHost models.Host
+				err = tx.GetContext(ctx, &firstHost, `
+					SELECT * FROM hosts 
+					WHERE inventory_id = $1 AND enabled = true
+					ORDER BY id LIMIT 1`, *template.InventoryID)
+				if err == nil {
+					runnerHostName = firstHost.Name
+					runnerHostID = firstHost.ID
+					log.Printf("No runner host set - using first host '%s' (ID %d) for job %d", runnerHostName, runnerHostID, job.ID)
+				}
+			}
+		}
+
 		manifest := events.JobManifest{
 			Inventory:       inventoryContent,
 			ProjectURL:      projectURL,
@@ -193,6 +228,9 @@ func (s *Scheduler) processPendingJobs() error {
 			PlaybookContent: pbContent,
 			ExtraVars:       map[string]interface{}{},
 			EnvironmentRefs: []string{},
+			RunnerHost:      runnerHostName,
+			RunnerHostID:    runnerHostID,
+			APIURL:          os.Getenv("API_URL"),
 		}
 
 		req := &events.ExecutionRequest{
@@ -211,6 +249,131 @@ func (s *Scheduler) processPendingJobs() error {
 	}
 
 	return tx.Commit()
+}
+
+func (s *Scheduler) processSchedules() error {
+	ctx := context.Background()
+
+	// Transaction
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Fetch due schedules with SKIP LOCKED
+	query := `
+		SELECT *
+		FROM schedules
+		WHERE enabled = true AND next_run <= NOW()
+		FOR UPDATE SKIP LOCKED
+		LIMIT 10`
+
+	var schedules []models.Schedule
+	if err := tx.SelectContext(ctx, &schedules, query); err != nil {
+		return fmt.Errorf("failed to select pending schedules: %w", err)
+	}
+
+	if len(schedules) == 0 {
+		return nil
+	}
+
+	for _, sched := range schedules {
+		log.Printf("Processing schedule %d (%s) due at %s", sched.ID, sched.Name, sched.NextRun)
+
+		// 2. Launch Job
+		var jobID int64
+		err := tx.QueryRowContext(ctx, `
+			INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at)
+			VALUES ($1, $2, 'pending', $3)
+			RETURNING id`,
+			sched.Name, sched.UnifiedJobTemplateID, time.Now(),
+		).Scan(&jobID)
+		if err != nil {
+			log.Printf("Failed to spawn job for schedule %d: %v", sched.ID, err)
+			continue
+		}
+		log.Printf("Spawned job %d from schedule %d", jobID, sched.ID)
+
+		// 3. (Skipped) We do NOT create execution_run here.
+		// The existing processPendingJobs loop picks up 'pending' jobs with no current_run_id and handles it.
+
+		// 5. Calculate Next Run
+		rule, err := rrule.StrToRRule(sched.RRule)
+		if err != nil {
+			log.Printf("Invalid RRule for schedule %d: %v", sched.ID, err)
+			// Disable it to stop error loop
+			_, _ = tx.ExecContext(ctx, "UPDATE schedules SET enabled = false WHERE id = $1", sched.ID)
+			continue
+		}
+
+		// rrule-go: rule.After(dt, inclusive)
+		next := rule.After(time.Now(), false)
+
+		log.Printf("Schedule %d next run: %s", sched.ID, next)
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE schedules 
+			SET next_run = $1, modified_at = NOW() 
+			WHERE id = $2`,
+			next, sched.ID)
+
+		if err != nil {
+			log.Printf("Failed to update schedule %d next_run: %v", sched.ID, err)
+			continue
+		}
+	}
+
+	return tx.Commit()
+}
+
+// processTimedOutJobs marks jobs that are stuck in running/queued state as failed.
+// This catches cases where the host-runner crashes silently without sending events.
+func (s *Scheduler) processTimedOutJobs() error {
+	ctx := context.Background()
+
+	// Find jobs that have been running/queued for too long without completion
+	// Timeout: 30 minutes for running, 10 minutes for queued (should have started)
+	timeout := 30 * time.Minute
+	queuedTimeout := 10 * time.Minute
+
+	// Mark long-running jobs as failed
+	result, err := s.DB.ExecContext(ctx, `
+		UPDATE unified_jobs 
+		SET status = 'failed', finished_at = NOW()
+		WHERE status = 'running' 
+		AND started_at IS NOT NULL 
+		AND started_at < NOW() - $1::interval
+		RETURNING id`, fmt.Sprintf("%d seconds", int(timeout.Seconds())))
+	if err != nil {
+		log.Printf("Error checking running timeout: %v", err)
+	} else if rows, _ := result.RowsAffected(); rows > 0 {
+		log.Printf("Marked %d running jobs as failed due to timeout", rows)
+	}
+
+	// Mark long-queued jobs as failed (should have transitioned to running)
+	result, err = s.DB.ExecContext(ctx, `
+		UPDATE unified_jobs 
+		SET status = 'failed', finished_at = NOW()
+		WHERE status = 'queued' 
+		AND current_run_id IS NOT NULL
+		AND created_at < NOW() - $1::interval
+		RETURNING id`, fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())))
+	if err != nil {
+		log.Printf("Error checking queued timeout: %v", err)
+	} else if rows, _ := result.RowsAffected(); rows > 0 {
+		log.Printf("Marked %d queued jobs as failed due to timeout", rows)
+	}
+
+	// Also update corresponding execution_runs
+	_, _ = s.DB.ExecContext(ctx, `
+		UPDATE execution_runs SET state = 'failed', finished_at = NOW()
+		WHERE id IN (
+			SELECT current_run_id FROM unified_jobs 
+			WHERE status = 'failed' AND finished_at > NOW() - INTERVAL '1 minute'
+		) AND state NOT IN ('successful', 'failed')`)
+
+	return nil
 }
 
 func findFile(fs billy.Filesystem, path string) (billy.File, error) {

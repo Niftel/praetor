@@ -31,6 +31,13 @@ type JobManifest struct {
 	PlaybookContent string                 `json:"playbook_content"` // Inline playbook content (optional)
 	ExtraVars       map[string]interface{} `json:"extra_vars"`
 	EnvironmentRefs []string               `json:"environment_refs"`
+	RunnerHost      string                 `json:"runner_host,omitempty"`
+	RunnerHostID    int64                  `json:"runner_host_id,omitempty"` // Host ID for heartbeat calls
+	APIURL          string                 `json:"api_url,omitempty"`        // API URL for heartbeat calls
+
+	// Credentials
+	SSHUser       string `json:"ssh_user,omitempty"`
+	SSHPrivateKey string `json:"ssh_private_key,omitempty"`
 }
 
 // JobEvent represents a single event emitted by the executor during execution.

@@ -174,3 +174,76 @@ func (rs *InventoriesResource) DeleteInventory(w http.ResponseWriter, r *http.Re
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// GetInventoryByParam GET /api/v1/inventories/{inventoryId} - uses inventoryId param
+func (rs *InventoriesResource) GetInventoryByParam(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "inventoryId")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	var inventory models.Inventory
+	query := `SELECT * FROM inventories WHERE id = $1`
+	err = rs.DB.GetContext(r.Context(), &inventory, query, id)
+	if err != nil {
+		render.ErrNotFound(nil).Render(w, r)
+		return
+	}
+
+	render.JSON(w, r, inventory)
+}
+
+// UpdateInventoryByParam PUT /api/v1/inventories/{inventoryId} - uses inventoryId param
+func (rs *InventoriesResource) UpdateInventoryByParam(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "inventoryId")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	var input models.Inventory
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	query := `
+		UPDATE inventories 
+		SET name = $2, description = $3, kind = $4, modified_at = now() 
+		WHERE id = $1 
+		RETURNING *`
+
+	var updated models.Inventory
+	err = rs.DB.QueryRowxContext(r.Context(), query,
+		id, input.Name, input.Description, input.Kind,
+	).StructScan(&updated)
+
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+
+	render.JSON(w, r, updated)
+}
+
+// DeleteInventoryByParam DELETE /api/v1/inventories/{inventoryId} - uses inventoryId param
+func (rs *InventoriesResource) DeleteInventoryByParam(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "inventoryId")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	query := `DELETE FROM inventories WHERE id = $1`
+	_, err = rs.DB.ExecContext(r.Context(), query, id)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

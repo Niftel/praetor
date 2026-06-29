@@ -28,6 +28,7 @@ func (rs *JobsResource) Routes() chi.Router {
 	r.Post("/", rs.LaunchJob)
 	r.Get("/runs/{runID}", rs.GetExecutionRun)
 	r.Get("/runs/{runID}/events", rs.ListJobEvents)
+	r.Post("/runs/{runID}/events", rs.CreateJobEvent)
 	return r
 }
 
@@ -43,6 +44,7 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 }
 
 // LaunchJob creates a new unified job with status 'pending'
+// The Scheduler will pick this up, create an execution_run, and dispatch it.
 func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// Simple launch payload
 	type LaunchRequest struct {
@@ -55,8 +57,12 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For MVP: Insert simple unified_job
-	// In reality we'd look up template, etc.
+	// Insert unified_job in 'pending' state with NO current_run_id
+	// The Scheduler will:
+	// 1. Pick up jobs WHERE status='pending' AND current_run_id IS NULL
+	// 2. Create execution_run
+	// 3. Set current_run_id and status='queued'
+	// 4. Publish to NATS for execution
 	var jobID int64
 	err := rs.DB.QueryRowContext(r.Context(), `
 		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at)
@@ -70,9 +76,12 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return created job
+	// Return created job - scheduler will assign current_run_id shortly
 	render.Status(r, http.StatusCreated)
-	render.JSON(w, r, map[string]interface{}{"id": jobID, "status": "pending"})
+	render.JSON(w, r, map[string]interface{}{
+		"id":     jobID,
+		"status": "pending",
+	})
 }
 
 // GetExecutionRun returns details of a specific execution run
@@ -113,6 +122,70 @@ func (rs *JobsResource) ListJobEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render.JSON(w, r, events)
+}
+
+// CreateJobEvent ingests a new event (used by host-runner)
+func (rs *JobsResource) CreateJobEvent(w http.ResponseWriter, r *http.Request) {
+	runIDStr := chi.URLParam(r, "runID")
+	runID, err := uuid.Parse(runIDStr)
+	if err != nil {
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+
+	var evt models.JobEvent
+	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+
+	// 1. Look up UnifiedJobID from ExecutionRun
+	var unifiedJobID int64
+	err = rs.DB.QueryRowContext(r.Context(), `SELECT unified_job_id FROM execution_runs WHERE id = $1`, runID).Scan(&unifiedJobID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			render.Render(w, r, ErrNotFound)
+			return
+		}
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+
+	// 2. Insert Event
+	query := `
+		INSERT INTO job_events (
+			unified_job_id, execution_run_id, seq, event_type, 
+			stdout_snippet, event_data, created_at
+		) VALUES (
+			$1, $2, $3, $4, 
+			$5, $6, $7
+		) RETURNING id`
+
+	// Ensure defaults
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
+	if evt.EventData == nil {
+		evt.EventData = json.RawMessage("{}")
+	}
+
+	var newID int64
+	err = rs.DB.QueryRowContext(r.Context(), query,
+		unifiedJobID, runID, evt.Seq, evt.EventType,
+		evt.StdoutSnippet, evt.EventData, evt.CreatedAt,
+	).Scan(&newID)
+
+	if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+
+	evt.ID = newID
+	evt.UnifiedJobID = unifiedJobID
+	evt.ExecutionRunID = runID
+
+	render.Status(r, http.StatusCreated)
+	render.JSON(w, r, evt)
 }
 
 // -- Err Helpers (Basic) --
