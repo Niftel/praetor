@@ -1,0 +1,152 @@
+dn: ou=users,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: users
+description: All Praetor users
+
+dn: ou=organizations,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: organizations
+description: Praetor organizations
+
+dn: ou=teams,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: teams
+description: Praetor teams
+
+dn: ou=Engineering,ou=organizations,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: Engineering
+description: Engineering department
+
+dn: ou=Operations,ou=organizations,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: Operations
+description: Operations department
+
+dn: ou=Security,ou=organizations,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: Security
+description: Security team
+
+dn: uid=admin,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: admin
+sn: Administrator
+givenName: System
+cn: System Administrator
+displayName: System Administrator
+mail: admin@praetor.local
+uidNumber: 1000
+gidNumber: 1000
+homeDirectory: /home/admin
+userPassword: admin
+
+dn: uid=alice,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: alice
+sn: Smith
+givenName: Alice
+cn: Alice Smith
+displayName: Alice Smith
+mail: alice@praetor.local
+uidNumber: 1001
+gidNumber: 1000
+homeDirectory: /home/alice
+userPassword: alice123
+
+dn: uid=bob,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: bob
+sn: Johnson
+givenName: Bob
+cn: Bob Johnson
+displayName: Bob Johnson
+mail: bob@praetor.local
+uidNumber: 1002
+gidNumber: 1000
+homeDirectory: /home/bob
+userPassword: bob123
+
+dn: uid=charlie,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: charlie
+sn: Brown
+givenName: Charlie
+cn: Charlie Brown
+displayName: Charlie Brown
+mail: charlie@praetor.local
+uidNumber: 1003
+gidNumber: 1000
+homeDirectory: /home/charlie
+userPassword: charlie123
+
+dn: uid=diana,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: diana
+sn: Prince
+givenName: Diana
+cn: Diana Prince
+displayName: Diana Prince
+mail: diana@praetor.local
+uidNumber: 1004
+gidNumber: 1000
+homeDirectory: /home/diana
+userPassword: diana123
+
+dn: uid=eve,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: eve
+sn: Wilson
+givenName: Eve
+cn: Eve Wilson
+displayName: Eve Wilson
+mail: eve@praetor.local
+uidNumber: 1005
+gidNumber: 1000
+homeDirectory: /home/eve
+userPassword: eve123
+
+dn: cn=platform-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: platform-team
+description: Platform Engineering Team
+ou: Engineering
+member: uid=alice,ou=users,dc=praetor,dc=local
+member: uid=bob,ou=users,dc=praetor,dc=local
+member: uid=eve,ou=users,dc=praetor,dc=local
+
+dn: cn=sre-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: sre-team
+description: Site Reliability Engineering Team
+ou: Operations
+member: uid=bob,ou=users,dc=praetor,dc=local
+member: uid=charlie,ou=users,dc=praetor,dc=local
+
+dn: cn=security-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: security-team
+description: Security Operations Team
+ou: Security
+member: uid=diana,ou=users,dc=praetor,dc=local
+member: uid=alice,ou=users,dc=praetor,dc=local
+
+dn: cn=admins,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: admins
+description: System Administrators
+ou: Operations
+member: uid=admin,ou=users,dc=praetor,dc=local
+member: uid=alice,ou=users,dc=praetor,dc=local

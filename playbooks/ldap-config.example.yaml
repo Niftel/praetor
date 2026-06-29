@@ -1,0 +1,105 @@
+# Praetor LDAP Configuration Example
+# Copy this file to /etc/praetor/ldap.yaml or set PRAETOR_LDAP_CONFIG environment variable
+
+# LDAP Server Connection Settings
+server:
+  # LDAP URL (ldap:// or ldaps://)
+  url: "ldaps://ldap.example.com:636"
+  
+  # Service account for binding
+  bind_dn: "cn=service-account,ou=serviceaccounts,dc=example,dc=com"
+  
+  # Password via environment variable (recommended for security)
+  bind_password_env: "LDAP_BIND_PASSWORD"
+  # Or specify directly (not recommended):
+  # bind_password: "secret"
+  
+  # Use StartTLS for non-SSL connections
+  start_tls: false
+  
+  # Skip TLS certificate verification (not recommended for production)
+  insecure_skip_verify: false
+  
+  # Connection timeout
+  timeout: 30s
+
+# User Search Configuration
+users:
+  # Base DN for user searches
+  search_base: "ou=users,dc=example,dc=com"
+  
+  # LDAP filter to find users
+  search_filter: "(objectClass=person)"
+  
+  # Search scope: base, one, or sub
+  search_scope: "sub"
+  
+  # Attribute mapping to Praetor user fields
+  attributes:
+    username: "uid"           # or "sAMAccountName" for Active Directory
+    email: "mail"
+    first_name: "givenName"
+    last_name: "sn"
+
+# Organization Search Configuration
+organizations:
+  # Enable org sync from LDAP
+  enabled: true
+  
+  # Base DN for organization searches
+  search_base: "ou=departments,dc=example,dc=com"
+  
+  # LDAP filter for organizations
+  search_filter: "(objectClass=organizationalUnit)"
+  
+  # Search scope
+  search_scope: "one"
+  
+  # Attribute mapping
+  attributes:
+    name: "ou"
+    description: "description"
+  
+  # Attribute containing member DNs
+  member_attribute: "member"
+
+# Team Search Configuration
+teams:
+  # Enable team sync from LDAP
+  enabled: true
+  
+  # Base DN for team searches
+  search_base: "ou=teams,dc=example,dc=com"
+  
+  # LDAP filter for teams
+  search_filter: "(objectClass=groupOfNames)"
+  
+  # Search scope
+  search_scope: "sub"
+  
+  # Attribute mapping
+  attributes:
+    name: "cn"
+    description: "description"
+  
+  # Attribute containing member DNs
+  member_attribute: "member"
+  
+  # Attribute linking team to organization
+  organization_attribute: "ou"
+
+# Sync Behavior Settings
+sync:
+  # How often to run scheduled sync (0 = disabled)
+  interval: "1h"
+  
+  # Create entities if they don't exist in Praetor
+  create_users: true
+  create_orgs: true
+  create_teams: true
+  
+  # Remove entities no longer in LDAP (DANGER: can delete data!)
+  remove_stale: false
+  
+  # Log changes without applying (for testing)
+  dry_run: false

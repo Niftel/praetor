@@ -1,0 +1,49 @@
+# Praetor LDAP Configuration for Mock Server
+# This config connects to the OpenLDAP container in docker-compose
+
+server:
+  url: "ldap://ldap:389"
+  bind_dn: "cn=admin,dc=praetor,dc=local"
+  bind_password: "admin"
+  start_tls: false
+  insecure_skip_verify: true
+  timeout: 30s
+
+users:
+  search_base: "ou=users,dc=praetor,dc=local"
+  search_filter: "(objectClass=inetOrgPerson)"
+  search_scope: "sub"
+  attributes:
+    username: "uid"
+    email: "mail"
+    first_name: "givenName"
+    last_name: "sn"
+
+organizations:
+  enabled: true
+  search_base: "ou=organizations,dc=praetor,dc=local"
+  search_filter: "(objectClass=organizationalUnit)"
+  search_scope: "one"
+  attributes:
+    name: "ou"
+    description: "description"
+  member_attribute: "member"
+
+teams:
+  enabled: true
+  search_base: "ou=teams,dc=praetor,dc=local"
+  search_filter: "(objectClass=groupOfNames)"
+  search_scope: "sub"
+  attributes:
+    name: "cn"
+    description: "description"
+  member_attribute: "member"
+  organization_attribute: "ou"
+
+sync:
+  interval: "1h"
+  create_users: true
+  create_orgs: true
+  create_teams: true
+  remove_stale: false
+  dry_run: false

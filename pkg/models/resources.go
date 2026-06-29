@@ -29,14 +29,18 @@ type Inventory struct {
 }
 
 type Host struct {
-	ID          int64           `json:"id" db:"id"`
-	InventoryID int64           `json:"inventory_id" db:"inventory_id"`
-	Name        string          `json:"name" db:"name"`
-	Description *string         `json:"description,omitempty" db:"description"`
-	Variables   json.RawMessage `json:"variables,omitempty" db:"variables"`
-	Enabled     bool            `json:"enabled" db:"enabled"`
-	CreatedAt   time.Time       `json:"created_at" db:"created_at"`
-	ModifiedAt  time.Time       `json:"modified_at" db:"modified_at"`
+	ID             int64           `json:"id" db:"id"`
+	InventoryID    int64           `json:"inventory_id" db:"inventory_id"`
+	Name           string          `json:"name" db:"name"`
+	Description    *string         `json:"description,omitempty" db:"description"`
+	Variables      json.RawMessage `json:"variables,omitempty" db:"variables"`
+	Enabled        bool            `json:"enabled" db:"enabled"`
+	IsControlNode  bool            `json:"is_control_node" db:"is_control_node"`
+	IsRunnerHost   bool            `json:"is_runner_host" db:"is_runner_host"`
+	RunnerLastSeen *time.Time      `json:"runner_last_seen,omitempty" db:"runner_last_seen"`
+	RunnerHealthy  bool            `json:"runner_healthy" db:"runner_healthy"`
+	CreatedAt      time.Time       `json:"created_at" db:"created_at"`
+	ModifiedAt     time.Time       `json:"modified_at" db:"modified_at"`
 }
 
 type Group struct {
@@ -90,10 +94,25 @@ type JobTemplate struct {
 	Playbook               string          `json:"playbook" db:"playbook"`
 	PlaybookContent        *string         `json:"playbook_content,omitempty" db:"playbook_content"`
 	ExecutionEnvironmentID *int64          `json:"execution_environment_id,omitempty" db:"execution_environment_id"`
+	UnifiedJobTemplateID   *int64          `json:"unified_job_template_id,omitempty" db:"unified_job_template_id"`
+	CredentialID           *int64          `json:"credential_id,omitempty" db:"credential_id"`
 	Forks                  int             `json:"forks" db:"forks"`
 	JobType                string          `json:"job_type" db:"job_type"`
 	Verbosity              int             `json:"verbosity" db:"verbosity"`
 	ExtraVars              json.RawMessage `json:"extra_vars,omitempty" db:"extra_vars"`
 	CreatedAt              time.Time       `json:"created_at" db:"created_at"`
 	ModifiedAt             time.Time       `json:"modified_at" db:"modified_at"`
+}
+
+type Schedule struct {
+	ID                   int64           `json:"id" db:"id"`
+	Name                 string          `json:"name" db:"name"`
+	Description          *string         `json:"description,omitempty" db:"description"`
+	UnifiedJobTemplateID int64           `json:"unified_job_template_id" db:"unified_job_template_id"`
+	RRule                string          `json:"rrule" db:"rrule"`
+	NextRun              time.Time       `json:"next_run" db:"next_run"`
+	Enabled              bool            `json:"enabled" db:"enabled"`
+	ExtraVars            json.RawMessage `json:"extra_vars,omitempty" db:"extra_vars"`
+	CreatedAt            time.Time       `json:"created_at" db:"created_at"`
+	ModifiedAt           time.Time       `json:"modified_at" db:"modified_at"`
 }

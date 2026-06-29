@@ -1,0 +1,1 @@
+ALTER TABLE job_templates ADD COLUMN IF NOT EXISTS credential_id BIGINT REFERENCES credentials(id) ON DELETE SET NULL;
