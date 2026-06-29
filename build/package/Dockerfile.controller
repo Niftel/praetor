@@ -11,12 +11,12 @@ COPY . .
 RUN go build -o /praetor-controller ./cmd/controller
 
 # Run Stage
-FROM alpine:3.19
+FROM docker:24-cli
 
 WORKDIR /
 
 COPY --from=builder /praetor-controller /praetor-controller
 
-USER 1000:1000
+USER root
 
 CMD ["/praetor-controller"]

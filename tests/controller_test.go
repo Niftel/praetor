@@ -46,7 +46,7 @@ func TestReconcilerLogic(t *testing.T) {
 	}
 
 	// For actual Reconciler instantiation test:
-	rec := reconciler.NewReconciler(nil, k8sClient, 1*time.Second)
+	rec := reconciler.NewReconciler(nil, nil, nil, 10*time.Millisecond, 5*time.Minute)
 	if rec == nil {
 		t.Fatal("Reconciler failed to instantiate")
 	}
