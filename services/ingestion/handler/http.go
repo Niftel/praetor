@@ -77,3 +77,46 @@ func (h *IngestionHandler) IngestLog(w http.ResponseWriter, r *http.Request) {
 	render.Status(r, http.StatusAccepted)
 	render.JSON(w, r, map[string]string{"status": "accepted"})
 }
+
+// StreamLog GET /api/v1/runs/{run_id}/logs?since=N
+// Streams the run's stored stdout (chunks reassembled in order) back to the
+// caller. `since` supports incremental tailing; the highest seq written is
+// returned in the X-Praetor-Last-Seq header so a poller can advance its cursor.
+func (h *IngestionHandler) StreamLog(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "run_id"))
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	// since is the highest seq the caller already has; -1 (the default) fetches
+	// from the beginning. The query is exclusive (seq > since).
+	since := int64(-1)
+	if v := r.URL.Query().Get("since"); v != "" {
+		if since, err = strconv.ParseInt(v, 10, 64); err != nil {
+			praetorRender.ErrInvalidRequest(fmt.Errorf("invalid since: %w", err)).Render(w, r)
+			return
+		}
+	}
+
+	// Resolve the tail cursor up front so it can be sent as a header before the
+	// body is written (headers can't be set once streaming has begun).
+	latest, err := h.Service.LatestLogSeq(r.Context(), runID)
+	if err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	if latest < since {
+		latest = since
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Praetor-Last-Seq", strconv.FormatInt(latest, 10))
+
+	if err := h.Service.StreamLogs(r.Context(), runID, since, w); err != nil {
+		// The body may be partially written at this point; the error is logged
+		// by the renderer. Nothing more we can safely do mid-stream.
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+}

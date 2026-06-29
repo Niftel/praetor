@@ -1,6 +1,7 @@
 package core_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"testing"
@@ -106,5 +107,38 @@ func TestLogChunkEndToEnd(t *testing.T) {
 	}
 	if byteLen != len(payload) {
 		t.Fatalf("indexed byte_length %d != %d", byteLen, len(payload))
+	}
+
+	// Ingest a second chunk and wait for it to be indexed.
+	payload2 := []byte("TASK [install nginx] ***\nchanged: [web-01]\nPLAY RECAP ***\n")
+	if err := svc.IngestLogChunk(context.Background(), runID, 1, payload2); err != nil {
+		t.Fatalf("ingest chunk 1: %v", err)
+	}
+	select {
+	case <-indexed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second log chunk was not indexed")
+	}
+
+	// Read-back: the full log is the chunks reassembled in order.
+	var buf bytes.Buffer
+	if err := svc.StreamLogs(context.Background(), runID, -1, &buf); err != nil {
+		t.Fatalf("stream logs: %v", err)
+	}
+	if got, want := buf.String(), string(payload)+string(payload2); got != want {
+		t.Fatalf("full log read-back mismatch:\n got %q\nwant %q", got, want)
+	}
+
+	// Incremental tail: since=0 must return only the chunk after seq 0.
+	buf.Reset()
+	if err := svc.StreamLogs(context.Background(), runID, 0, &buf); err != nil {
+		t.Fatalf("stream logs since=0: %v", err)
+	}
+	if got := buf.String(); got != string(payload2) {
+		t.Fatalf("tail read-back mismatch:\n got %q\nwant %q", got, payload2)
+	}
+
+	if latest, err := svc.LatestLogSeq(context.Background(), runID); err != nil || latest != 1 {
+		t.Fatalf("LatestLogSeq = %d, %v; want 1, nil", latest, err)
 	}
 }

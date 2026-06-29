@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -31,6 +32,48 @@ func NewIngestionService(db *sqlx.DB, pub EventPublisher, store objectstore.LogS
 		Publisher: pub,
 		Store:     store,
 	}
+}
+
+// LatestLogSeq returns the highest stored chunk seq for a run, or -1 if none.
+// It lets a reader advance its tail cursor without parsing the streamed bytes.
+func (s *IngestionService) LatestLogSeq(ctx context.Context, runID uuid.UUID) (int64, error) {
+	var seq int64
+	err := s.DB.GetContext(ctx, &seq,
+		`SELECT COALESCE(MAX(seq), -1) FROM job_output_chunks WHERE execution_run_id = $1`, runID)
+	return seq, err
+}
+
+// StreamLogs writes the run's stored output, in chunk order, to w. sinceSeq
+// supports incremental tailing: a caller polling for live updates passes the
+// highest seq it has already seen, and only later chunks are written.
+func (s *IngestionService) StreamLogs(ctx context.Context, runID uuid.UUID, sinceSeq int64, w io.Writer) error {
+	if s.Store == nil {
+		return fmt.Errorf("log store not configured")
+	}
+
+	rows, err := s.DB.QueryxContext(ctx, `
+		SELECT storage_key FROM job_output_chunks
+		WHERE execution_run_id = $1 AND seq > $2
+		ORDER BY seq`, runID, sinceSeq)
+	if err != nil {
+		return fmt.Errorf("list log chunks: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return err
+		}
+		data, err := s.Store.Get(key)
+		if err != nil {
+			return fmt.Errorf("fetch chunk %s: %w", key, err)
+		}
+		if _, err := w.Write(data); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 // IngestLogChunk persists a raw stdout chunk to the object store and publishes a
