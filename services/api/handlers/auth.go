@@ -34,9 +34,10 @@ type LoginResponse struct {
 }
 
 type AuthClaims struct {
-	UserID      int64  `json:"user_id"`
-	Username    string `json:"username"`
-	IsSuperuser bool   `json:"is_superuser"`
+	UserID          int64  `json:"user_id"`
+	Username        string `json:"username"`
+	IsSuperuser     bool   `json:"is_superuser"`
+	IsSystemAuditor bool   `json:"is_system_auditor"`
 	jwt.RegisteredClaims
 }
 
@@ -50,7 +51,7 @@ func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	var user models.User
 	// Get user including password_hash
-	query := `SELECT id, username, password_hash, first_name, last_name, email, is_superuser, is_active FROM users WHERE username = $1`
+	query := `SELECT id, username, password_hash, first_name, last_name, email, is_superuser, is_system_auditor, is_active FROM users WHERE username = $1`
 	err := h.DB.Get(&user, query, req.Username)
 	if err != nil {
 		// Generic error for security
@@ -72,9 +73,10 @@ func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Generate JWT
 	claims := AuthClaims{
-		UserID:      user.ID,
-		Username:    user.Username,
-		IsSuperuser: user.IsSuperuser,
+		UserID:          user.ID,
+		Username:        user.Username,
+		IsSuperuser:     user.IsSuperuser,
+		IsSystemAuditor: user.IsSystemAuditor,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

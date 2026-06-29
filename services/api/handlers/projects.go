@@ -9,7 +9,9 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
 
@@ -17,17 +19,33 @@ import (
 // ListProjects GET /api/v1/projects
 func (h *ContentHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
+	uc := currentUser(r)
 
 	var projects []models.Project
-	query := `SELECT * FROM projects ORDER BY id LIMIT $1 OFFSET $2`
-	err := h.DB.Select(&projects, query, pg.Limit, pg.Offset)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
 	var total int64
-	_ = h.DB.Get(&total, "SELECT count(*) FROM projects")
+
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		if err := h.DB.Select(&projects, `SELECT * FROM projects ORDER BY id LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		_ = h.DB.Get(&total, "SELECT count(*) FROM projects")
+	} else {
+		ids, err := h.readableIDs(r, rbac.ContentTypeProject)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if len(ids) > 0 {
+			q, args, _ := sqlx.In(`SELECT * FROM projects WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
+			q = h.DB.Rebind(q)
+			if err := h.DB.Select(&projects, q, args...); err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+			total = int64(len(ids))
+		}
+	}
 
 	if projects == nil {
 		projects = []models.Project{}
@@ -49,11 +67,14 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("DEBUG: CreateProject Input: %+v\n", input)
-
 	// Basic validation
 	if input.Name == "" || input.SCMURL == "" || input.OrganizationID == 0 {
 		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+
+	// Creating a project requires admin on its parent organization.
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
 		return
 	}
 
@@ -80,6 +101,8 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
+		// The creator becomes admin of the project they just made.
+		h.grantCreatorAdmin(r.Context(), rbac.ContentTypeProject, created.ID, currentUser(r))
 		render.Created(w, r, created)
 	} else {
 		render.ErrInternal(nil).Render(w, r)
@@ -92,6 +115,12 @@ func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	// Triggering an SCM sync mutates the project; require admin on it.
+	// (update_role is the finer-grained AWX equivalent — a future refinement.)
+	if !h.authorize(w, r, rbac.ContentTypeProject, id, actAdmin) {
 		return
 	}
 
