@@ -13,8 +13,6 @@ import UsersPage from './pages/UsersPage';
 import TeamsPage from './pages/TeamsPage';
 import RolesPage from './pages/RolesPage';
 import OrganizationsPage from './pages/OrganizationsPage';
-import InstancesPage from './pages/InstancesPage';
-import InstanceGroupsPage from './pages/InstanceGroupsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
 import { getAuthToken, removeAuthToken } from './services/api';
 
@@ -41,8 +39,6 @@ const App = () => {
           element={isAuthenticated ? <Layout onLogout={handleLogout} /> : <Navigate to="/login" replace />}
         >
           <Route index element={<DashboardPage />} />
-          <Route path="instances" element={<InstancesPage />} />
-          <Route path="instance-groups" element={<InstanceGroupsPage />} />
           <Route path="jobs" element={<JobsPage />} />
           <Route path="templates" element={<TemplatesPage />} />
           <Route path="projects" element={<ProjectsPage />} />

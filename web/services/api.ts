@@ -75,16 +75,6 @@ export const api = {
     // Full playbook stdout, reassembled from the object store (returns plain text).
     getJobLogs: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/logs`).then(r => r.text()),
 
-    // Infrastructure
-    getInstances: () => fetchWithAuth('/instances').then(r => r.json()),
-    getRunnerHosts: () => fetchWithAuth('/infrastructure/runner-hosts').then(r => r.json()),
-    createInstance: (data: any) => fetchWithAuth('/instances', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
-    updateInstance: (id: number, data: any) => fetchWithAuth(`/instances/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
-    deleteInstance: (id: number) => fetchWithAuth(`/instances/${id}`, { method: 'DELETE' }),
-
-    getInstanceGroups: () => fetchWithAuth('/instance_groups').then(r => r.json()),
-    createInstanceGroup: (data: any) => fetchWithAuth('/instance_groups', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
-    deleteInstanceGroup: (id: number) => fetchWithAuth(`/instance_groups/${id}`, { method: 'DELETE' }),
 
     // Inventories
     getInventories: () => fetchWithAuth('/inventories').then(r => r.json()),

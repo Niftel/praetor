@@ -57,13 +57,6 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { name: 'Roles', path: '/roles', icon: <Shield size={20} /> },
         { name: 'Auth Providers', path: '/auth-providers', icon: <Key size={20} /> },
       ]
-    },
-    {
-      title: 'Infrastructure',
-      items: [
-        { name: 'Instances', path: '/instances', icon: <Server size={20} /> },
-        { name: 'Instance Groups', path: '/instance-groups', icon: <Users size={20} /> },
-      ]
     }
   ];
 
