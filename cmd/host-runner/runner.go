@@ -111,9 +111,12 @@ func (r *Runner) Execute() error {
 	cmd := exec.Command("ansible-playbook", "-i", inventoryPath, playbookPath)
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
 
-	stdoutFile, err := os.Create(filepath.Join(r.JobDir, "stdout.log"))
+	// Append (not truncate): on a resume after interruption this preserves the
+	// earlier output and keeps the log syncer's byte cursor valid; the resumed
+	// run's output is appended and shipped as the next chunks.
+	stdoutFile, err := os.OpenFile(filepath.Join(r.JobDir, "stdout.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to create stdout.log: %w", err)
+		return fmt.Errorf("failed to open stdout.log: %w", err)
 	}
 	defer stdoutFile.Close()
 	cmd.Stdout = io.MultiWriter(stdoutFile, os.Stdout)
