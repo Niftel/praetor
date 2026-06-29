@@ -61,9 +61,19 @@ const JobsPage = () => {
     setCopied(false);
     setIsLogModalOpen(true);
     try {
-      const events = await api.getJobEvents(runId);
-      // Concatenate stdout snippets with newlines
-      const fullLog = events.map((e: any) => e.stdout_snippet).join("\n");
+      // Full playbook output lives in the object store; fetch the reassembled
+      // log. Fall back to event stdout snippets for older runs (or lifecycle-only
+      // output) that predate object-store logging.
+      let fullLog = "";
+      try {
+        fullLog = await api.getJobLogs(runId);
+      } catch {
+        fullLog = "";
+      }
+      if (!fullLog || !fullLog.trim()) {
+        const events = await api.getJobEvents(runId);
+        fullLog = events.map((e: any) => e.stdout_snippet).filter(Boolean).join("\n");
+      }
       setLogs(fullLog || "No logs available.");
       // Auto-scroll to bottom after logs load
       setTimeout(() => {

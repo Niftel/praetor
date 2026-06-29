@@ -72,6 +72,8 @@ export const api = {
 
     // Logs
     getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
+    // Full playbook stdout, reassembled from the object store (returns plain text).
+    getJobLogs: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/logs`).then(r => r.text()),
 
     // Infrastructure
     getInstances: () => fetchWithAuth('/instances').then(r => r.json()),

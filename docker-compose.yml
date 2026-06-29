@@ -90,6 +90,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       JWT_SECRET: "praetor-prod-secret-2025-secure-key-9Xv2" # In prod use .env
       PORT: 8080
+      INGESTION_URL: http://ingestion:8081 # for proxying run logs from the object store
       PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
     volumes:
       - ./deployments/ldap/ldap-config.yaml:/etc/praetor/ldap.yaml:ro

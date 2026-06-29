@@ -4,7 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -60,6 +63,7 @@ func (rs *JobsResource) Routes() chi.Router {
 	r.Get("/runs/{runID}", rs.GetExecutionRun)
 	r.Get("/runs/{runID}/events", rs.ListJobEvents)
 	r.Post("/runs/{runID}/events", rs.CreateJobEvent)
+	r.Get("/runs/{runID}/logs", rs.StreamRunLogs)
 	return r
 }
 
@@ -198,6 +202,51 @@ func (rs *JobsResource) ListJobEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render.JSON(w, r, events)
+}
+
+// StreamRunLogs returns a run's full stdout. Bulk playbook output is streamed to
+// the object store (not the event stream), so this proxies the ingestion
+// service's reassembled-log endpoint rather than reading job_events. Auth
+// matches ListJobEvents (the user must be able to read the governing template).
+func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
+	runIDStr := chi.URLParam(r, "runID")
+	runID, err := uuid.Parse(runIDStr)
+	if err != nil {
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+	if !rs.authorizeRunRead(w, r, runID) {
+		return
+	}
+
+	base := os.Getenv("INGESTION_URL")
+	if base == "" {
+		base = "http://ingestion:8081"
+	}
+	// The upstream chunk query is exclusive (seq > since) and chunks start at
+	// seq 0, so a full fetch must pass since=-1 — defaulting to 0 would silently
+	// drop the first chunk (the start of the playbook output).
+	since := r.URL.Query().Get("since")
+	if since == "" {
+		since = "-1"
+	}
+	upstream := fmt.Sprintf("%s/api/v1/runs/%s/logs?since=%s", base, runID, url.QueryEscape(since))
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream, nil)
+	if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		render.Render(w, r, ErrInternal(fmt.Errorf("reach ingestion logs: %w", err)))
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 // CreateJobEvent ingests a new event (used by host-runner)
