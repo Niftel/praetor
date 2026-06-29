@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/praetor/services/api/render"
@@ -21,6 +22,18 @@ const (
 	actExecute
 )
 
+// Authorizer is the shared object-level authorization helper. It is embedded by
+// every resource handler so the same enforcement primitives (authorize,
+// readableIDs, grantCreatorAdmin) are available everywhere, not just on
+// ContentHandler.
+type Authorizer struct {
+	Access *rbac.AccessChecker
+}
+
+func NewAuthorizer(db *sqlx.DB) *Authorizer {
+	return &Authorizer{Access: rbac.NewAccessChecker(db)}
+}
+
 // currentUser pulls the authenticated user set by the auth middleware.
 func currentUser(r *http.Request) middleware.UserContext {
 	return r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
@@ -34,20 +47,20 @@ func currentUser(r *http.Request) middleware.UserContext {
 //
 // Superuser (all actions) and system auditor (reads) are handled inside the
 // checker, so they are not special-cased here.
-func (h *ContentHandler) authorize(w http.ResponseWriter, r *http.Request, contentType rbac.ContentType, objectID int64, action permAction) bool {
+func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentType rbac.ContentType, objectID int64, action permAction) bool {
 	uc := currentUser(r)
 
 	var allowed bool
 	var err error
 	switch action {
 	case actRead:
-		allowed, err = h.Access.CanRead(r.Context(), uc.UserID, contentType, objectID)
+		allowed, err = a.Access.CanRead(r.Context(), uc.UserID, contentType, objectID)
 	case actAdmin:
-		allowed, err = h.Access.CanAdmin(r.Context(), uc.UserID, contentType, objectID)
+		allowed, err = a.Access.CanAdmin(r.Context(), uc.UserID, contentType, objectID)
 	case actUse:
-		allowed, err = h.Access.CanUse(r.Context(), uc.UserID, contentType, objectID)
+		allowed, err = a.Access.CanUse(r.Context(), uc.UserID, contentType, objectID)
 	case actExecute:
-		allowed, err = h.Access.CanExecute(r.Context(), uc.UserID, contentType, objectID)
+		allowed, err = a.Access.CanExecute(r.Context(), uc.UserID, contentType, objectID)
 	}
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -63,9 +76,9 @@ func (h *ContentHandler) authorize(w http.ResponseWriter, r *http.Request, conte
 // readableIDs returns the object IDs of contentType the current user may read.
 // FilterAccessibleIDs already returns everything for superusers and system
 // auditors, so list handlers can use this uniformly.
-func (h *ContentHandler) readableIDs(r *http.Request, contentType rbac.ContentType) ([]int64, error) {
+func (a *Authorizer) readableIDs(r *http.Request, contentType rbac.ContentType) ([]int64, error) {
 	uc := currentUser(r)
-	return h.Access.FilterAccessibleIDs(r.Context(), uc.UserID, contentType, rbac.RoleFieldRead)
+	return a.Access.FilterAccessibleIDs(r.Context(), uc.UserID, contentType, rbac.RoleFieldRead)
 }
 
 // grantCreatorAdmin makes the creating user an admin of a freshly-created
@@ -73,16 +86,16 @@ func (h *ContentHandler) readableIDs(r *http.Request, contentType rbac.ContentTy
 // creator the object's admin_role). Superusers already have implicit access, so
 // they are skipped. Best-effort: a failure is logged, not surfaced, since the
 // object was already created.
-func (h *ContentHandler) grantCreatorAdmin(ctx context.Context, contentType rbac.ContentType, objectID int64, uc middleware.UserContext) {
+func (a *Authorizer) grantCreatorAdmin(ctx context.Context, contentType rbac.ContentType, objectID int64, uc middleware.UserContext) {
 	if uc.IsSuperuser {
 		return
 	}
-	role, err := h.Access.GetObjectRole(ctx, contentType, objectID, rbac.RoleFieldAdmin)
+	role, err := a.Access.GetObjectRole(ctx, contentType, objectID, rbac.RoleFieldAdmin)
 	if err != nil {
 		log.Printf("authz: could not find admin_role for %s/%d to grant creator: %v", contentType, objectID, err)
 		return
 	}
-	if err := h.Access.AddUserToRole(ctx, role.ID, uc.UserID); err != nil {
+	if err := a.Access.AddUserToRole(ctx, role.ID, uc.UserID); err != nil {
 		log.Printf("authz: could not grant creator %d admin on %s/%d: %v", uc.UserID, contentType, objectID, err)
 	}
 }

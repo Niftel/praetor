@@ -8,17 +8,19 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
 
 // TemplatesResource handles job template operations
 type TemplatesResource struct {
 	DB *sqlx.DB
+	*Authorizer
 }
 
 // NewTemplatesResource creates a new templates resource handler
 func NewTemplatesResource(db *sqlx.DB) *TemplatesResource {
-	return &TemplatesResource{DB: db}
+	return &TemplatesResource{DB: db, Authorizer: NewAuthorizer(db)}
 }
 
 // Routes creates a REST router for the Templates resource
@@ -35,17 +37,33 @@ func (rs *TemplatesResource) Routes() chi.Router {
 // ListTemplates GET /api/v1/job-templates
 func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
+	uc := currentUser(r)
 
 	var templates []models.JobTemplate
-	query := `SELECT * FROM job_templates ORDER BY id DESC LIMIT $1 OFFSET $2`
-	err := rs.DB.SelectContext(r.Context(), &templates, query, pg.Limit, pg.Offset)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
 	var total int64
-	_ = rs.DB.Get(&total, "SELECT count(*) FROM job_templates")
+
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		if err := rs.DB.SelectContext(r.Context(), &templates, `SELECT * FROM job_templates ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		_ = rs.DB.Get(&total, "SELECT count(*) FROM job_templates")
+	} else {
+		ids, err := rs.readableIDs(r, rbac.ContentTypeJobTemplate)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if len(ids) > 0 {
+			q, args, _ := sqlx.In(`SELECT * FROM job_templates WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
+			q = rs.DB.Rebind(q)
+			if err := rs.DB.SelectContext(r.Context(), &templates, q, args...); err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+			total = int64(len(ids))
+		}
+	}
 
 	if templates == nil {
 		templates = []models.JobTemplate{}
@@ -89,6 +107,21 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		input.JobType = "run"
 	}
 
+	// Creating a template requires admin on its org, plus use access on any
+	// project/inventory/credential it attaches (AWX attach semantics).
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+		return
+	}
+	if input.ProjectID != nil && !rs.authorize(w, r, rbac.ContentTypeProject, *input.ProjectID, actUse) {
+		return
+	}
+	if input.InventoryID != nil && !rs.authorize(w, r, rbac.ContentTypeInventory, *input.InventoryID, actUse) {
+		return
+	}
+	if input.CredentialID != nil && !rs.authorize(w, r, rbac.ContentTypeCredential, *input.CredentialID, actUse) {
+		return
+	}
+
 	tx, err := rs.DB.Beginx()
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -128,6 +161,7 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeJobTemplate, created.ID, currentUser(r))
 	render.Created(w, r, created)
 }
 
@@ -137,6 +171,10 @@ func (rs *TemplatesResource) GetTemplate(w http.ResponseWriter, r *http.Request)
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, id, actRead) {
 		return
 	}
 
@@ -160,6 +198,10 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, id, actAdmin) {
+		return
+	}
+
 	var input models.JobTemplate
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -167,7 +209,7 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 	}
 
 	query := `
-		UPDATE job_templates 
+		UPDATE job_templates
 		SET name = $2, description = $3, playbook = $4, playbook_content = $5, 
 		    project_id = $6, verbosity = $7, inventory_id = $8, credential_id = $9, modified_at = now()
 		WHERE id = $1 
@@ -193,6 +235,10 @@ func (rs *TemplatesResource) DeleteTemplate(w http.ResponseWriter, r *http.Reque
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, id, actAdmin) {
 		return
 	}
 

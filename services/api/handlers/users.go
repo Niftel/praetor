@@ -37,6 +37,11 @@ func (h *ContentHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser POST /api/v1/users
 func (h *ContentHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	if uc := currentUser(r); !uc.IsSuperuser {
+		render.ErrForbidden(nil).Render(w, r)
+		return
+	}
+
 	// Simplified user creation (no password hashing implemented yet for skeleton)
 	var input models.User
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -83,6 +88,13 @@ func (h *ContentHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 // UpdateUser PUT /api/v1/users/{id}
 func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	// This endpoint can set is_superuser/is_active, so it is superuser-only.
+	// Self-service profile editing belongs in a separate, field-restricted route.
+	if uc := currentUser(r); !uc.IsSuperuser {
+		render.ErrForbidden(nil).Render(w, r)
+		return
+	}
+
 	id := render.GetIDParam(r)
 	var input models.User
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -119,6 +131,11 @@ func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 // DeleteUser DELETE /api/v1/users/{id}
 func (h *ContentHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	if uc := currentUser(r); !uc.IsSuperuser {
+		render.ErrForbidden(nil).Render(w, r)
+		return
+	}
+
 	id := render.GetIDParam(r)
 	res, err := h.DB.Exec("DELETE FROM users WHERE id = $1", id)
 	if err != nil {

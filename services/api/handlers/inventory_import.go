@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 	"gopkg.in/yaml.v3"
 )
@@ -33,6 +34,11 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 	inventoryId, err := parseInt64(inventoryIdStr)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	// Importing hosts/groups mutates the inventory.
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actAdmin) {
 		return
 	}
 

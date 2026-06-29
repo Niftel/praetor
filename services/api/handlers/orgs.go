@@ -15,14 +15,14 @@ import (
 )
 
 type ContentHandler struct {
-	DB     *sqlx.DB
-	Access *rbac.AccessChecker
+	DB *sqlx.DB
+	*Authorizer
 }
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
 	return &ContentHandler{
-		DB:     db,
-		Access: rbac.NewAccessChecker(db),
+		DB:         db,
+		Authorizer: NewAuthorizer(db),
 	}
 }
 
