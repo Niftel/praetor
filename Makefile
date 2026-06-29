@@ -1,11 +1,20 @@
-.PHONY: build test clean run-api run-scheduler run-ingestion migrate-up migrate-down
+.PHONY: build host-runner test clean run-api run-scheduler run-ingestion migrate-up migrate-down
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
 SCHEDULER_BINARY=$(BINARY_DIR)/praetor-scheduler
 INGESTION_BINARY=$(BINARY_DIR)/praetor-ingestion
 
-build:
+# Host-runner cross-compilation target. The binary is bootstrapped onto your
+# MANAGED hosts, so this is their CPU arch, not necessarily the build machine's.
+# It defaults to the build machine's arch (so the local docker-compose demo,
+# whose containers run the host arch, works out of the box); override for
+# cross-arch targets, e.g. `make host-runner HOST_RUNNER_ARCH=amd64`.
+HOST_RUNNER_OS ?= linux
+HOST_RUNNER_ARCH ?= $(shell go env GOHOSTARCH)
+HOST_RUNNER_BINARY=build/$(HOST_RUNNER_OS)/praetor-host-runner
+
+build: host-runner
 	@echo "Building services..."
 	mkdir -p $(BINARY_DIR)
 	go build -o $(API_BINARY) ./cmd/api
@@ -13,9 +22,14 @@ build:
 	go build -o $(INGESTION_BINARY) ./cmd/ingestion
 	go build -o $(BINARY_DIR)/praetor-consumer ./cmd/consumer
 	go build -o $(BINARY_DIR)/praetor-executor ./cmd/executor
-	# Build Host Runner for Linux (Target OS)
-	GOOS=linux GOARCH=amd64 go build -o build/linux/praetor-host-runner ./cmd/host-runner
 	@echo "Build complete."
+
+# Build the Linux host-runner the executor bootstraps onto target hosts. Served
+# to the executor via the ./build directory mount in docker-compose.yml.
+host-runner:
+	@echo "Building host-runner for $(HOST_RUNNER_OS)/$(HOST_RUNNER_ARCH)..."
+	mkdir -p build/$(HOST_RUNNER_OS)
+	GOOS=$(HOST_RUNNER_OS) GOARCH=$(HOST_RUNNER_ARCH) CGO_ENABLED=0 go build -o $(HOST_RUNNER_BINARY) ./cmd/host-runner
 
 test:
 	@echo "Running tests..."
