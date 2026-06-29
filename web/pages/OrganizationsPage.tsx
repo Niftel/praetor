@@ -5,7 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Building2, Users, ShieldCheck, UserPlus, Trash2, Loader, Eye, Key } from 'lucide-react';
+import { Building2, Users, ShieldCheck, UserPlus, Trash2, Loader, Eye, Key, Package, Plus } from 'lucide-react';
 
 const OrganizationsPage = () => {
     const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -21,6 +21,13 @@ const OrganizationsPage = () => {
     const [showAddMemberModal, setShowAddMemberModal] = useState(false);
     const [showAddAdminModal, setShowAddAdminModal] = useState(false);
     const [selectedUserId, setSelectedUserId] = useState<number>(0);
+
+    // Galaxy / Automation Hub credentials
+    const [orgGalaxyCreds, setOrgGalaxyCreds] = useState<any[]>([]);
+    const [allCredentials, setAllCredentials] = useState<any[]>([]);
+    const [galaxyTypeId, setGalaxyTypeId] = useState<number>(0);
+    const [showAddGalaxyModal, setShowAddGalaxyModal] = useState(false);
+    const [selectedGalaxyCredId, setSelectedGalaxyCredId] = useState<number>(0);
 
     const fetchOrganizations = async () => {
         try {
@@ -38,6 +45,11 @@ const OrganizationsPage = () => {
     useEffect(() => {
         fetchOrganizations();
         api.getUsers().then(res => setAllUsers(res?.items || res || [])).catch(() => { });
+        api.getCredentials().then(res => setAllCredentials(res?.items || res || [])).catch(() => { });
+        api.getCredentialTypes().then((types: any[]) => {
+            const galaxy = (types || []).find(t => /galaxy/i.test(t.name));
+            if (galaxy) setGalaxyTypeId(galaxy.id);
+        }).catch(() => { });
     }, []);
 
     const handleCreate = async () => {
@@ -67,20 +79,51 @@ const OrganizationsPage = () => {
     const loadOrgDetails = async (org: Organization) => {
         setSelectedOrg(org);
         try {
-            const [members, admins, teams, roles] = await Promise.all([
+            const [members, admins, teams, roles, galaxy] = await Promise.all([
                 api.getOrganizationUsers(org.id).catch(() => []),
                 api.getOrganizationAdmins(org.id).catch(() => []),
                 api.getOrganizationTeams(org.id).catch(() => []),
                 api.getOrganizationRoles(org.id).catch(() => []),
+                api.getOrgGalaxyCredentials(org.id).catch(() => []),
             ]);
             setOrgMembers(members || []);
             setOrgAdmins(admins || []);
             setOrgTeams(teams || []);
             setOrgRoles(roles || []);
+            setOrgGalaxyCreds(galaxy || []);
         } catch (err) {
             console.error('Failed to load org details', err);
         }
     };
+
+    const handleAddGalaxyCred = async () => {
+        if (!selectedOrg || !selectedGalaxyCredId) return;
+        try {
+            await api.addOrgGalaxyCredential(selectedOrg.id, selectedGalaxyCredId);
+            loadOrgDetails(selectedOrg);
+            setShowAddGalaxyModal(false);
+            setSelectedGalaxyCredId(0);
+        } catch (err) {
+            alert('Failed to attach Galaxy credential');
+        }
+    };
+
+    const handleRemoveGalaxyCred = async (credId: number) => {
+        if (!selectedOrg) return;
+        try {
+            await api.removeOrgGalaxyCredential(selectedOrg.id, credId);
+            loadOrgDetails(selectedOrg);
+        } catch (err) {
+            console.error('Failed to remove Galaxy credential', err);
+        }
+    };
+
+    // Galaxy-type credentials in this org not already attached.
+    const availableGalaxyCreds = () =>
+        allCredentials.filter(c =>
+            c.credential_type_id === galaxyTypeId &&
+            (c.organization_id === selectedOrg?.id) &&
+            !orgGalaxyCreds.find(g => g.credential_id === c.id));
 
     const handleAddMember = async () => {
         if (!selectedOrg || !selectedUserId) return;
@@ -291,6 +334,36 @@ const OrganizationsPage = () => {
                                     {orgTeams.length === 0 && <div className="text-gray-500 text-center py-4">No teams in this organization</div>}
                                 </div>
                             </Card>
+
+                            {/* Galaxy / Automation Hub Credentials */}
+                            <Card>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                                        <Package size={20} className="text-rose-600" />
+                                        Galaxy Credentials
+                                    </h3>
+                                    <Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={() => { setSelectedGalaxyCredId(0); setShowAddGalaxyModal(true); }}>
+                                        Attach
+                                    </Button>
+                                </div>
+                                <p className="text-xs text-gray-500 mb-3">Private Ansible Galaxy / Automation Hub servers used to install this org's project requirements (in order).</p>
+                                <div className="space-y-2">
+                                    {orgGalaxyCreds.map(gc => (
+                                        <div key={gc.id} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-8 w-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600">
+                                                    <Package size={16} />
+                                                </div>
+                                                <span className="text-gray-900">{gc.name}</span>
+                                            </div>
+                                            <button onClick={() => handleRemoveGalaxyCred(gc.credential_id)} className="text-gray-400 hover:text-red-600">
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {orgGalaxyCreds.length === 0 && <div className="text-gray-500 text-center py-4">None attached — the public galaxy.ansible.com is used.</div>}
+                                </div>
+                            </Card>
                         </div>
                     ) : (
                         <Card className="h-full flex items-center justify-center py-16">
@@ -373,6 +446,35 @@ const OrganizationsPage = () => {
                     <div className="flex justify-end gap-2">
                         <Button variant="secondary" onClick={() => setShowAddAdminModal(false)}>Cancel</Button>
                         <Button onClick={handleAddAdmin}>Add</Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Attach Galaxy Credential Modal */}
+            <Modal isOpen={showAddGalaxyModal} onClose={() => setShowAddGalaxyModal(false)} title="Attach Galaxy Credential">
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Galaxy / Automation Hub Credential</label>
+                        <select
+                            className="w-full border border-gray-300 rounded-md p-2"
+                            value={selectedGalaxyCredId}
+                            onChange={e => setSelectedGalaxyCredId(Number(e.target.value))}
+                        >
+                            <option value={0}>-- Select a credential --</option>
+                            {availableGalaxyCreds().map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                        {availableGalaxyCreds().length === 0 && (
+                            <p className="text-xs text-gray-500 mt-2">
+                                No unattached Galaxy credentials in this organization. Create one on the Credentials page using the
+                                &ldquo;Ansible Galaxy/Automation Hub API Token&rdquo; type.
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <Button variant="secondary" onClick={() => setShowAddGalaxyModal(false)}>Cancel</Button>
+                        <Button onClick={handleAddGalaxyCred} disabled={!selectedGalaxyCredId}>Attach</Button>
                     </div>
                 </div>
             </Modal>

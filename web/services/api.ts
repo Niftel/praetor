@@ -169,6 +169,9 @@ export const api = {
     addOrganizationAdmin: (orgId: number, userId: number) => fetchWithAuth(`/organizations/${orgId}/admins`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
     getOrganizationTeams: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/teams`).then(r => r.json()),
     getOrganizationRoles: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/object_roles`).then(r => r.json()),
+    getOrgGalaxyCredentials: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/galaxy-credentials`).then(r => r.json()),
+    addOrgGalaxyCredential: (orgId: number, credentialId: number) => fetchWithAuth(`/organizations/${orgId}/galaxy-credentials`, { method: 'POST', body: JSON.stringify({ credential_id: credentialId }) }),
+    removeOrgGalaxyCredential: (orgId: number, credId: number) => fetchWithAuth(`/organizations/${orgId}/galaxy-credentials/${credId}`, { method: 'DELETE' }),
 
     // User relationships
     getUserOrganizations: (userId: number) => fetchWithAuth(`/users/${userId}/organizations`).then(r => r.json()),
