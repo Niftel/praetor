@@ -70,6 +70,18 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
         dest: /usr/local/bin/praetor-host-runner
         mode: '0755'
 
+    - name: Ensure Ansible plugin directory exists
+      file:
+        path: /usr/local/share/praetor/plugins/callback
+        state: directory
+        mode: '0755'
+
+    - name: Copy checkpoint callback plugin (enables task-level resume)
+      copy:
+        src: /tmp/build/plugins/callback/praetor_checkpoint.py
+        dest: /usr/local/share/praetor/plugins/callback/praetor_checkpoint.py
+        mode: '0644'
+
     - name: Copy Manifest
       copy:
         src: %s

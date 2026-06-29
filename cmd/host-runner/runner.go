@@ -108,8 +108,19 @@ func (r *Runner) Execute() error {
 	// longer emit per-line stdout events into the WAL — bulk output belongs in
 	// the object store, not the control-plane database. Only structured
 	// lifecycle events (started/completed/failed) flow through the event WAL.
-	cmd := exec.Command("ansible-playbook", "-i", inventoryPath, playbookPath)
+	// Enable the checkpoint callback (if the plugin is deployed) and, when a
+	// checkpoint from an interrupted run is present, resume the play: skip
+	// completed tasks and restore registered vars.
+	playArgs := []string{"-i", inventoryPath}
+	if resume := resumeArgs(r.JobDir); resume != nil {
+		log.Printf("Resuming play at task %q (restoring checkpointed vars)", resume[1])
+		playArgs = append(playArgs, resume...)
+	}
+	playArgs = append(playArgs, playbookPath)
+
+	cmd := exec.Command("ansible-playbook", playArgs...)
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
+	cmd.Env = append(cmd.Env, checkpointEnv(r.JobDir)...)
 
 	// Append (not truncate): on a resume after interruption this preserves the
 	// earlier output and keeps the log syncer's byte cursor valid; the resumed

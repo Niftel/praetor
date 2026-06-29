@@ -38,6 +38,10 @@ WORKDIR /
 COPY --from=builder /praetor-executor /praetor-executor
 COPY --from=builder /praetor-host-runner /tmp/build/linux/praetor-host-runner
 
+# Ansible plugins shipped to target hosts at bootstrap (checkpoint callback for
+# task-level resume).
+COPY deployments/host-runner/plugins /tmp/build/plugins
+
 # Create the build directory for host-runner
 RUN mkdir -p /tmp/build/linux
 
