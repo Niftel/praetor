@@ -49,6 +49,9 @@ func (s *Scheduler) Start() {
 			if err := s.processPendingJobs(); err != nil {
 				log.Printf("Error processing jobs: %v", err)
 			}
+			if err := s.relayOutbox(); err != nil {
+				log.Printf("Error relaying outbox: %v", err)
+			}
 			if err := s.processSchedules(); err != nil {
 				log.Printf("Error processing schedules: %v", err)
 			}
@@ -240,12 +243,79 @@ func (s *Scheduler) processPendingJobs() error {
 			CreatedAt:      time.Now(),
 		}
 
-		log.Printf("Publishing ExecutionRequest for Job %d. Playbook: %s, PlaybookContent Length: %d", job.ID, manifest.Playbook, len(manifest.PlaybookContent))
-
-		if err := s.Publisher.PublishExecutionRequest(req); err != nil {
-			log.Printf("Failed to publish execution request for run %s: %v", runID, err)
+		// Enqueue the launch in the transactional outbox rather than publishing
+		// inline. Publishing inside the tx was a dual-write: a publish that
+		// succeeded before a failed commit would orphan a run, and a publish
+		// that failed after a successful commit would strand the job in
+		// 'queued' forever. The outbox row commits atomically with the run; the
+		// relay delivers it.
+		payload, err := json.Marshal(req)
+		if err != nil {
+			log.Printf("Failed to marshal execution request for run %s: %v", runID, err)
+			return err
 		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO execution_outbox (execution_run_id, payload) VALUES ($1, $2)`,
+			runID, payload,
+		); err != nil {
+			log.Printf("Failed to enqueue execution request for run %s: %v", runID, err)
+			return err
+		}
+		log.Printf("Enqueued ExecutionRequest for Job %d (run %s). Playbook: %s", job.ID, runID, manifest.Playbook)
+	}
 
+	return tx.Commit()
+}
+
+// relayOutbox publishes committed-but-unsent launches to the durable request
+// stream and marks them sent. FOR UPDATE SKIP LOCKED makes it safe to run from
+// multiple schedulers; the request stream's dedup window makes a re-publish
+// after a crash (sent on the bus but not yet marked) harmless.
+func (s *Scheduler) relayOutbox() error {
+	ctx := context.Background()
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	type outboxRow struct {
+		ID      int64           `db:"id"`
+		Payload json.RawMessage `db:"payload"`
+	}
+	var rows []outboxRow
+	if err := tx.SelectContext(ctx, &rows, `
+		SELECT id, payload FROM execution_outbox
+		WHERE status = 'pending'
+		ORDER BY id
+		FOR UPDATE SKIP LOCKED
+		LIMIT 50`); err != nil {
+		return fmt.Errorf("failed to select outbox rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	for _, row := range rows {
+		var req events.ExecutionRequest
+		if err := json.Unmarshal(row.Payload, &req); err != nil {
+			log.Printf("outbox: dropping unparseable row %d: %v", row.ID, err)
+			_, _ = tx.ExecContext(ctx, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
+			continue
+		}
+		if err := s.Publisher.PublishExecutionRequest(&req); err != nil {
+			// Leave the row pending so it is retried on the next tick.
+			log.Printf("outbox: publish failed for row %d (will retry): %v", row.ID, err)
+			_, _ = tx.ExecContext(ctx, `UPDATE execution_outbox SET attempts = attempts + 1 WHERE id = $1`, row.ID)
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE execution_outbox SET status = 'sent', sent_at = now(), attempts = attempts + 1 WHERE id = $1`,
+			row.ID,
+		); err != nil {
+			return fmt.Errorf("failed to mark outbox row %d sent: %w", row.ID, err)
+		}
 	}
 
 	return tx.Commit()

@@ -24,9 +24,20 @@ const (
 	StreamEvents          = "PRAETOR_EVENTS"
 	DurableConsumerEvents = "praetor-event-consumer"
 
+	// StreamRequests is a durable work-queue stream for job launches. Unlike
+	// core NATS (where a request published while no executor is connected is
+	// lost), a launch is retained until an executor consumes and acks it. A
+	// dedup window makes at-least-once delivery from the scheduler's outbox
+	// relay safe: a re-published launch is stored once.
+	StreamRequests          = "PRAETOR_REQUESTS"
+	DurableConsumerExecutor = "praetor-executor"
+
 	// eventRetention bounds how long undelivered events are retained in the
 	// stream. It must comfortably exceed any expected control-plane outage.
 	eventRetention = 72 * time.Hour
+	// requestDedup is the JetStream duplicate-suppression window keyed on the
+	// execution_run_id message id.
+	requestDedup = 5 * time.Minute
 )
 
 type NatsBus struct {
@@ -73,38 +84,59 @@ func (b *NatsBus) Close() {
 	b.Conn.Close()
 }
 
-// ensureStreams creates (or reconciles) the durable, file-backed stream that
-// captures every job event and log chunk published to the bus.
+// ensureStreams creates (or reconciles) the durable, file-backed streams that
+// back the event pipeline and the job-launch queue.
 func (b *NatsBus) ensureStreams() error {
-	cfg := &nats.StreamConfig{
-		Name:      StreamEvents,
-		Subjects:  []string{SubjectJobEvent, SubjectLogChunk},
-		Storage:   nats.FileStorage,
-		Retention: nats.LimitsPolicy,
-		MaxAge:    eventRetention,
-		Replicas:  1, // raise to 3 on a clustered deployment
+	streams := []*nats.StreamConfig{
+		{
+			Name:      StreamEvents,
+			Subjects:  []string{SubjectJobEvent, SubjectLogChunk},
+			Storage:   nats.FileStorage,
+			Retention: nats.LimitsPolicy,
+			MaxAge:    eventRetention,
+			Replicas:  1, // raise to 3 on a clustered deployment
+		},
+		{
+			Name:       StreamRequests,
+			Subjects:   []string{SubjectExecutionRequest},
+			Storage:    nats.FileStorage,
+			Retention:  nats.WorkQueuePolicy, // a launch is removed once an executor acks it
+			MaxAge:     eventRetention,
+			Duplicates: requestDedup,
+			Replicas:   1,
+		},
 	}
 
-	if _, err := b.JS.StreamInfo(StreamEvents); err != nil {
-		if _, err := b.JS.AddStream(cfg); err != nil {
-			return fmt.Errorf("create stream %s: %w", StreamEvents, err)
+	for _, cfg := range streams {
+		if _, err := b.JS.StreamInfo(cfg.Name); err != nil {
+			if _, err := b.JS.AddStream(cfg); err != nil {
+				return fmt.Errorf("create stream %s: %w", cfg.Name, err)
+			}
+			log.Printf("[nats] created durable JetStream stream %s (subjects=%v)", cfg.Name, cfg.Subjects)
+			continue
 		}
-		log.Printf("[nats] created durable JetStream stream %s (subjects=%v)", StreamEvents, cfg.Subjects)
-		return nil
-	}
-	if _, err := b.JS.UpdateStream(cfg); err != nil {
-		return fmt.Errorf("update stream %s: %w", StreamEvents, err)
+		if _, err := b.JS.UpdateStream(cfg); err != nil {
+			return fmt.Errorf("update stream %s: %w", cfg.Name, err)
+		}
 	}
 	return nil
 }
 
 // -- Publisher Implementation --
 
-// PublishExecutionRequest dispatches a job to executors. This remains a core
-// (non-durable) NATS publish; durable launch delivery is tracked separately as
-// a follow-up (outbox pattern) and is out of scope for the event pipeline.
+// PublishExecutionRequest durably enqueues a job launch. It publishes through
+// JetStream with the execution_run_id as the dedup message id, so the
+// scheduler's outbox relay can republish on retry without ever enqueuing the
+// same launch twice (within the dedup window).
 func (b *NatsBus) PublishExecutionRequest(req *events.ExecutionRequest) error {
-	return b.Enc.Publish(SubjectExecutionRequest, req)
+	data, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal execution request: %w", err)
+	}
+	if _, err := b.JS.Publish(SubjectExecutionRequest, data, nats.MsgId(req.ExecutionRunID.String())); err != nil {
+		return fmt.Errorf("jetstream publish execution request: %w", err)
+	}
+	return nil
 }
 
 // PublishJobEvent publishes through JetStream and blocks for the stream's
@@ -135,12 +167,32 @@ func (b *NatsBus) PublishLogChunk(chunk *events.LogChunk) error {
 
 // -- Subscriber Implementation --
 
+// SubscribeToExecutionRequests binds a durable, manual-ack work-queue consumer
+// and returns a channel of launches. The interface is unchanged for callers, but
+// delivery is now durable: a launch survives the executor being offline and is
+// redelivered until acknowledged. The message is acked once it has been handed
+// to a local worker (ack-on-receipt) — a crash before completion is recovered by
+// the scheduler's stale-run reconciliation rather than by redelivery, which
+// avoids double-bootstrapping a host. The queue group still load-balances across
+// executors.
 func (b *NatsBus) SubscribeToExecutionRequests() (<-chan events.ExecutionRequest, error) {
 	ch := make(chan events.ExecutionRequest, 100)
-	// Queue Subscribe ensures load balancing if we run multiple executors.
-	_, err := b.Enc.QueueSubscribe(SubjectExecutionRequest, QueueGroupExecutor, func(req *events.ExecutionRequest) {
-		ch <- *req
-	})
+	_, err := b.JS.QueueSubscribe(SubjectExecutionRequest, QueueGroupExecutor, func(msg *nats.Msg) {
+		var req events.ExecutionRequest
+		if err := json.Unmarshal(msg.Data, &req); err != nil {
+			log.Printf("[executor] terminating undecodable execution request: %v", err)
+			_ = msg.Term()
+			return
+		}
+		ch <- req // backpressure: blocks (extending ack via AckWait) if workers are saturated
+		_ = msg.Ack()
+	},
+		nats.Durable(DurableConsumerExecutor),
+		nats.ManualAck(),
+		nats.AckExplicit(),
+		nats.DeliverAll(),
+		nats.AckWait(60*time.Second),
+	)
 	if err != nil {
 		return nil, err
 	}
