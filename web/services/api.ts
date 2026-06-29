@@ -1,0 +1,191 @@
+const API_BASE = '/api/v1';
+
+export const getAuthToken = () => localStorage.getItem('praetor_token');
+export const setAuthToken = (token: string) => localStorage.setItem('praetor_token', token);
+export const removeAuthToken = () => localStorage.removeItem('praetor_token');
+
+export const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
+    const token = getAuthToken();
+    const headers = new Headers(options.headers || {});
+
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    headers.set('Content-Type', 'application/json');
+
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+    });
+
+    if (response.status === 401) {
+        removeAuthToken();
+        window.location.href = '/login';
+        throw new Error('Unauthorized');
+    }
+
+    if (!response.ok) {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || errorData.message || 'API request failed');
+        }
+        throw new Error(response.statusText || 'API request failed');
+    }
+
+    return response;
+};
+
+export const api = {
+    // Auth
+    login: async (credentials: any) => {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(credentials)
+        });
+        if (!res.ok) throw new Error('Login failed');
+        return res.json();
+    },
+
+    // Jobs
+    getJobs: () => fetchWithAuth('/jobs').then(r => r.json()),
+    launchJob: (data: any) => fetchWithAuth('/jobs', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+
+    // Dashboard Stats (derived from jobs for now)
+    getDashboardStats: async () => {
+        const jobs = await fetchWithAuth('/jobs').then(r => r.json());
+        // Calculate stats on the fly or fetch from a dedicated endpoint if you have one
+        return jobs;
+    },
+
+    // Templates
+    getTemplates: () => fetchWithAuth('/job-templates').then(r => r.json()),
+    createTemplate: (data: any) => fetchWithAuth('/job-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteTemplate: (id: number) => fetchWithAuth(`/job-templates/${id}`, { method: 'DELETE' }),
+
+    // Projects
+    getProjects: () => fetchWithAuth('/projects').then(r => r.json()),
+    createProject: (data: any) => fetchWithAuth('/projects', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    syncProject: (id: number) => fetchWithAuth(`/projects/${id}/sync`, { method: 'POST' }),
+
+    // Logs
+    getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
+
+    // Infrastructure
+    getInstances: () => fetchWithAuth('/instances').then(r => r.json()),
+    createInstance: (data: any) => fetchWithAuth('/instances', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateInstance: (id: number, data: any) => fetchWithAuth(`/instances/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteInstance: (id: number) => fetchWithAuth(`/instances/${id}`, { method: 'DELETE' }),
+
+    getInstanceGroups: () => fetchWithAuth('/instance_groups').then(r => r.json()),
+    createInstanceGroup: (data: any) => fetchWithAuth('/instance_groups', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteInstanceGroup: (id: number) => fetchWithAuth(`/instance_groups/${id}`, { method: 'DELETE' }),
+
+    // Inventories
+    getInventories: () => fetchWithAuth('/inventories').then(r => r.json()),
+    getInventory: (id: number) => fetchWithAuth(`/inventories/${id}`).then(r => r.json()),
+    createInventory: (data: any) => fetchWithAuth('/inventories', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateInventory: (id: number, data: any) => fetchWithAuth(`/inventories/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteInventory: (id: number) => fetchWithAuth(`/inventories/${id}`, { method: 'DELETE' }),
+    importInventory: (inventoryId: number, content: string, format: 'ini' | 'yaml') =>
+        fetchWithAuth(`/inventories/${inventoryId}/import`, {
+            method: 'POST',
+            body: JSON.stringify({ content, format })
+        }).then(r => r.json()),
+
+    // Hosts (nested under inventories)
+    getHosts: (inventoryId: number) => fetchWithAuth(`/inventories/${inventoryId}/hosts`).then(r => r.json()),
+    getHost: (hostId: number) => fetchWithAuth(`/hosts/${hostId}`).then(r => r.json()),
+    createHost: (inventoryId: number, data: any) => fetchWithAuth(`/inventories/${inventoryId}/hosts`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateHost: (hostId: number, data: any) => fetchWithAuth(`/hosts/${hostId}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteHost: (hostId: number) => fetchWithAuth(`/hosts/${hostId}`, { method: 'DELETE' }),
+    setRunnerHost: (hostId: number) => fetchWithAuth(`/hosts/${hostId}/set-runner`, { method: 'POST' }).then(r => r.json()),
+
+    // Groups (nested under inventories)
+    getGroups: (inventoryId: number) => fetchWithAuth(`/inventories/${inventoryId}/groups`).then(r => r.json()),
+    getGroup: (groupId: number) => fetchWithAuth(`/groups/${groupId}`).then(r => r.json()),
+    createGroup: (inventoryId: number, data: any) => fetchWithAuth(`/inventories/${inventoryId}/groups`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateGroup: (groupId: number, data: any) => fetchWithAuth(`/groups/${groupId}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteGroup: (groupId: number) => fetchWithAuth(`/groups/${groupId}`, { method: 'DELETE' }),
+    getGroupHosts: (groupId: number) => fetchWithAuth(`/groups/${groupId}/hosts`).then(r => r.json()),
+    addHostToGroup: (groupId: number, hostId: number) => fetchWithAuth(`/groups/${groupId}/hosts`, { method: 'POST', body: JSON.stringify({ host_id: hostId }) }),
+    removeHostFromGroup: (groupId: number, hostId: number) => fetchWithAuth(`/groups/${groupId}/hosts/${hostId}`, { method: 'DELETE' }),
+    getHostGroups: (hostId: number) => fetchWithAuth(`/hosts/${hostId}/groups`).then(r => r.json()),
+
+    // Credentials
+    getCredentials: () => fetchWithAuth('/credentials').then(r => r.json()),
+    getCredential: (id: number) => fetchWithAuth(`/credentials/${id}`).then(r => r.json()),
+    createCredential: (data: any) => fetchWithAuth('/credentials', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateCredential: (id: number, data: any) => fetchWithAuth(`/credentials/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteCredential: (id: number) => fetchWithAuth(`/credentials/${id}`, { method: 'DELETE' }),
+    getCredentialTypes: () => fetchWithAuth('/credential-types').then(r => r.json()),
+
+    // Schedules
+    getSchedules: () => fetchWithAuth('/schedules').then(r => r.json()),
+    getSchedule: (id: number) => fetchWithAuth(`/schedules/${id}`).then(r => r.json()),
+    createSchedule: (data: any) => fetchWithAuth('/schedules', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateSchedule: (id: number, data: any) => fetchWithAuth(`/schedules/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteSchedule: (id: number) => fetchWithAuth(`/schedules/${id}`, { method: 'DELETE' }),
+
+    // Users
+    getUsers: () => fetchWithAuth('/users').then(r => r.json()),
+    getUser: (id: number) => fetchWithAuth(`/users/${id}`).then(r => r.json()),
+    createUser: (data: any) => fetchWithAuth('/users', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateUser: (id: number, data: any) => fetchWithAuth(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteUser: (id: number) => fetchWithAuth(`/users/${id}`, { method: 'DELETE' }),
+
+    // Teams
+    getTeams: () => fetchWithAuth('/teams').then(r => r.json()),
+    getTeam: (id: number) => fetchWithAuth(`/teams/${id}`).then(r => r.json()),
+    createTeam: (data: any) => fetchWithAuth('/teams', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateTeam: (id: number, data: any) => fetchWithAuth(`/teams/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteTeam: (id: number) => fetchWithAuth(`/teams/${id}`, { method: 'DELETE' }),
+    getTeamMembers: (teamId: number) => fetchWithAuth(`/teams/${teamId}/members`).then(r => r.json()),
+    addTeamMember: (teamId: number, userId: number) => fetchWithAuth(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+    removeTeamMember: (teamId: number, userId: number) => fetchWithAuth(`/teams/${teamId}/members/${userId}`, { method: 'DELETE' }),
+
+    // Roles (AWX-style)
+    getRoles: () => fetchWithAuth('/roles').then(r => r.json()),
+    getRole: (id: number) => fetchWithAuth(`/roles/${id}`).then(r => r.json()),
+    getRoleUsers: (roleId: number) => fetchWithAuth(`/roles/${roleId}/users`).then(r => r.json()),
+    addRoleUser: (roleId: number, userId: number) => fetchWithAuth(`/roles/${roleId}/users`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+    removeRoleUser: (roleId: number, userId: number) => fetchWithAuth(`/roles/${roleId}/users/${userId}`, { method: 'DELETE' }),
+    getRoleTeams: (roleId: number) => fetchWithAuth(`/roles/${roleId}/teams`).then(r => r.json()),
+    addRoleTeam: (roleId: number, teamId: number) => fetchWithAuth(`/roles/${roleId}/teams`, { method: 'POST', body: JSON.stringify({ team_id: teamId }) }),
+    removeRoleTeam: (roleId: number, teamId: number) => fetchWithAuth(`/roles/${roleId}/teams/${teamId}`, { method: 'DELETE' }),
+
+    // Organizations
+    getOrganizations: () => fetchWithAuth('/organizations').then(r => r.json()),
+    getOrganization: (id: number) => fetchWithAuth(`/organizations/${id}`).then(r => r.json()),
+    createOrganization: (data: any) => fetchWithAuth('/organizations', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateOrganization: (id: number, data: any) => fetchWithAuth(`/organizations/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteOrganization: (id: number) => fetchWithAuth(`/organizations/${id}`, { method: 'DELETE' }),
+    getOrganizationUsers: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/users`).then(r => r.json()),
+    addOrganizationUser: (orgId: number, userId: number) => fetchWithAuth(`/organizations/${orgId}/users`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+    removeOrganizationUser: (orgId: number, userId: number) => fetchWithAuth(`/organizations/${orgId}/users/${userId}`, { method: 'DELETE' }),
+    getOrganizationAdmins: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/admins`).then(r => r.json()),
+    addOrganizationAdmin: (orgId: number, userId: number) => fetchWithAuth(`/organizations/${orgId}/admins`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+    getOrganizationTeams: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/teams`).then(r => r.json()),
+    getOrganizationRoles: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/object_roles`).then(r => r.json()),
+
+    // User relationships
+    getUserOrganizations: (userId: number) => fetchWithAuth(`/users/${userId}/organizations`).then(r => r.json()),
+    getUserTeams: (userId: number) => fetchWithAuth(`/users/${userId}/teams`).then(r => r.json()),
+    getUserRoles: (userId: number) => fetchWithAuth(`/users/${userId}/roles`).then(r => r.json()),
+
+    // Legacy role bindings (kept for backwards compat)
+    getRoleBindings: () => fetchWithAuth('/role_bindings').then(r => r.json()),
+    createRoleBinding: (data: any) => fetchWithAuth('/role_bindings', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteRoleBinding: (id: number) => fetchWithAuth(`/role_bindings/${id}`, { method: 'DELETE' }),
+
+    // LDAP Configuration
+    getLdapConfig: () => fetchWithAuth('/ldap/config').then(r => r.json()),
+    testLdapConnection: () => fetchWithAuth('/ldap/test-connection', { method: 'POST' }).then(r => r.json()),
+    triggerLdapSync: () => fetchWithAuth('/ldap/sync', { method: 'POST' }).then(r => r.json()),
+    getLdapSyncStatus: () => fetchWithAuth('/ldap/sync/status').then(r => r.json()),
+    getLdapSyncDetails: (id: number) => fetchWithAuth(`/ldap/sync/${id}`).then(r => r.json()),
+};
+
+
