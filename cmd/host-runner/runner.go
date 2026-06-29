@@ -79,6 +79,12 @@ func (r *Runner) Execute() error {
 			return fmt.Errorf("git clone failed: %v, output: %s", err, string(out))
 		}
 
+		// Install the project's Ansible Galaxy requirements (roles/collections)
+		// into project-adjacent paths before running the play.
+		if err := installGalaxyRequirements(projectDir, galaxyEnv(req.JobManifest.GalaxyServers)); err != nil {
+			return fmt.Errorf("galaxy requirements: %w", err)
+		}
+
 		// Adjust playbook path relative to connection?
 		// If req.JobManifest.Playbook is "site.yml", it's now "project/site.yml"
 		if req.JobManifest.Playbook != "" {
