@@ -1,8 +1,14 @@
 services:
   nats:
     image: nats:latest
+    # Enable JetStream with file-based persistence so job events survive a
+    # consumer/DB outage (and a NATS restart) and can be replayed.
+    command: ["-js", "-sd", "/data"]
     ports:
       - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
     networks:
       - praetor-net
 
@@ -213,3 +219,6 @@ services:
 networks:
   praetor-net:
     driver: bridge
+
+volumes:
+  nats-data:

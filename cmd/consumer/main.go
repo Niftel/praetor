@@ -5,19 +5,9 @@ import (
 	"os"
 
 	"github.com/praetordev/praetor/pkg/db"
-	"github.com/praetordev/praetor/pkg/events"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/consumer/core"
 )
-
-// NOOPSubscriber for bootstrapping
-type NOOPSubscriber struct {
-	ch chan events.JobEvent
-}
-
-func (s *NOOPSubscriber) SubscribeToJobEvents() (<-chan events.JobEvent, error) {
-	return s.ch, nil
-}
 
 func main() {
 	log.Println("Starting Event Consumer Service...")
