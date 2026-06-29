@@ -1,2 +1,37 @@
-
+# Secrets / keys
 keys
+*.pem
+.env
+web/.env.local
+
+# Compiled service binaries (rebuild via `make build`)
+/main
+/api
+/consumer
+/controller
+/temp_controller
+/executor
+/host-runner
+/ingestion
+/migrator
+/scheduler
+/praetor-host-runner-linux
+/build/praetor-host-runner
+/build/linux/
+/bin/
+
+# Logs
+*.log
+executor_logs.txt
+
+# Frontend
+node_modules/
+web/dist/
+*.zip
+
+# Local backups (recoverable from git history)
+web_backup_v1/
+web_config_backup/
+
+# OS / editor cruft
+.DS_Store
