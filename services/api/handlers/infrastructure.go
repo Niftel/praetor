@@ -40,7 +40,42 @@ func (rs *InfrastructureResource) Routes() chi.Router {
 		r.Delete("/", rs.DeleteInstanceGroup)
 	})
 
+	// Execution targets: the runner hosts jobs bootstrap onto, with the health
+	// the host-runner reports via /hosts/{id}/runner-heartbeat.
+	r.Get("/infrastructure/runner-hosts", rs.ListRunnerHosts)
+
 	return r
+}
+
+// RunnerHostView is a runner host (an execution target) plus its owning
+// inventory's name, for the infrastructure view.
+type RunnerHostView struct {
+	ID             int64      `db:"id" json:"id"`
+	Name           string     `db:"name" json:"name"`
+	InventoryID    int64      `db:"inventory_id" json:"inventory_id"`
+	InventoryName  string     `db:"inventory_name" json:"inventory_name"`
+	Enabled        bool       `db:"enabled" json:"enabled"`
+	IsRunnerHost   bool       `db:"is_runner_host" json:"is_runner_host"`
+	RunnerHealthy  bool       `db:"runner_healthy" json:"runner_healthy"`
+	RunnerLastSeen *time.Time `db:"runner_last_seen" json:"runner_last_seen"`
+}
+
+// ListRunnerHosts returns the hosts designated as job runners across all
+// inventories, with their last reported health. This is the operationally
+// useful half of the infrastructure view: where jobs actually execute.
+func (rs *InfrastructureResource) ListRunnerHosts(w http.ResponseWriter, r *http.Request) {
+	hosts := []RunnerHostView{}
+	if err := rs.DB.SelectContext(r.Context(), &hosts, `
+		SELECT h.id, h.name, h.inventory_id, i.name AS inventory_name,
+		       h.enabled, h.is_runner_host, h.runner_healthy, h.runner_last_seen
+		FROM hosts h
+		JOIN inventories i ON i.id = h.inventory_id
+		WHERE h.is_runner_host = true
+		ORDER BY h.runner_last_seen DESC NULLS LAST, h.name`); err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	render.JSON(w, r, hosts)
 }
 
 // --- Instances ---

@@ -407,9 +407,10 @@ func (s *Scheduler) processTimedOutJobs() error {
 	// running a long time; it is declared lost only when its liveness signal
 	// disappears. The host-runner stamps execution_runs.last_heartbeat_at every
 	// ~30s during execution, so:
-	lostHeartbeatGrace := 2 * time.Minute // ~4 missed heartbeats
-	startGrace := 5 * time.Minute         // running but never heartbeated
-	queuedTimeout := 10 * time.Minute     // never picked up by an executor
+	lostHeartbeatGrace := 2 * time.Minute  // ~4 missed heartbeats
+	startGrace := 5 * time.Minute          // running but never heartbeated
+	queuedTimeout := 10 * time.Minute      // never picked up by an executor
+	deadInstanceGrace := 15 * time.Minute  // control-plane node gone; drop its row
 
 	// 1. Lost runs: a running run whose heartbeat went stale, or that started
 	// but never reported in within the start grace. Mark the run 'lost' and its
@@ -461,6 +462,23 @@ func (s *Scheduler) processTimedOutJobs() error {
 		log.Printf("Error reconciling stuck queued jobs: %v", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
 		log.Printf("Marked %d queued jobs as failed (never started)", rows)
+	}
+
+	// 3. Reap dead control-plane instances. Instances register under their
+	// container/host id and heartbeat every ~30s; on rebuild a new id registers
+	// and the old row would otherwise linger forever as a dead entry. Drop any
+	// that have not heartbeated in well beyond the heartbeat interval — a node
+	// that returns simply re-registers.
+	result, err = s.DB.ExecContext(ctx, `
+		DELETE FROM instances
+		WHERE last_heartbeat IS NOT NULL
+		  AND last_heartbeat < now() - $1::interval`,
+		fmt.Sprintf("%d seconds", int(deadInstanceGrace.Seconds())),
+	)
+	if err != nil {
+		log.Printf("Error reaping dead instances: %v", err)
+	} else if rows, _ := result.RowsAffected(); rows > 0 {
+		log.Printf("Reaped %d dead instance(s) (stale heartbeat)", rows)
 	}
 
 	return nil
