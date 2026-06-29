@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
@@ -41,6 +42,8 @@ func (r *Runner) Execute() error {
 	if err := json.Unmarshal(manifestBytes, &req); err != nil {
 		return fmt.Errorf("failed to parse manifest: %w", err)
 	}
+
+	defer r.Wal.Close()
 
 	log.Printf("Executing run %s (Job %d)", req.ExecutionRunID, req.UnifiedJobID)
 
@@ -245,30 +248,53 @@ func (r *Runner) sendHeartbeat(hostID int64, apiURL string) {
 	}
 }
 
-// WAL represents the Write-Ahead Log
+// WAL is an append-only, fsync'd write-ahead log of job events. On the host it
+// is the primary source of truth during a control-plane outage, so every append
+// is flushed to stable storage before returning and each record is written in a
+// single syscall (line + newline together) so a concurrent reader — the syncer —
+// never observes a half-written record.
 type WAL struct {
-	Path string
+	mu   sync.Mutex
+	path string
+	f    *os.File
 }
 
 func NewWAL(path string) *WAL {
-	return &WAL{Path: path}
+	w := &WAL{path: path}
+	w.f, _ = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	return w
 }
 
 func (w *WAL) Append(evt *events.JobEvent) error {
-	f, err := os.OpenFile(w.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
 	data, err := json.Marshal(evt)
 	if err != nil {
 		return err
 	}
+	data = append(data, '\n')
 
-	if _, err := f.Write(data); err != nil {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.f == nil {
+		if w.f, err = os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err != nil {
+			return err
+		}
+	}
+
+	if _, err := w.f.Write(data); err != nil {
 		return err
 	}
-	_, err = f.WriteString("\n")
+	// fsync: a host crash must not lose an event the runner believes is durable.
+	return w.f.Sync()
+}
+
+func (w *WAL) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.f == nil {
+		return nil
+	}
+	err := w.f.Close()
+	w.f = nil
 	return err
 }
