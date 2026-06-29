@@ -15,6 +15,8 @@ build:
 	go build -o $(INGESTION_BINARY) ./cmd/ingestion
 	go build -o $(BINARY_DIR)/praetor-consumer ./cmd/consumer
 	go build -o $(BINARY_DIR)/praetor-executor ./cmd/executor
+	# Build Host Runner for Linux (Target OS)
+	GOOS=linux GOARCH=amd64 go build -o build/linux/praetor-host-runner ./cmd/host-runner
 	@echo "Build complete."
 
 test:
@@ -44,7 +46,7 @@ run-scheduler:
 	DATABASE_URL=$(DB_URL) go run ./cmd/scheduler
 
 run-controller:
-	DATABASE_URL=$(DB_URL) go run ./cmd/controller
+	PRAETOR_ORCHESTRATOR=docker PRAETOR_PROJECT_DIR=$(shell pwd)/playbooks_repo DATABASE_URL=$(DB_URL) go run ./cmd/controller
 
 run-ingestion:
 	DATABASE_URL=$(DB_URL) INGESTION_PORT=8081 go run ./cmd/ingestion

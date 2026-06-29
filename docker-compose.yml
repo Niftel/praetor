@@ -22,6 +22,27 @@ services:
     networks:
       - praetor-net
 
+  # Mock LDAP server for testing
+  ldap:
+    image: osixia/openldap:1.5.0
+    environment:
+      LDAP_ORGANISATION: "Praetor Demo"
+      LDAP_DOMAIN: "praetor.local"
+      LDAP_BASE_DN: "dc=praetor,dc=local"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_CONFIG_PASSWORD: "config"
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: "readonly"
+      LDAP_READONLY_USER_PASSWORD: "readonly"
+      LDAP_SEED_INTERNAL_LDIF_PATH: "/tmp/ldif"
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./deployments/ldap/bootstrap.ldif:/tmp/ldif/bootstrap.ldif:ro
+    networks:
+      - praetor-net
+
   migrator:
     build:
       context: .
@@ -37,13 +58,35 @@ services:
     # Run once and exit
     restart: on-failure
 
+  ingestion:
+    build:
+      context: .
+      dockerfile: build/package/Dockerfile.ingestion
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
+      INGESTION_PORT: 8081
+      NATS_URL: nats://nats:4222
+    ports:
+      - "8090:8081"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    networks:
+      - praetor-net
+
   api:
     build:
       context: .
       dockerfile: build/package/Dockerfile.api
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
+      JWT_SECRET: "praetor-prod-secret-2025-secure-key-9Xv2" # In prod use .env
       PORT: 8080
+      PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
+    volumes:
+      - ./deployments/ldap/ldap-config.yaml:/etc/praetor/ldap.yaml:ro
     ports:
       - "8080:8080"
     depends_on:
@@ -51,6 +94,8 @@ services:
         condition: service_completed_successfully
       db:
         condition: service_healthy
+      ldap:
+        condition: service_started
     networks:
       - praetor-net
 
@@ -61,6 +106,10 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       NATS_URL: nats://nats:4222
+      PRAETOR_PROJECT_DIR: /tmp/project
+      API_URL: http://api:8080
+    volumes:
+      - ./:/tmp/project:ro
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -75,11 +124,14 @@ services:
       dockerfile: build/package/Dockerfile.executor
     environment:
       NATS_URL: nats://nats:4222
+      INGESTION_URL: http://ingestion:8081
       EXECUTOR_WORKERS: 2
       ANSIBLE_FORKS: 1
     shm_size: 1gb
     volumes:
       - ./keys:/tmp/keys:ro
+      - ./build:/tmp/build:ro
+      - ./praetor-host-runner-linux:/tmp/build/linux/praetor-host-runner:ro
     depends_on:
       nats:
         condition: service_started
@@ -91,7 +143,7 @@ services:
     image: alpine:3.19
     hostname: web1
     command: >
-      /bin/sh -c "apk add --no-cache openssh python3 sudo && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && adduser -D praetor && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
+      /bin/sh -c "apk add --no-cache openssh python3 sudo ansible git && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && (adduser -D praetor || true) && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
     volumes:
       - ./keys:/tmp/keys:ro
     networks:
@@ -103,7 +155,7 @@ services:
     image: alpine:3.19
     hostname: web2
     command: >
-      /bin/sh -c "apk add --no-cache openssh python3 sudo && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && adduser -D praetor && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
+      /bin/sh -c "apk add --no-cache openssh python3 sudo ansible git && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && (adduser -D praetor || true) && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
     volumes:
       - ./keys:/tmp/keys:ro
     networks:
@@ -115,7 +167,7 @@ services:
     image: alpine:3.19
     hostname: db1
     command: >
-      /bin/sh -c "apk add --no-cache openssh python3 sudo && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && adduser -D praetor && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
+      /bin/sh -c "apk add --no-cache openssh python3 sudo ansible git && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && (adduser -D praetor || true) && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
     volumes:
       - ./keys:/tmp/keys:ro
     networks:
