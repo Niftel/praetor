@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
+	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/registration"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/executor/core"
 )
@@ -24,8 +27,18 @@ func main() {
 	}
 	defer bus.Close()
 
-	// runner := &core.MockRunner{}
-	runner := core.NewAnsibleRunner()
+	// Determine Publisher (HTTP or NATS)
+	var publisher core.EventPublisher = bus
+	ingestionURL := os.Getenv("INGESTION_URL")
+	if ingestionURL != "" {
+		log.Printf("Using HTTP Ingestion Publisher at %s", ingestionURL)
+		publisher = core.NewHttpEventPublisher(ingestionURL)
+	} else {
+		log.Println("Using NATS Event Publisher")
+	}
+
+	// 4. Create Runner (Bootstrap Mode)
+	runner := core.NewBootstrapRunner()
 
 	// Check for One-Shot Mode
 	if os.Getenv("PRAETOR_MODE") == "oneshot" {
@@ -54,7 +67,7 @@ func main() {
 
 		go func() {
 			for evt := range eventChan {
-				if err := bus.PublishJobEvent(&evt); err != nil {
+				if err := publisher.PublishJobEvent(&evt); err != nil {
 					log.Printf("Failed to publish event: %v", err)
 				}
 			}
@@ -74,10 +87,30 @@ func main() {
 		return
 	}
 
-	// 2. Create Agent (Daemon Mode)
-	agent := core.NewAgent(bus, bus, runner)
+	// 2. Instance Registration (Daemon Mode only)
+	apiURL := os.Getenv("API_URL")
+	if apiURL == "" {
+		apiURL = "http://api:8080/api/v1"
+	}
+	regClient := registration.NewClient(registration.Config{
+		APIBaseURL:      apiURL,
+		InstanceType:    "executor",
+		Capacity:        100,
+		HeartbeatPeriod: 30 * time.Second,
+	})
 
-	// 3. Start
+	ctx := context.Background()
+	if err := regClient.Register(ctx); err != nil {
+		log.Printf("[registration] Failed to register (will retry): %v", err)
+	}
+	regClient.StartHeartbeat(ctx)
+	defer regClient.Stop()
+
+	// 3. Create Agent (Daemon Mode)
+	// We use NATS for Subscription (bus), and our selected publisher for Events
+	agent := core.NewAgent(bus, publisher, runner)
+
+	// 4. Start
 	if err := agent.Start(); err != nil {
 		log.Fatalf("Agent failed: %v", err)
 	}

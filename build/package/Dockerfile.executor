@@ -10,6 +10,9 @@ COPY . .
 
 RUN go build -o /praetor-executor ./cmd/executor
 
+# Build host-runner for Alpine Linux targets (static binary)
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' -o /praetor-host-runner ./cmd/host-runner
+
 # Run Stage
 FROM python:3.11-slim
 
@@ -33,6 +36,10 @@ RUN pip install --no-cache-dir --upgrade pip \
 WORKDIR /
 
 COPY --from=builder /praetor-executor /praetor-executor
+COPY --from=builder /praetor-host-runner /tmp/build/linux/praetor-host-runner
+
+# Create the build directory for host-runner
+RUN mkdir -p /tmp/build/linux
 
 # Create a non-root user
 RUN useradd -m -u 1000 praetor

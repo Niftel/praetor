@@ -89,19 +89,41 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		input.JobType = "run"
 	}
 
+	tx, err := rs.DB.Beginx()
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	defer tx.Rollback()
+
+	// 1. Insert into unified_job_templates to get ID
+	var ujtID int64
+	err = tx.QueryRowxContext(r.Context(), "INSERT INTO unified_job_templates (name) VALUES ($1) RETURNING id", input.Name).Scan(&ujtID)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	input.UnifiedJobTemplateID = &ujtID
+
+	// 2. Insert into job_templates
 	query := `
-		INSERT INTO job_templates (organization_id, name, description, playbook, playbook_content, project_id, inventory_id, job_type, verbosity) 
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+		INSERT INTO job_templates (organization_id, name, description, playbook, playbook_content, project_id, inventory_id, job_type, verbosity, unified_job_template_id, credential_id) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
 		RETURNING *`
 
 	var created models.JobTemplate
-	err := rs.DB.QueryRowxContext(r.Context(), query,
+	err = tx.QueryRowxContext(r.Context(), query,
 		input.OrganizationID, input.Name, input.Description,
 		input.Playbook, input.PlaybookContent, input.ProjectID, input.InventoryID,
-		input.JobType, input.Verbosity,
+		input.JobType, input.Verbosity, ujtID, input.CredentialID,
 	).StructScan(&created)
 
 	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -147,14 +169,14 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 	query := `
 		UPDATE job_templates 
 		SET name = $2, description = $3, playbook = $4, playbook_content = $5, 
-		    project_id = $6, verbosity = $7, inventory_id = $8, modified_at = now()
+		    project_id = $6, verbosity = $7, inventory_id = $8, credential_id = $9, modified_at = now()
 		WHERE id = $1 
 		RETURNING *`
 
 	var updated models.JobTemplate
 	err = rs.DB.QueryRowxContext(r.Context(), query,
 		id, input.Name, input.Description, input.Playbook,
-		input.PlaybookContent, input.ProjectID, input.Verbosity, input.InventoryID,
+		input.PlaybookContent, input.ProjectID, input.Verbosity, input.InventoryID, input.CredentialID,
 	).StructScan(&updated)
 
 	if err != nil {

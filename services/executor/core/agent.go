@@ -1,10 +1,12 @@
 package core
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
 )
@@ -84,7 +86,15 @@ func (a *Agent) processRequest(req events.ExecutionRequest) {
 	// Run the job (blocking for this worker)
 	if err := a.Runner.Run(&req, eventChan); err != nil {
 		log.Printf("Job run failed: %v", err)
-		// TODO: Emit JOB_FAILED event if runner didn't
+		// Emit JOB_FAILED event since runner didn't succeed
+		failMsg := fmt.Sprintf("Runner failed: %v", err)
+		eventChan <- events.JobEvent{
+			ExecutionRunID: req.ExecutionRunID,
+			UnifiedJobID:   req.UnifiedJobID,
+			EventType:      "JOB_FAILED",
+			Timestamp:      time.Now(),
+			StdoutSnippet:  &failMsg,
+		}
 	}
 	close(eventChan)
 }

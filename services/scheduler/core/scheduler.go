@@ -20,6 +20,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/teambition/rrule-go"
 )
 
 type Scheduler struct {
@@ -47,6 +48,15 @@ func (s *Scheduler) Start() {
 		case <-s.Ticker.C:
 			if err := s.processPendingJobs(); err != nil {
 				log.Printf("Error processing jobs: %v", err)
+			}
+			if err := s.relayOutbox(); err != nil {
+				log.Printf("Error relaying outbox: %v", err)
+			}
+			if err := s.processSchedules(); err != nil {
+				log.Printf("Error processing schedules: %v", err)
+			}
+			if err := s.processTimedOutJobs(); err != nil {
+				log.Printf("Error processing timed out jobs: %v", err)
 			}
 		}
 	}
@@ -95,7 +105,7 @@ func (s *Scheduler) processPendingJobs() error {
 
 		if err != nil {
 			log.Printf("Failed to create run for job %d: %v", job.ID, err)
-			continue
+			return err // Rollback
 		}
 
 		// 4. Update Job
@@ -106,7 +116,7 @@ func (s *Scheduler) processPendingJobs() error {
 
 		if err != nil {
 			log.Printf("Failed to update job %d: %v", job.ID, err)
-			continue
+			return err // Rollback
 		}
 
 		// 5. Resolve Project from Template - REQUIRES a template with a project
@@ -186,6 +196,34 @@ func (s *Scheduler) processPendingJobs() error {
 			pbContent = *template.PlaybookContent
 		}
 
+		// 7. Find the designated runner host for this inventory
+		var runnerHostName string
+		var runnerHostID int64
+		if template.InventoryID != nil {
+			var runnerHost models.Host
+			err = tx.GetContext(ctx, &runnerHost, `
+				SELECT * FROM hosts 
+				WHERE inventory_id = $1 AND is_runner_host = true AND enabled = true
+				LIMIT 1`, *template.InventoryID)
+			if err == nil {
+				runnerHostName = runnerHost.Name
+				runnerHostID = runnerHost.ID
+				log.Printf("Using runner host '%s' (ID %d) for job %d", runnerHostName, runnerHostID, job.ID)
+			} else {
+				// Fallback to first enabled host if no explicit runner host is set
+				var firstHost models.Host
+				err = tx.GetContext(ctx, &firstHost, `
+					SELECT * FROM hosts 
+					WHERE inventory_id = $1 AND enabled = true
+					ORDER BY id LIMIT 1`, *template.InventoryID)
+				if err == nil {
+					runnerHostName = firstHost.Name
+					runnerHostID = firstHost.ID
+					log.Printf("No runner host set - using first host '%s' (ID %d) for job %d", runnerHostName, runnerHostID, job.ID)
+				}
+			}
+		}
+
 		manifest := events.JobManifest{
 			Inventory:       inventoryContent,
 			ProjectURL:      projectURL,
@@ -193,6 +231,9 @@ func (s *Scheduler) processPendingJobs() error {
 			PlaybookContent: pbContent,
 			ExtraVars:       map[string]interface{}{},
 			EnvironmentRefs: []string{},
+			RunnerHost:      runnerHostName,
+			RunnerHostID:    runnerHostID,
+			APIURL:          os.Getenv("API_URL"),
 		}
 
 		req := &events.ExecutionRequest{
@@ -202,15 +243,226 @@ func (s *Scheduler) processPendingJobs() error {
 			CreatedAt:      time.Now(),
 		}
 
-		log.Printf("Publishing ExecutionRequest for Job %d. Playbook: %s, PlaybookContent Length: %d", job.ID, manifest.Playbook, len(manifest.PlaybookContent))
-
-		if err := s.Publisher.PublishExecutionRequest(req); err != nil {
-			log.Printf("Failed to publish execution request for run %s: %v", runID, err)
+		// Enqueue the launch in the transactional outbox rather than publishing
+		// inline. Publishing inside the tx was a dual-write: a publish that
+		// succeeded before a failed commit would orphan a run, and a publish
+		// that failed after a successful commit would strand the job in
+		// 'queued' forever. The outbox row commits atomically with the run; the
+		// relay delivers it.
+		payload, err := json.Marshal(req)
+		if err != nil {
+			log.Printf("Failed to marshal execution request for run %s: %v", runID, err)
+			return err
 		}
-
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO execution_outbox (execution_run_id, payload) VALUES ($1, $2)`,
+			runID, payload,
+		); err != nil {
+			log.Printf("Failed to enqueue execution request for run %s: %v", runID, err)
+			return err
+		}
+		log.Printf("Enqueued ExecutionRequest for Job %d (run %s). Playbook: %s", job.ID, runID, manifest.Playbook)
 	}
 
 	return tx.Commit()
+}
+
+// relayOutbox publishes committed-but-unsent launches to the durable request
+// stream and marks them sent. FOR UPDATE SKIP LOCKED makes it safe to run from
+// multiple schedulers; the request stream's dedup window makes a re-publish
+// after a crash (sent on the bus but not yet marked) harmless.
+func (s *Scheduler) relayOutbox() error {
+	ctx := context.Background()
+
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	type outboxRow struct {
+		ID      int64           `db:"id"`
+		Payload json.RawMessage `db:"payload"`
+	}
+	var rows []outboxRow
+	if err := tx.SelectContext(ctx, &rows, `
+		SELECT id, payload FROM execution_outbox
+		WHERE status = 'pending'
+		ORDER BY id
+		FOR UPDATE SKIP LOCKED
+		LIMIT 50`); err != nil {
+		return fmt.Errorf("failed to select outbox rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	for _, row := range rows {
+		var req events.ExecutionRequest
+		if err := json.Unmarshal(row.Payload, &req); err != nil {
+			log.Printf("outbox: dropping unparseable row %d: %v", row.ID, err)
+			_, _ = tx.ExecContext(ctx, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
+			continue
+		}
+		if err := s.Publisher.PublishExecutionRequest(&req); err != nil {
+			// Leave the row pending so it is retried on the next tick.
+			log.Printf("outbox: publish failed for row %d (will retry): %v", row.ID, err)
+			_, _ = tx.ExecContext(ctx, `UPDATE execution_outbox SET attempts = attempts + 1 WHERE id = $1`, row.ID)
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE execution_outbox SET status = 'sent', sent_at = now(), attempts = attempts + 1 WHERE id = $1`,
+			row.ID,
+		); err != nil {
+			return fmt.Errorf("failed to mark outbox row %d sent: %w", row.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Scheduler) processSchedules() error {
+	ctx := context.Background()
+
+	// Transaction
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Fetch due schedules with SKIP LOCKED
+	query := `
+		SELECT *
+		FROM schedules
+		WHERE enabled = true AND next_run <= NOW()
+		FOR UPDATE SKIP LOCKED
+		LIMIT 10`
+
+	var schedules []models.Schedule
+	if err := tx.SelectContext(ctx, &schedules, query); err != nil {
+		return fmt.Errorf("failed to select pending schedules: %w", err)
+	}
+
+	if len(schedules) == 0 {
+		return nil
+	}
+
+	for _, sched := range schedules {
+		log.Printf("Processing schedule %d (%s) due at %s", sched.ID, sched.Name, sched.NextRun)
+
+		// 2. Launch Job
+		var jobID int64
+		err := tx.QueryRowContext(ctx, `
+			INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at)
+			VALUES ($1, $2, 'pending', $3)
+			RETURNING id`,
+			sched.Name, sched.UnifiedJobTemplateID, time.Now(),
+		).Scan(&jobID)
+		if err != nil {
+			log.Printf("Failed to spawn job for schedule %d: %v", sched.ID, err)
+			continue
+		}
+		log.Printf("Spawned job %d from schedule %d", jobID, sched.ID)
+
+		// 3. (Skipped) We do NOT create execution_run here.
+		// The existing processPendingJobs loop picks up 'pending' jobs with no current_run_id and handles it.
+
+		// 5. Calculate Next Run
+		rule, err := rrule.StrToRRule(sched.RRule)
+		if err != nil {
+			log.Printf("Invalid RRule for schedule %d: %v", sched.ID, err)
+			// Disable it to stop error loop
+			_, _ = tx.ExecContext(ctx, "UPDATE schedules SET enabled = false WHERE id = $1", sched.ID)
+			continue
+		}
+
+		// rrule-go: rule.After(dt, inclusive)
+		next := rule.After(time.Now(), false)
+
+		log.Printf("Schedule %d next run: %s", sched.ID, next)
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE schedules 
+			SET next_run = $1, modified_at = NOW() 
+			WHERE id = $2`,
+			next, sched.ID)
+
+		if err != nil {
+			log.Printf("Failed to update schedule %d next_run: %v", sched.ID, err)
+			continue
+		}
+	}
+
+	return tx.Commit()
+}
+
+// processTimedOutJobs marks jobs that are stuck in running/queued state as failed.
+// This catches cases where the host-runner crashes silently without sending events.
+func (s *Scheduler) processTimedOutJobs() error {
+	ctx := context.Background()
+
+	// Heartbeat-aware reconciliation. A long-running job is NOT failed merely for
+	// running a long time; it is declared lost only when its liveness signal
+	// disappears. The host-runner stamps execution_runs.last_heartbeat_at every
+	// ~30s during execution, so:
+	lostHeartbeatGrace := 2 * time.Minute // ~4 missed heartbeats
+	startGrace := 5 * time.Minute         // running but never heartbeated
+	queuedTimeout := 10 * time.Minute     // never picked up by an executor
+
+	// 1. Lost runs: a running run whose heartbeat went stale, or that started
+	// but never reported in within the start grace. Mark the run 'lost' and its
+	// job 'error' in one statement.
+	result, err := s.DB.ExecContext(ctx, `
+		WITH lost AS (
+			UPDATE execution_runs er
+			SET state = 'lost', finished_at = now()
+			WHERE er.state = 'running'
+			  AND (
+			    (er.last_heartbeat_at IS NOT NULL AND er.last_heartbeat_at < now() - $1::interval)
+			    OR (er.last_heartbeat_at IS NULL AND er.started_at IS NOT NULL AND er.started_at < now() - $2::interval)
+			  )
+			RETURNING er.unified_job_id
+		)
+		UPDATE unified_jobs uj
+		SET status = 'error', finished_at = now()
+		FROM lost
+		WHERE uj.id = lost.unified_job_id
+		  AND uj.status NOT IN ('successful', 'failed', 'canceled', 'error')`,
+		fmt.Sprintf("%d seconds", int(lostHeartbeatGrace.Seconds())),
+		fmt.Sprintf("%d seconds", int(startGrace.Seconds())),
+	)
+	if err != nil {
+		log.Printf("Error reconciling lost runs: %v", err)
+	} else if rows, _ := result.RowsAffected(); rows > 0 {
+		log.Printf("Marked %d runs as lost (stale/absent heartbeat)", rows)
+	}
+
+	// 2. Queued too long: never picked up by an executor. With the durable
+	// outbox this should be rare, but it remains a safety net.
+	result, err = s.DB.ExecContext(ctx, `
+		WITH stuck AS (
+			UPDATE unified_jobs uj
+			SET status = 'failed', finished_at = now()
+			WHERE uj.status = 'queued'
+			  AND uj.current_run_id IS NOT NULL
+			  AND uj.created_at < now() - $1::interval
+			RETURNING uj.current_run_id
+		)
+		UPDATE execution_runs er
+		SET state = 'failed', finished_at = now()
+		FROM stuck
+		WHERE er.id = stuck.current_run_id
+		  AND er.state NOT IN ('successful', 'failed', 'canceled', 'lost')`,
+		fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())),
+	)
+	if err != nil {
+		log.Printf("Error reconciling stuck queued jobs: %v", err)
+	} else if rows, _ := result.RowsAffected(); rows > 0 {
+		log.Printf("Marked %d queued jobs as failed (never started)", rows)
+	}
+
+	return nil
 }
 
 func findFile(fs billy.Filesystem, path string) (billy.File, error) {

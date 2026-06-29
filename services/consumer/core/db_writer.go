@@ -18,6 +18,23 @@ func NewDBWriter(db *sqlx.DB) *DBWriter {
 	return &DBWriter{DB: db}
 }
 
+// WriteLogChunk indexes a log-chunk reference into job_output_chunks. The chunk
+// bytes already live durably in the object store; this row is the pointer. The
+// ON CONFLICT makes it idempotent so a redelivered or re-uploaded chunk is a
+// no-op, which is what lets the consumer ack-after-commit.
+func (w *DBWriter) WriteLogChunk(ctx context.Context, chunk events.LogChunk) error {
+	_, err := w.DB.ExecContext(ctx, `
+		INSERT INTO job_output_chunks (execution_run_id, seq, storage_key, byte_length, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (execution_run_id, seq) DO NOTHING`,
+		chunk.ExecutionRunID, chunk.Seq, chunk.StorageKey, chunk.ByteLength, chunk.Timestamp,
+	)
+	if err != nil {
+		return fmt.Errorf("insert job_output_chunk failed: %w", err)
+	}
+	return nil
+}
+
 // WriteEvent projects a JobEvent into the database.
 func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	tx, err := w.DB.BeginTxx(ctx, nil)
@@ -31,11 +48,16 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	// We need to map JobEvent fields to DB columns.
 	eventDataJSON, _ := json.Marshal(evt.EventData)
 
+	// ON CONFLICT makes the write idempotent: the (execution_run_id, seq) unique
+	// constraint means a redelivered or replayed event is silently skipped
+	// rather than failing the transaction. This is what allows the consumer to
+	// safely ack-after-commit and tolerate at-least-once delivery.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO job_events (
-			unified_job_id, execution_run_id, seq, event_type, 
+			unified_job_id, execution_run_id, seq, event_type,
 			host_id, task_name, play_name, event_data, stdout_snippet, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (execution_run_id, seq) DO NOTHING`,
 		evt.UnifiedJobID, evt.ExecutionRunID, evt.Seq, evt.EventType,
 		nil, evt.TaskName, evt.PlayName, eventDataJSON, evt.StdoutSnippet, evt.Timestamp,
 	)
@@ -75,44 +97,42 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 		return nil
 	}
 
-	// Update ExecutionRun
-	queryRun := `UPDATE execution_runs SET state = $1, last_event_seq = $2`
-	argsRun := []interface{}{newState, evt.Seq}
-
+	// Compute the finish timestamp only for terminal events; COALESCE keeps the
+	// earliest started_at / first finished_at across duplicate or replayed
+	// events.
+	var finishedAt interface{}
 	if finished {
-		queryRun += `, finished_at = $3 WHERE id = $4`
-		argsRun = append(argsRun, evt.Timestamp, evt.ExecutionRunID)
-	} else if newState == "running" {
-		queryRun += `, started_at = $3 WHERE id = $4`
-		argsRun = append(argsRun, evt.Timestamp, evt.ExecutionRunID)
-	} else {
-		queryRun += ` WHERE id = $3`
-		argsRun = append(argsRun, evt.ExecutionRunID)
+		finishedAt = evt.Timestamp
 	}
 
-	if _, err := tx.ExecContext(ctx, queryRun, argsRun...); err != nil {
+	// The `state NOT IN (<terminal>)` guard makes the projection monotonic: once
+	// a run is terminal we never overwrite it. Combined with COALESCE/GREATEST
+	// this means an out-of-order or replayed event (e.g. a redelivered
+	// JOB_STARTED arriving after JOB_COMPLETED) cannot regress final state — so
+	// there is never a "job succeeded but the DB says running/failed" outcome.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE execution_runs SET
+			state = $1,
+			started_at = COALESCE(started_at, $2),
+			finished_at = COALESCE(finished_at, $3),
+			last_event_seq = GREATEST(last_event_seq, $4)
+		WHERE id = $5
+		  AND state NOT IN ('successful', 'failed', 'canceled', 'lost')`,
+		newState, evt.Timestamp, finishedAt, evt.Seq, evt.ExecutionRunID,
+	); err != nil {
 		log.Printf("Failed to update execution_run %s: %v", evt.ExecutionRunID, err)
 		return err
 	}
 
-	// Update UnifiedJob
-	// Only update status if the execution_run matches current_run_id (optimistic check)
-	// But simpler: just update unified_job status based on this run's progress.
-	queryJob := `UPDATE unified_jobs SET status = $1`
-	argsJob := []interface{}{newStatus}
-
-	if finished {
-		queryJob += `, finished_at = $2 WHERE id = $3`
-		argsJob = append(argsJob, evt.Timestamp, evt.UnifiedJobID)
-	} else if newStatus == "running" {
-		queryJob += `, started_at = $2 WHERE id = $3`
-		argsJob = append(argsJob, evt.Timestamp, evt.UnifiedJobID)
-	} else {
-		queryJob += ` WHERE id = $2`
-		argsJob = append(argsJob, evt.UnifiedJobID)
-	}
-
-	if _, err := tx.ExecContext(ctx, queryJob, argsJob...); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE unified_jobs SET
+			status = $1,
+			started_at = COALESCE(started_at, $2),
+			finished_at = COALESCE(finished_at, $3)
+		WHERE id = $4
+		  AND status NOT IN ('successful', 'failed', 'canceled', 'error')`,
+		newStatus, evt.Timestamp, finishedAt, evt.UnifiedJobID,
+	); err != nil {
 		log.Printf("Failed to update unified_job %d: %v", evt.UnifiedJobID, err)
 		return err
 	}

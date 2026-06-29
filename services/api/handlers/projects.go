@@ -49,6 +49,8 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("DEBUG: CreateProject Input: %+v\n", input)
+
 	// Basic validation
 	if input.Name == "" || input.SCMURL == "" || input.OrganizationID == 0 {
 		render.ErrInvalidRequest(nil).Render(w, r)

@@ -199,7 +199,7 @@ func (rs *GroupsResource) AddHostToGroup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	query := `INSERT INTO host_group_mapping (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
+	query := `INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
 	_, err = rs.DB.ExecContext(r.Context(), query, input.HostID, groupId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -225,7 +225,7 @@ func (rs *GroupsResource) RemoveHostFromGroup(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	query := `DELETE FROM host_group_mapping WHERE host_id = $1 AND group_id = $2`
+	query := `DELETE FROM host_groups WHERE host_id = $1 AND group_id = $2`
 	_, err = rs.DB.ExecContext(r.Context(), query, hostId, groupId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -247,8 +247,8 @@ func (rs *GroupsResource) ListGroupHosts(w http.ResponseWriter, r *http.Request)
 	var hosts []models.Host
 	query := `
 		SELECT h.* FROM hosts h
-		JOIN host_group_mapping hgm ON h.id = hgm.host_id
-		WHERE hgm.group_id = $1
+		JOIN host_groups hg ON h.id = hg.host_id
+		WHERE hg.group_id = $1
 		ORDER BY h.name`
 	err = rs.DB.SelectContext(r.Context(), &hosts, query, groupId)
 	if err != nil {

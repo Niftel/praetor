@@ -7,16 +7,21 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 )
 
-type EventSubscriber interface {
-	SubscribeToJobEvents() (<-chan events.JobEvent, error)
+// EventConsumer delivers job events and log-chunk references to handlers and
+// acknowledges each one only when its handler returns nil. A non-nil return
+// keeps the message in the durable stream for redelivery, so the database is
+// the gate on acknowledgement.
+type EventConsumer interface {
+	ConsumeJobEvents(handler func(events.JobEvent) error) error
+	ConsumeLogChunks(handler func(events.LogChunk) error) error
 }
 
 type Consumer struct {
-	Subscriber EventSubscriber
+	Subscriber EventConsumer
 	Writer     *DBWriter
 }
 
-func NewConsumer(sub EventSubscriber, writer *DBWriter) *Consumer {
+func NewConsumer(sub EventConsumer, writer *DBWriter) *Consumer {
 	return &Consumer{
 		Subscriber: sub,
 		Writer:     writer,
@@ -24,22 +29,36 @@ func NewConsumer(sub EventSubscriber, writer *DBWriter) *Consumer {
 }
 
 func (c *Consumer) Start() error {
-	eventChan, err := c.Subscriber.SubscribeToJobEvents()
-	if err != nil {
+	log.Println("Consumer started, waiting for events...")
+
+	// The handler's error is the ack signal: returning nil acks the message,
+	// returning an error (e.g. the DB is unavailable) leaves it in the stream
+	// for redelivery once we recover.
+	if err := c.Subscriber.ConsumeJobEvents(func(evt events.JobEvent) error {
+		if err := c.processEvent(evt); err != nil {
+			log.Printf("Error processing event %d for run %s (will retry): %v", evt.Seq, evt.ExecutionRunID, err)
+			return err
+		}
+		log.Printf("Processed event %s (Seq: %d) for Job %d", evt.EventType, evt.Seq, evt.UnifiedJobID)
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	log.Println("Consumer started, waiting for events...")
-
-	for evt := range eventChan {
-		// In a real system we would handle offsets/acks here
-		if err := c.processEvent(evt); err != nil {
-			log.Printf("Error processing event %d for run %s: %v", evt.Seq, evt.ExecutionRunID, err)
-			continue
+	// Log-chunk references are indexed on the same ack-after-commit contract.
+	if err := c.Subscriber.ConsumeLogChunks(func(chunk events.LogChunk) error {
+		if err := c.Writer.WriteLogChunk(context.Background(), chunk); err != nil {
+			log.Printf("Error indexing log chunk %d for run %s (will retry): %v", chunk.Seq, chunk.ExecutionRunID, err)
+			return err
 		}
-		log.Printf("Processed event %s (Seq: %d) for Job %d", evt.EventType, evt.Seq, evt.UnifiedJobID)
+		log.Printf("Indexed log chunk (Seq: %d) for run %s", chunk.Seq, chunk.ExecutionRunID)
+		return nil
+	}); err != nil {
+		return err
 	}
-	return nil
+
+	// Delivery runs on background goroutines; block forever.
+	select {}
 }
 
 func (c *Consumer) processEvent(evt events.JobEvent) error {
