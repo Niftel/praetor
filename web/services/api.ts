@@ -77,6 +77,7 @@ export const api = {
 
     // Infrastructure
     getInstances: () => fetchWithAuth('/instances').then(r => r.json()),
+    getRunnerHosts: () => fetchWithAuth('/infrastructure/runner-hosts').then(r => r.json()),
     createInstance: (data: any) => fetchWithAuth('/instances', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     updateInstance: (id: number, data: any) => fetchWithAuth(`/instances/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteInstance: (id: number) => fetchWithAuth(`/instances/${id}`, { method: 'DELETE' }),
