@@ -78,6 +78,22 @@ func (h *IngestionHandler) IngestLog(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]string{"status": "accepted"})
 }
 
+// Heartbeat POST /api/v1/runs/{run_id}/heartbeat — called by the host-runner
+// during execution to stamp execution_runs.last_heartbeat_at.
+func (h *IngestionHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "run_id"))
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	if err := h.Service.RecordHeartbeat(r.Context(), runID); err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.Status(r, http.StatusOK)
+	render.JSON(w, r, map[string]string{"status": "ok"})
+}
+
 // StreamLog GET /api/v1/runs/{run_id}/logs?since=N
 // Streams the run's stored stdout (chunks reassembled in order) back to the
 // caller. `since` supports incremental tailing; the highest seq written is

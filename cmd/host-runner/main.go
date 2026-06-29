@@ -52,6 +52,7 @@ func run() error {
 		logSyncer := NewLogSyncer(*jobDir, *apiURL, *runID)
 		done := make(chan bool, 1)
 		logDone := make(chan bool, 1)
+		hbDone := make(chan bool, 1)
 		finished := make(chan bool, 1)
 		logFinished := make(chan bool, 1)
 		go func() {
@@ -62,7 +63,10 @@ func run() error {
 			logSyncer.Start(logDone)
 			logFinished <- true
 		}()
+		// Heartbeat liveness for the run, concurrently with execution.
+		go runHeartbeat(*apiURL, *runID, hbDone)
 		defer func() {
+			hbDone <- true
 			log.Println("Waiting for syncers to finish...")
 			// Safety: give the FS a moment to flush any pending writes.
 			time.Sleep(100 * time.Millisecond)

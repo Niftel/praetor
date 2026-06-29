@@ -34,6 +34,20 @@ func NewIngestionService(db *sqlx.DB, pub EventPublisher, store objectstore.LogS
 	}
 }
 
+// RecordHeartbeat stamps a run's liveness. The reconciler reads
+// last_heartbeat_at to distinguish a live long-running job from a lost one. A
+// terminal run is left untouched (a late heartbeat can't revive it).
+func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID) error {
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE execution_runs
+		SET last_heartbeat_at = now()
+		WHERE id = $1 AND state NOT IN ('successful', 'failed', 'canceled', 'lost')`, runID)
+	if err != nil {
+		return fmt.Errorf("record heartbeat: %w", err)
+	}
+	return nil
+}
+
 // LatestLogSeq returns the highest stored chunk seq for a run, or -1 if none.
 // It lets a reader advance its tail cursor without parsing the streamed bytes.
 func (s *IngestionService) LatestLogSeq(ctx context.Context, runID uuid.UUID) (int64, error) {

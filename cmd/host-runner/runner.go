@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,51 +151,11 @@ func (r *Runner) Execute() error {
 	statusBytes, _ := json.Marshal(status)
 	_ = os.WriteFile(filepath.Join(r.JobDir, "status.json"), statusBytes, 0644)
 
-	// Start heartbeat loop if we have the necessary info
-	if req.JobManifest.RunnerHostID > 0 && req.JobManifest.APIURL != "" {
-		log.Printf("Starting heartbeat loop for host %d to %s", req.JobManifest.RunnerHostID, req.JobManifest.APIURL)
-		go r.heartbeatLoop(req.JobManifest.RunnerHostID, req.JobManifest.APIURL)
-		// Block forever to keep agent running
-		select {}
-	}
-
+	// Heartbeating during execution is driven from main.go (it targets the run,
+	// not just the host) so the reconciler can tell a live long-running job from
+	// a lost one. The runner returns once the playbook finishes; the deferred
+	// syncer/heartbeat shutdown in main.go then performs a final flush.
 	return err
-}
-
-func (r *Runner) heartbeatLoop(hostID int64, apiURL string) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	// Send initial heartbeat immediately
-	r.sendHeartbeat(hostID, apiURL)
-
-	for range ticker.C {
-		r.sendHeartbeat(hostID, apiURL)
-	}
-}
-
-func (r *Runner) sendHeartbeat(hostID int64, apiURL string) {
-	url := fmt.Sprintf("%s/api/v1/hosts/%d/runner-heartbeat", apiURL, hostID)
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest("POST", url, nil)
-	if err != nil {
-		log.Printf("Failed to create heartbeat request: %v", err)
-		return
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Heartbeat failed: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Heartbeat returned status %d", resp.StatusCode)
-	} else {
-		log.Printf("Heartbeat sent successfully for host %d", hostID)
-	}
 }
 
 // WAL is an append-only, fsync'd write-ahead log of job events. On the host it

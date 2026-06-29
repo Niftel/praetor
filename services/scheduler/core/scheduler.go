@@ -402,46 +402,65 @@ func (s *Scheduler) processSchedules() error {
 func (s *Scheduler) processTimedOutJobs() error {
 	ctx := context.Background()
 
-	// Find jobs that have been running/queued for too long without completion
-	// Timeout: 30 minutes for running, 10 minutes for queued (should have started)
-	timeout := 30 * time.Minute
-	queuedTimeout := 10 * time.Minute
+	// Heartbeat-aware reconciliation. A long-running job is NOT failed merely for
+	// running a long time; it is declared lost only when its liveness signal
+	// disappears. The host-runner stamps execution_runs.last_heartbeat_at every
+	// ~30s during execution, so:
+	lostHeartbeatGrace := 2 * time.Minute // ~4 missed heartbeats
+	startGrace := 5 * time.Minute         // running but never heartbeated
+	queuedTimeout := 10 * time.Minute     // never picked up by an executor
 
-	// Mark long-running jobs as failed
+	// 1. Lost runs: a running run whose heartbeat went stale, or that started
+	// but never reported in within the start grace. Mark the run 'lost' and its
+	// job 'error' in one statement.
 	result, err := s.DB.ExecContext(ctx, `
-		UPDATE unified_jobs 
-		SET status = 'failed', finished_at = NOW()
-		WHERE status = 'running' 
-		AND started_at IS NOT NULL 
-		AND started_at < NOW() - $1::interval
-		RETURNING id`, fmt.Sprintf("%d seconds", int(timeout.Seconds())))
+		WITH lost AS (
+			UPDATE execution_runs er
+			SET state = 'lost', finished_at = now()
+			WHERE er.state = 'running'
+			  AND (
+			    (er.last_heartbeat_at IS NOT NULL AND er.last_heartbeat_at < now() - $1::interval)
+			    OR (er.last_heartbeat_at IS NULL AND er.started_at IS NOT NULL AND er.started_at < now() - $2::interval)
+			  )
+			RETURNING er.unified_job_id
+		)
+		UPDATE unified_jobs uj
+		SET status = 'error', finished_at = now()
+		FROM lost
+		WHERE uj.id = lost.unified_job_id
+		  AND uj.status NOT IN ('successful', 'failed', 'canceled', 'error')`,
+		fmt.Sprintf("%d seconds", int(lostHeartbeatGrace.Seconds())),
+		fmt.Sprintf("%d seconds", int(startGrace.Seconds())),
+	)
 	if err != nil {
-		log.Printf("Error checking running timeout: %v", err)
+		log.Printf("Error reconciling lost runs: %v", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
-		log.Printf("Marked %d running jobs as failed due to timeout", rows)
+		log.Printf("Marked %d runs as lost (stale/absent heartbeat)", rows)
 	}
 
-	// Mark long-queued jobs as failed (should have transitioned to running)
+	// 2. Queued too long: never picked up by an executor. With the durable
+	// outbox this should be rare, but it remains a safety net.
 	result, err = s.DB.ExecContext(ctx, `
-		UPDATE unified_jobs 
-		SET status = 'failed', finished_at = NOW()
-		WHERE status = 'queued' 
-		AND current_run_id IS NOT NULL
-		AND created_at < NOW() - $1::interval
-		RETURNING id`, fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())))
+		WITH stuck AS (
+			UPDATE unified_jobs uj
+			SET status = 'failed', finished_at = now()
+			WHERE uj.status = 'queued'
+			  AND uj.current_run_id IS NOT NULL
+			  AND uj.created_at < now() - $1::interval
+			RETURNING uj.current_run_id
+		)
+		UPDATE execution_runs er
+		SET state = 'failed', finished_at = now()
+		FROM stuck
+		WHERE er.id = stuck.current_run_id
+		  AND er.state NOT IN ('successful', 'failed', 'canceled', 'lost')`,
+		fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())),
+	)
 	if err != nil {
-		log.Printf("Error checking queued timeout: %v", err)
+		log.Printf("Error reconciling stuck queued jobs: %v", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
-		log.Printf("Marked %d queued jobs as failed due to timeout", rows)
+		log.Printf("Marked %d queued jobs as failed (never started)", rows)
 	}
-
-	// Also update corresponding execution_runs
-	_, _ = s.DB.ExecContext(ctx, `
-		UPDATE execution_runs SET state = 'failed', finished_at = NOW()
-		WHERE id IN (
-			SELECT current_run_id FROM unified_jobs 
-			WHERE status = 'failed' AND finished_at > NOW() - INTERVAL '1 minute'
-		) AND state NOT IN ('successful', 'failed')`)
 
 	return nil
 }
