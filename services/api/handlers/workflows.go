@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
@@ -202,38 +203,89 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 	render.Created(w, r, map[string]interface{}{"workflow_job_id": wjID, "status": "running"})
 }
 
-// GetWorkflowJob GET /api/v1/workflow-jobs/{id}
+// ListWorkflowJobs GET /api/v1/workflow-jobs — recent runs the user can see.
+func (rs *WorkflowsResource) ListWorkflowJobs(w http.ResponseWriter, r *http.Request) {
+	type run struct {
+		ID                 int64      `json:"id" db:"id"`
+		WorkflowTemplateID int64      `json:"workflow_template_id" db:"workflow_template_id"`
+		TemplateName       string     `json:"template_name" db:"template_name"`
+		OrganizationID     int64      `json:"organization_id" db:"organization_id"`
+		Status             string     `json:"status" db:"status"`
+		CreatedAt          time.Time  `json:"created_at" db:"created_at"`
+		FinishedAt         *time.Time `json:"finished_at" db:"finished_at"`
+	}
+	rows := []run{}
+	orgIDs, err := rs.readableIDs(r, rbac.ContentTypeOrganization)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if len(orgIDs) > 0 {
+		q, args, _ := sqlx.In(`
+			SELECT wj.id, wj.workflow_template_id, wt.name AS template_name,
+			       wt.organization_id, wj.status, wj.created_at, wj.finished_at
+			FROM workflow_jobs wj
+			JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
+			WHERE wt.organization_id IN (?)
+			ORDER BY wj.id DESC LIMIT 100`, orgIDs)
+		q = rs.DB.Rebind(q)
+		if err := rs.DB.SelectContext(r.Context(), &rows, q, args...); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+	}
+	render.JSON(w, r, rows)
+}
+
+// GetWorkflowJob GET /api/v1/workflow-jobs/{id} — full run detail: status, the
+// template's structure (node names + edges) and each node's live status, so a
+// run page can draw and refresh the DAG on its own.
 func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	// Gate on the owning workflow's org so job runs aren't visible cross-tenant.
-	var org int64
-	if err := rs.DB.GetContext(r.Context(), &org, `
-		SELECT wt.organization_id
+	var meta struct {
+		Org        int64      `db:"organization_id"`
+		TemplateID int64      `db:"workflow_template_id"`
+		Name       string     `db:"name"`
+		Status     string     `db:"status"`
+		CreatedAt  time.Time  `db:"created_at"`
+		FinishedAt *time.Time `db:"finished_at"`
+	}
+	if err := rs.DB.GetContext(r.Context(), &meta, `
+		SELECT wt.organization_id, wj.workflow_template_id, wt.name, wj.status, wj.created_at, wj.finished_at
 		FROM workflow_jobs wj
 		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
 		WHERE wj.id=$1`, id); err != nil {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actRead) {
-		return
-	}
-	var status string
-	if err := rs.DB.GetContext(r.Context(), &status, `SELECT status FROM workflow_jobs WHERE id=$1`, id); err != nil {
-		render.ErrInvalidRequest(nil).Render(w, r)
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, meta.Org, actRead) {
 		return
 	}
 	type node struct {
-		ID            int64  `json:"id" db:"id"`
-		NodeKey       string `json:"node_key" db:"node_key"`
-		NodeType      string `json:"node_type" db:"node_type"`
-		UnifiedJobID  *int64 `json:"unified_job_id" db:"unified_job_id"`
-		Status        string `json:"status" db:"status"`
+		ID           int64  `json:"id" db:"id"`
+		NodeKey      string `json:"node_key" db:"node_key"`
+		NodeType     string `json:"node_type" db:"node_type"`
+		Name         string `json:"name" db:"name"`
+		UnifiedJobID *int64 `json:"unified_job_id" db:"unified_job_id"`
+		Status       string `json:"status" db:"status"`
 	}
 	nodes := []node{}
-	_ = rs.DB.SelectContext(r.Context(), &nodes,
-		`SELECT id, node_key, node_type, unified_job_id, status FROM workflow_job_nodes WHERE workflow_job_id=$1 ORDER BY id`, id)
-	render.JSON(w, r, map[string]interface{}{"id": id, "status": status, "nodes": nodes})
+	_ = rs.DB.SelectContext(r.Context(), &nodes, `
+		SELECT wjn.id, wjn.node_key, wjn.node_type,
+		       COALESCE(wn.name, '') AS name, wjn.unified_job_id, wjn.status
+		FROM workflow_job_nodes wjn
+		LEFT JOIN workflow_nodes wn
+		       ON wn.workflow_template_id = $1 AND wn.node_key = wjn.node_key
+		WHERE wjn.workflow_job_id = $2
+		ORDER BY wjn.id`, meta.TemplateID, id)
+	edges := []workflowEdge{}
+	_ = rs.DB.SelectContext(r.Context(), &edges,
+		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, meta.TemplateID)
+	render.JSON(w, r, map[string]interface{}{
+		"id": id, "workflow_template_id": meta.TemplateID, "name": meta.Name,
+		"status": meta.Status, "created_at": meta.CreatedAt, "finished_at": meta.FinishedAt,
+		"nodes": nodes, "edges": edges,
+	})
 }
 
 func (rs *WorkflowsResource) setNodeApproval(w http.ResponseWriter, r *http.Request, status string) {
