@@ -4,7 +4,7 @@ import { Inventory, Host, Group } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
-import { Server, Users, Settings, Plus, Trash, Loader, Play, Activity, Clock } from 'lucide-react';
+import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock } from 'lucide-react';
 
 const InventoriesPage = () => {
   const [inventories, setInventories] = useState<Inventory[]>([]);
@@ -19,6 +19,7 @@ const InventoriesPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedHostId, setSelectedHostId] = useState<number | null>(null);
+  const [showHostDetail, setShowHostDetail] = useState(false);
   const [hostGroups, setHostGroups] = useState<number[]>([]); // Group IDs the selected host belongs to
   const [settingRunner, setSettingRunner] = useState(false);
 
@@ -248,6 +249,10 @@ const InventoriesPage = () => {
   };
 
   const selectedHost = hosts.find(h => h.id === selectedHostId);
+  const selectedInv = inventories.find(i => i.id === selectedInventoryId);
+  const openHost = (id: number) => { setSelectedHostId(id); setShowHostDetail(true); };
+  const addLabel = activeTab === 'hosts' ? 'Host' : activeTab === 'groups' ? 'Group' : 'Source';
+  const onAdd = () => activeTab === 'hosts' ? setShowHostModal(true) : activeTab === 'groups' ? setShowGroupModal(true) : setShowSourceModal(true);
 
   if (loading) {
     return (
@@ -262,273 +267,214 @@ const InventoriesPage = () => {
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Inventories</h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">Inventories</h1>
+        <Button icon={<Plus size={16} />} onClick={() => setShowInventoryModal(true)}>New Inventory</Button>
+      </div>
 
-      <div className="flex flex-1 gap-6 overflow-hidden">
-        {/* Left Sidebar: Inventory List */}
-        <Card className="w-64 flex flex-col overflow-hidden">
-          <div className="p-4 border-b border-gray-100 bg-gray-50">
-            <h3 className="font-semibold text-gray-700">Inventories</h3>
+      <div className="flex gap-6 items-start">
+        {/* Left: inventory list */}
+        <Card className="w-72 shrink-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">All inventories</h3>
+            <span className="text-xs text-gray-400">{inventories.length}</span>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div className="p-2 space-y-0.5 max-h-[72vh] overflow-y-auto">
             {inventories.map(inv => (
               <div
                 key={inv.id}
-                className={`flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors cursor-pointer ${selectedInventoryId === inv.id
-                  ? 'bg-brand-50 text-brand-700 font-medium'
-                  : 'text-gray-600 hover:bg-gray-50'
-                  }`}
                 onClick={() => { setSelectedInventoryId(inv.id); setSelectedHostId(null); }}
+                className={`group flex items-center justify-between gap-2 px-3 py-2 rounded-md cursor-pointer ${selectedInventoryId === inv.id ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
               >
-                <span>{inv.name}</span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDeleteInventory(inv.id); }}
-                  className="text-gray-400 hover:text-red-600"
-                >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Server size={15} className={`shrink-0 ${selectedInventoryId === inv.id ? 'text-brand-600' : 'text-gray-400'}`} />
+                  <span className={`text-sm truncate ${selectedInventoryId === inv.id ? 'text-brand-700 font-medium' : 'text-gray-700'}`} title={inv.name}>{inv.name}</span>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); handleDeleteInventory(inv.id); }} className="shrink-0 text-gray-300 group-hover:text-gray-400 hover:!text-red-600" title="Delete inventory">
                   <Trash size={14} />
                 </button>
               </div>
             ))}
-            {inventories.length === 0 && <p className="p-4 text-sm text-gray-500">No inventories found.</p>}
-          </div>
-          <div className="p-2 border-t border-gray-100 space-y-1">
-            <Button size="sm" variant="ghost" className="w-full justify-start" icon={<Plus size={14} />} onClick={() => setShowInventoryModal(true)}>New Inventory</Button>
-            {selectedInventoryId && (
-              <Button size="sm" variant="ghost" className="w-full justify-start" icon={<Server size={14} />} onClick={() => setShowImportModal(true)}>Import Hosts</Button>
-            )}
+            {inventories.length === 0 && <p className="px-3 py-6 text-sm text-gray-400 text-center">No inventories yet.</p>}
           </div>
         </Card>
 
-        {/* Middle Pane: Hosts/Groups List */}
-        <Card className="w-80 flex flex-col overflow-hidden">
-          <div className="flex border-b border-gray-200">
-            <button
-              className={`flex-1 py-3 text-sm font-medium border-b-2 ${activeTab === 'hosts' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('hosts')}
-            >
-              Hosts ({hosts.length})
-            </button>
-            <button
-              className={`flex-1 py-3 text-sm font-medium border-b-2 ${activeTab === 'groups' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('groups')}
-            >
-              Groups ({groups.length})
-            </button>
-            <button
-              className={`flex-1 py-3 text-sm font-medium border-b-2 ${activeTab === 'sources' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('sources')}
-            >
-              Sources ({sources.length})
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto">
-            {activeTab === 'sources' ? (
-              <ul className="divide-y divide-gray-100">
-                {sources.map(s => (
-                  <li key={s.id} className="p-4 hover:bg-gray-50">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <span className="text-sm font-medium text-gray-900">{s.name}</span>
-                        <span className="ml-2 text-xs text-gray-400">{s.source_kind}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => handleSyncSource(s.id)} className="text-brand-600 hover:text-brand-700" title="Sync now">
-                          <Play size={14} />
-                        </button>
-                        <button onClick={() => handleDeleteSource(s.id)} className="text-gray-400 hover:text-red-600" title="Delete">
-                          <Trash size={14} />
-                        </button>
-                      </div>
-                    </div>
-                    {s.last_synced_at && (
-                      <p className="mt-1 text-xs text-gray-400">Last synced {new Date(s.last_synced_at).toLocaleString()}</p>
-                    )}
-                  </li>
-                ))}
-                {sources.length === 0 && <p className="p-4 text-sm text-gray-500">No sources. Add one to populate this inventory dynamically.</p>}
-              </ul>
-            ) : activeTab === 'hosts' ? (
-              <ul className="divide-y divide-gray-100">
-                {hosts.map(host => (
-                  <li
-                    key={host.id}
-                    className={`p-4 cursor-pointer hover:bg-gray-50 ${selectedHostId === host.id ? 'bg-brand-50' : ''}`}
-                    onClick={() => setSelectedHostId(host.id)}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${host.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
-                        <span className="text-sm font-medium text-gray-900">{host.name}</span>
-                        {host.is_runner_host && (
-                          <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded">
-                            Runner
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteHost(host.id); }}
-                        className="text-gray-400 hover:text-red-600"
-                      >
-                        <Trash size={14} />
-                      </button>
-                    </div>
-                    {host.is_runner_host && (
-                      <div className="mt-2 ml-4 text-xs">
-                        {host.runner_healthy ? (
-                          <span className="flex items-center text-green-600">
-                            <Activity className="h-3 w-3 mr-1" /> Agent healthy
-                          </span>
-                        ) : host.runner_last_seen ? (
-                          <span className="flex items-center text-yellow-600">
-                            <Clock className="h-3 w-3 mr-1" /> Agent stale
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">Agent not installed</span>
-                        )}
-                      </div>
-                    )}
-                    {!host.is_runner_host && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSetRunner(host.id);
-                        }}
-                        className="mt-1 ml-4 text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1"
-                        disabled={settingRunner}
-                      >
-                        <Play size={10} /> Set as runner
-                      </button>
-                    )}
-                  </li>
-                ))}
-                {hosts.length === 0 && <p className="p-4 text-sm text-gray-500">No hosts found.</p>}
-              </ul>
-            ) : (
-              <ul className="divide-y divide-gray-100">
-                {groups.map(group => (
-                  <li key={group.id} className="p-4 hover:bg-gray-50 flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <Users size={16} className="text-gray-400" />
-                      <span className="text-sm font-medium text-gray-900">{group.name}</span>
-                    </div>
-                  </li>
-                ))}
-                {groups.length === 0 && <p className="p-4 text-sm text-gray-500">No groups found.</p>}
-              </ul>
-            )}
-          </div>
-          <div className="p-3 border-t border-gray-100 bg-gray-50">
-            <Button
-              size="sm"
-              className="w-full"
-              icon={<Plus size={14} />}
-              onClick={() => activeTab === 'hosts' ? setShowHostModal(true) : activeTab === 'groups' ? setShowGroupModal(true) : setShowSourceModal(true)}
-              disabled={!selectedInventoryId}
-            >
-              Add {activeTab === 'hosts' ? 'Host' : activeTab === 'groups' ? 'Group' : 'Source'}
-            </Button>
-          </div>
-        </Card>
-
-        {/* Right Pane: Details */}
-        <div className="flex-1 flex flex-col bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-          {selectedHost ? (
-            <>
-              <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-gray-900">{selectedHost.name}</h2>
-                    {selectedHost.is_runner_host && (
-                      <span className="px-2 py-0.5 text-xs font-semibold bg-purple-100 text-purple-700 rounded-full">
-                        Runner
-                      </span>
-                    )}
+        {/* Right: selected inventory detail */}
+        {selectedInv ? (
+          <div className="flex-1 min-w-0 space-y-4">
+            {/* Header + summary */}
+            <Card>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="text-xl font-bold text-gray-900 truncate" title={selectedInv.name}>{selectedInv.name}</h2>
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-sm text-gray-500">
+                    <span><b className="text-gray-900">{hosts.length}</b> hosts</span>
+                    <span><b className="text-gray-900">{groups.length}</b> groups</span>
+                    <span><b className="text-gray-900">{sources.length}</b> sources</span>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">Inventory ID: {selectedHost.inventory_id}</p>
                 </div>
-                <div className="flex gap-2">
-                  {!selectedHost.is_runner_host && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={settingRunner ? <Loader size={14} className="animate-spin" /> : <Play size={14} />}
-                      onClick={() => handleSetRunner(selectedHost.id)}
-                      disabled={settingRunner}
-                    >
-                      {settingRunner ? 'Setting...' : 'Set as Runner'}
-                    </Button>
-                  )}
-                  <Button size="sm" variant="danger" icon={<Trash size={14} />} onClick={() => handleDeleteHost(selectedHost.id)}>Delete</Button>
+                <Button variant="secondary" icon={<Server size={16} />} onClick={() => setShowImportModal(true)}>Import</Button>
+              </div>
+            </Card>
+
+            {/* Tabs + content */}
+            <Card className="overflow-hidden">
+              <div className="flex items-center justify-between border-b border-gray-200 px-2">
+                <div className="flex">
+                  {(['hosts', 'groups', 'sources'] as const).map(t => (
+                    <button key={t} onClick={() => setActiveTab(t)}
+                      className={`px-4 py-3 text-sm font-medium border-b-2 capitalize ${activeTab === t ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                      {t} <span className="text-gray-400">({t === 'hosts' ? hosts.length : t === 'groups' ? groups.length : sources.length})</span>
+                    </button>
+                  ))}
                 </div>
+                <Button size="sm" icon={<Plus size={14} />} onClick={onAdd}>Add {addLabel}</Button>
               </div>
 
-              <div className="p-6 overflow-y-auto space-y-6">
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-                    <input type="checkbox" checked={selectedHost.enabled} className="rounded text-brand-600 focus:ring-brand-500" readOnly />
-                    Enabled
-                  </label>
-                  <p className="text-xs text-gray-500">Disabled hosts are skipped during job execution.</p>
-                </div>
+              {/* Hosts */}
+              {activeTab === 'hosts' && (
+                <table className="min-w-full divide-y divide-gray-100">
+                  <tbody className="divide-y divide-gray-50">
+                    {hosts.map(host => (
+                      <tr key={host.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openHost(host.id)}>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${host.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
+                            <span className="text-sm font-medium text-gray-900 truncate" title={host.name}>{host.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 w-40">
+                          {host.is_runner_host ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">
+                              Runner
+                              {host.runner_healthy ? <Activity size={11} className="text-green-600" /> : host.runner_last_seen ? <Clock size={11} className="text-yellow-600" /> : null}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">{host.enabled ? 'enabled' : 'disabled'}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 w-44 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                          {!host.is_runner_host && (
+                            <Button variant="ghost" size="sm" icon={<Play size={13} />} disabled={settingRunner} onClick={() => handleSetRunner(host.id)}>Runner</Button>
+                          )}
+                          <Button variant="ghost" size="sm" icon={<Trash size={14} />} onClick={() => handleDeleteHost(host.id)} />
+                        </td>
+                      </tr>
+                    ))}
+                    {hosts.length === 0 && <tr><td className="px-4 py-8 text-center text-sm text-gray-400">No hosts. Add one, import, or sync a source.</td></tr>}
+                  </tbody>
+                </table>
+              )}
 
-                {/* Groups Section */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Users size={14} className="inline mr-1" /> Groups
-                  </label>
-                  {groups.length === 0 ? (
-                    <p className="text-xs text-gray-400">No groups in this inventory. Create a group first.</p>
-                  ) : (
-                    <div className="space-y-2 bg-gray-50 rounded-md p-3 border border-gray-200">
-                      {groups.map(group => {
-                        const isInGroup = hostGroups.includes(group.id);
-                        return (
-                          <label key={group.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
-                            <input
-                              type="checkbox"
-                              checked={isInGroup}
-                              className="rounded text-brand-600 focus:ring-brand-500"
-                              onChange={async () => {
-                                try {
-                                  if (isInGroup) {
-                                    await api.removeHostFromGroup(group.id, selectedHost.id);
-                                    setHostGroups(prev => prev.filter(id => id !== group.id));
-                                  } else {
-                                    await api.addHostToGroup(group.id, selectedHost.id);
-                                    setHostGroups(prev => [...prev, group.id]);
-                                  }
-                                } catch (err) {
-                                  console.error('Failed to update group membership', err);
-                                }
-                              }}
-                            />
-                            <span className="text-sm text-gray-700">{group.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+              {/* Groups */}
+              {activeTab === 'groups' && (
+                <table className="min-w-full divide-y divide-gray-100">
+                  <tbody className="divide-y divide-gray-50">
+                    {groups.map(group => (
+                      <tr key={group.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <Users size={15} className="text-gray-400" />
+                            <span className="text-sm font-medium text-gray-900">{group.name}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {groups.length === 0 && <tr><td className="px-4 py-8 text-center text-sm text-gray-400">No groups yet.</td></tr>}
+                  </tbody>
+                </table>
+              )}
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Variables (JSON)</label>
-                  <textarea
-                    className="w-full h-64 font-mono text-sm bg-slate-50 border border-gray-300 rounded-md p-3 focus:ring-brand-500 focus:border-brand-500"
-                    defaultValue={typeof selectedHost.variables === 'string' ? selectedHost.variables : JSON.stringify(selectedHost.variables, null, 2)}
-                  />
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
-              <Settings size={48} className="mb-4 opacity-20" />
-              <p>Select a host to view details</p>
+              {/* Sources */}
+              {activeTab === 'sources' && (
+                <table className="min-w-full divide-y divide-gray-100">
+                  <thead className="bg-gray-50"><tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Kind</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last synced</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {sources.map(s => (
+                      <tr key={s.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 text-sm font-medium text-gray-900">
+                          {s.name}{s.credential_id ? <span className="ml-2 text-xs text-gray-400">🔑</span> : null}
+                        </td>
+                        <td className="px-4 py-2.5 text-sm text-gray-500">{s.source_kind}</td>
+                        <td className="px-4 py-2.5 text-sm text-gray-500">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never'}</td>
+                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                          <Button variant="ghost" size="sm" icon={<Play size={13} />} onClick={() => handleSyncSource(s.id)}>Sync</Button>
+                          <Button variant="ghost" size="sm" icon={<Trash size={14} />} onClick={() => handleDeleteSource(s.id)} />
+                        </td>
+                      </tr>
+                    ))}
+                    {sources.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-400">No sources. Add one to populate this inventory dynamically (e.g. AWS).</td></tr>}
+                  </tbody>
+                </table>
+              )}
+            </Card>
+          </div>
+        ) : (
+          <Card className="flex-1">
+            <div className="flex flex-col items-center justify-center text-gray-400 py-20">
+              <Server size={40} className="mb-3 opacity-20" />
+              <p className="text-sm">Select an inventory to view its hosts, groups and sources.</p>
             </div>
-          )}
-        </div>
+          </Card>
+        )}
       </div>
+
+      {/* Host detail modal */}
+      <Modal isOpen={showHostDetail && !!selectedHost} onClose={() => setShowHostDetail(false)} title={selectedHost ? selectedHost.name : ''} size="lg">
+        {selectedHost && (
+          <div className="space-y-5">
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${selectedHost.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
+              <span className="text-sm text-gray-600">{selectedHost.enabled ? 'Enabled' : 'Disabled'}</span>
+              {selectedHost.is_runner_host && <span className="px-2 py-0.5 text-xs font-semibold bg-purple-100 text-purple-700 rounded-full">Runner</span>}
+              <div className="ml-auto flex gap-2">
+                {!selectedHost.is_runner_host && (
+                  <Button size="sm" variant="secondary" icon={settingRunner ? <Loader size={14} className="animate-spin" /> : <Play size={14} />} disabled={settingRunner} onClick={() => handleSetRunner(selectedHost.id)}>Set as runner</Button>
+                )}
+                <Button size="sm" variant="danger" icon={<Trash size={14} />} onClick={() => { handleDeleteHost(selectedHost.id); setShowHostDetail(false); }}>Delete</Button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2"><Users size={14} className="inline mr-1" /> Group membership</label>
+              {groups.length === 0 ? (
+                <p className="text-xs text-gray-400">No groups in this inventory.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-1 bg-gray-50 rounded-md p-3 border border-gray-200">
+                  {groups.map(group => {
+                    const isInGroup = hostGroups.includes(group.id);
+                    return (
+                      <label key={group.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
+                        <input type="checkbox" checked={isInGroup} className="rounded text-brand-600 focus:ring-brand-500"
+                          onChange={async () => {
+                            try {
+                              if (isInGroup) { await api.removeHostFromGroup(group.id, selectedHost.id); setHostGroups(prev => prev.filter(id => id !== group.id)); }
+                              else { await api.addHostToGroup(group.id, selectedHost.id); setHostGroups(prev => [...prev, group.id]); }
+                            } catch (err) { console.error('Failed to update group membership', err); }
+                          }} />
+                        <span className="text-sm text-gray-700 truncate">{group.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Variables</label>
+              <pre className="w-full max-h-64 overflow-auto font-mono text-xs bg-slate-50 border border-gray-200 rounded-md p-3 text-gray-700">
+                {(() => { try { return JSON.stringify(typeof selectedHost.variables === 'string' ? JSON.parse(selectedHost.variables || '{}') : (selectedHost.variables || {}), null, 2); } catch { return String(selectedHost.variables || '{}'); } })()}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* New Inventory Modal */}
       <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title="New Inventory">
