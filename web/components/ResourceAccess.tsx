@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import Button from './ui/Button';
-import Badge from './ui/Badge';
-import { Plus, Trash2, Users as UsersIcon, User as UserIcon } from 'lucide-react';
+import { Plus, X, Users as UsersIcon, User as UserIcon } from 'lucide-react';
 
 interface AccessRole {
   role_id: number;
@@ -45,10 +44,23 @@ const ResourceAccess: React.FC<Props> = ({ contentType, objectId, canManage = tr
     api.getTeams().then(r => setTeams(r?.items || r || [])).catch(() => { });
   }, []);
 
-  const grants = roles.flatMap(r => [
-    ...r.users.map(u => ({ kind: 'user' as const, id: u.id, name: u.username, roleId: r.role_id, roleField: r.role_field })),
-    ...r.teams.map(t => ({ kind: 'team' as const, id: t.id, name: t.name, roleId: r.role_id, roleField: r.role_field })),
-  ]);
+  // One row per principal (user/team), collecting all the roles they hold here.
+  const principals = (() => {
+    const m = new Map<string, { kind: 'user' | 'team'; id: number; name: string; roles: { roleId: number; roleField: string }[] }>();
+    for (const r of roles) {
+      for (const u of r.users) {
+        const k = `user-${u.id}`;
+        if (!m.has(k)) m.set(k, { kind: 'user', id: u.id, name: u.username, roles: [] });
+        m.get(k)!.roles.push({ roleId: r.role_id, roleField: r.role_field });
+      }
+      for (const t of r.teams) {
+        const k = `team-${t.id}`;
+        if (!m.has(k)) m.set(k, { kind: 'team', id: t.id, name: t.name, roles: [] });
+        m.get(k)!.roles.push({ roleId: r.role_id, roleField: r.role_field });
+      }
+    }
+    return [...m.values()];
+  })();
 
   const grant = async () => {
     setError('');
@@ -105,28 +117,38 @@ const ResourceAccess: React.FC<Props> = ({ contentType, objectId, canManage = tr
           <tr>
             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
-            {canManage && <th className="px-4 py-2"></th>}
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Roles</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {grants.map((g, i) => (
-            <tr key={`${g.kind}-${g.id}-${g.roleId}-${i}`} className="hover:bg-gray-50">
-              <td className="px-4 py-2 text-sm font-medium text-gray-900 flex items-center gap-2">
-                {g.kind === 'user' ? <UserIcon size={14} className="text-gray-400" /> : <UsersIcon size={14} className="text-blue-500" />}
-                {g.name}
+          {principals.map(p => (
+            <tr key={`${p.kind}-${p.id}`} className="hover:bg-gray-50">
+              <td className="px-4 py-2.5 text-sm font-medium text-gray-900">
+                <span className="flex items-center gap-2">
+                  {p.kind === 'user' ? <UserIcon size={14} className="text-gray-400" /> : <UsersIcon size={14} className="text-blue-500" />}
+                  {p.name}
+                </span>
               </td>
-              <td className="px-4 py-2 text-sm text-gray-500 capitalize">{g.kind}</td>
-              <td className="px-4 py-2 text-sm"><Badge variant={g.roleField === 'admin_role' ? 'warning' : g.roleField === 'member_role' ? 'info' : 'neutral'}>{roleLabel(g.roleField)}</Badge></td>
-              {canManage && (
-                <td className="px-4 py-2 text-right">
-                  <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => revoke(g)} />
-                </td>
-              )}
+              <td className="px-4 py-2.5 text-sm text-gray-500 capitalize align-top">{p.kind}</td>
+              <td className="px-4 py-2.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {p.roles.map(role => (
+                    <span key={role.roleId}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${role.roleField === 'admin_role' ? 'bg-amber-100 text-amber-800' : role.roleField === 'member_role' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'}`}>
+                      {roleLabel(role.roleField)}
+                      {canManage && (
+                        <button onClick={() => revoke({ kind: p.kind, id: p.id, roleId: role.roleId })} className="ml-0.5 -mr-0.5 hover:text-red-600" title="Remove role">
+                          <X size={11} />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </td>
             </tr>
           ))}
-          {grants.length === 0 && !loading && (
-            <tr><td colSpan={canManage ? 4 : 3} className="px-4 py-6 text-center text-sm text-gray-400">No one has explicit access yet.</td></tr>
+          {principals.length === 0 && !loading && (
+            <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-400">No one has explicit access yet.</td></tr>
           )}
         </tbody>
       </table>
