@@ -63,6 +63,7 @@ func (r *Runner) Execute() error {
 	// 2. Prepare Environment (e.g. write playbook file if inline)
 	// 2. Prepare Environment
 	playbookPath := filepath.Join(r.JobDir, "playbook.yml")
+	var galaxyPathEnv []string // ANSIBLE_COLLECTIONS_PATH/ROLES_PATH for the cache
 
 	if req.JobManifest.PlaybookContent != "" {
 		if err := os.WriteFile(playbookPath, []byte(req.JobManifest.PlaybookContent), 0644); err != nil {
@@ -82,10 +83,12 @@ func (r *Runner) Execute() error {
 		}
 
 		// Install the project's Ansible Galaxy requirements (roles/collections)
-		// into project-adjacent paths before running the play.
-		if err := installGalaxyRequirements(projectDir, galaxyEnv(req.JobManifest.GalaxyServers)); err != nil {
-			return fmt.Errorf("galaxy requirements: %w", err)
+		// into the content-addressed cache; the returned env points the play at it.
+		pathEnv, gerr := installGalaxyRequirements(projectDir, galaxyEnv(req.JobManifest.GalaxyServers))
+		if gerr != nil {
+			return fmt.Errorf("galaxy requirements: %w", gerr)
 		}
+		galaxyPathEnv = pathEnv
 
 		// Adjust playbook path relative to connection?
 		// If req.JobManifest.Playbook is "site.yml", it's now "project/site.yml"
@@ -142,6 +145,7 @@ func (r *Runner) Execute() error {
 	cmd := exec.Command("ansible-playbook", playArgs...)
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
 	cmd.Env = append(cmd.Env, checkpointEnv(r.JobDir)...)
+	cmd.Env = append(cmd.Env, galaxyPathEnv...) // point the play at the cached collections/roles
 	// A fresh run is launched by the bootstrap, whose nohup shell exports the
 	// SSH env. A resume after a host reboot is launched by the systemd unit,
 	// which exports nothing — so a resumed multi-host play would have no key to
