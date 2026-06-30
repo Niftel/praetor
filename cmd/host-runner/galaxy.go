@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +12,11 @@ import (
 
 	"github.com/praetordev/praetor/pkg/events"
 )
+
+// collectionsCacheRoot is the content-addressed cache of installed Galaxy
+// content on the runner host. Reused across jobs so identical requirements are
+// downloaded once and resolve to the same content every run.
+const collectionsCacheRoot = "/var/lib/praetor/collections-cache"
 
 // galaxyEnv builds the ANSIBLE_GALAXY_SERVER_* environment that points
 // ansible-galaxy at configured private Galaxy / Automation Hub servers. It
@@ -40,24 +47,103 @@ func galaxyEnv(servers []events.GalaxyServer) []string {
 
 // installGalaxyRequirements installs a project's role and collection
 // requirements (AWX layout: collections/requirements.yml, roles/requirements.yml,
-// or a bare requirements.yml treated as roles) into project-adjacent paths so
-// Ansible finds them automatically. galaxyEnvVars selects private servers.
-// A missing requirements file is not an error; a failed install is.
-func installGalaxyRequirements(projectDir string, galaxyEnvVars []string) error {
-	// Collections.
-	if f := firstExisting(projectDir, "collections/requirements.yml"); f != "" {
-		if err := runGalaxy(galaxyEnvVars, "collection", "install", "-r", f, "-p", filepath.Join(projectDir, "collections")); err != nil {
-			return fmt.Errorf("installing collection requirements: %w", err)
+// or a bare requirements.yml treated as roles) into a content-addressed cache on
+// the runner host, keyed by the requirements' hash (plus the Galaxy server
+// config). It returns the env that points the play at the cache
+// (ANSIBLE_COLLECTIONS_PATH / ANSIBLE_ROLES_PATH); a later job with identical
+// requirements reuses the cache and downloads nothing. A missing requirements
+// file is not an error; a failed install is.
+func installGalaxyRequirements(projectDir string, galaxyEnvVars []string) ([]string, error) {
+	colReq := firstExisting(projectDir, "collections/requirements.yml")
+	roleReq := firstExisting(projectDir, "roles/requirements.yml", "requirements.yml")
+	if colReq == "" && roleReq == "" {
+		return nil, nil
+	}
+
+	key := requirementsHash(colReq, roleReq, galaxyEnvVars)
+	cacheDir := filepath.Join(collectionsCacheRoot, key)
+	colPath := filepath.Join(cacheDir, "collections")
+	rolePath := filepath.Join(cacheDir, "roles")
+
+	var pathEnv []string
+	if colReq != "" {
+		pathEnv = append(pathEnv, "ANSIBLE_COLLECTIONS_PATH="+colPath)
+	}
+	if roleReq != "" {
+		pathEnv = append(pathEnv, "ANSIBLE_ROLES_PATH="+rolePath)
+	}
+
+	// Cache hit: a completed install for these exact requirements already exists.
+	if fileExists(filepath.Join(cacheDir, ".done")) {
+		log.Printf("galaxy: cache hit %s (no download)", key)
+		return pathEnv, nil
+	}
+
+	// Cache miss: install into a temp dir and atomically promote it, so two
+	// concurrent first-time installs for the same requirements can't clobber a
+	// half-populated cache — whoever finishes first wins and the other reuses it.
+	if err := os.MkdirAll(collectionsCacheRoot, 0755); err != nil {
+		return nil, fmt.Errorf("galaxy cache root: %w", err)
+	}
+	tmpDir, err := os.MkdirTemp(collectionsCacheRoot, "tmp-")
+	if err != nil {
+		return nil, fmt.Errorf("galaxy cache temp: %w", err)
+	}
+	defer os.RemoveAll(tmpDir) // no-op once promoted (renamed away)
+
+	if colReq != "" {
+		if err := runGalaxy(galaxyEnvVars, "collection", "install", "-r", colReq, "-p", filepath.Join(tmpDir, "collections")); err != nil {
+			return nil, fmt.Errorf("installing collection requirements: %w", err)
 		}
 	}
-	// Roles (roles/requirements.yml preferred; bare requirements.yml is the
-	// legacy roles location).
-	if f := firstExisting(projectDir, "roles/requirements.yml", "requirements.yml"); f != "" {
-		if err := runGalaxy(galaxyEnvVars, "role", "install", "-r", f, "-p", filepath.Join(projectDir, "roles")); err != nil {
-			return fmt.Errorf("installing role requirements: %w", err)
+	if roleReq != "" {
+		if err := runGalaxy(galaxyEnvVars, "role", "install", "-r", roleReq, "-p", filepath.Join(tmpDir, "roles")); err != nil {
+			return nil, fmt.Errorf("installing role requirements: %w", err)
 		}
 	}
-	return nil
+	writeCollectionLock(tmpDir, filepath.Join(tmpDir, "collections"), colReq != "")
+	// Mark complete inside the temp dir, then promote atomically.
+	_ = os.WriteFile(filepath.Join(tmpDir, ".done"), []byte(key), 0644)
+	if err := os.Rename(tmpDir, cacheDir); err != nil {
+		log.Printf("galaxy: cache %s already populated by a concurrent run", key)
+	} else {
+		log.Printf("galaxy: cached install %s", key)
+	}
+	return pathEnv, nil
+}
+
+// requirementsHash derives the cache key from the requirements file contents and
+// the Galaxy server config, so a content or hub change re-resolves.
+func requirementsHash(colReq, roleReq string, galaxyEnvVars []string) string {
+	h := sha256.New()
+	for _, f := range []string{colReq, roleReq} {
+		if f == "" {
+			continue
+		}
+		if data, err := os.ReadFile(f); err == nil {
+			h.Write(data)
+		}
+	}
+	for _, e := range galaxyEnvVars {
+		h.Write([]byte(e))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// writeCollectionLock records the resolved collection versions next to the cache
+// as requirements.lock — a reproducibility/audit record of exactly what was
+// installed. Best-effort.
+func writeCollectionLock(cacheDir, colPath string, hasCollections bool) {
+	if !hasCollections {
+		return
+	}
+	cmd := exec.Command("ansible-galaxy", "collection", "list", "-p", colPath, "--format", "yaml")
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(cacheDir, "requirements.lock"), out, 0644)
 }
 
 func firstExisting(dir string, rel ...string) string {
