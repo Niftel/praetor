@@ -5,6 +5,7 @@ import {
   Rocket,
   FileCode,
   GitBranch,
+  Workflow,
   Server,
   Key,
   Calendar,
@@ -43,6 +44,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
       items: [
         { name: 'Jobs', path: '/jobs', icon: <Rocket size={20} /> },
         { name: 'Templates', path: '/templates', icon: <FileCode size={20} /> },
+        { name: 'Workflows', path: '/workflows', icon: <Workflow size={20} /> },
         { name: 'Projects', path: '/projects', icon: <GitBranch size={20} /> },
         { name: 'Inventories', path: '/inventories', icon: <Server size={20} /> },
         { name: 'Credentials', path: '/credentials', icon: <Key size={20} /> },

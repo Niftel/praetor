@@ -88,6 +88,16 @@ export const api = {
     attachTemplateNotification: (jtId: number, data: any) => fetchWithAuth(`/job-templates/${jtId}/notifications`, { method: 'POST', body: JSON.stringify(data) }),
     detachTemplateNotification: (jtId: number, ntId: number, event: string) => fetchWithAuth(`/job-templates/${jtId}/notifications/${ntId}/${event}`, { method: 'DELETE' }),
 
+    // Workflows (DAG of job-template / approval nodes with success/failure/always edges)
+    getWorkflows: () => fetchWithAuth('/workflow-templates').then(r => r.json()),
+    getWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}`).then(r => r.json()),
+    createWorkflow: (data: any) => fetchWithAuth('/workflow-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'DELETE' }),
+    launchWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: '{}' }).then(r => r.json()),
+    getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
+    approveWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/approve`, { method: 'POST' }),
+    denyWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/deny`, { method: 'POST' }),
+
     // Logs
     getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
     // Full playbook stdout, reassembled from the object store (returns plain text).
