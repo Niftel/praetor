@@ -344,11 +344,17 @@ const InventoriesPage = () => {
                             <span className="text-sm font-medium text-gray-900 truncate" title={host.name}>{host.name}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-2.5 w-40">
+                        <td className="px-4 py-2.5 w-56">
                           {host.is_runner_host ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">
-                              Runner
-                              {host.runner_healthy ? <Activity size={11} className="text-green-600" /> : host.runner_last_seen ? <Clock size={11} className="text-yellow-600" /> : null}
+                            <span className="inline-flex items-center gap-2">
+                              <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">Runner</span>
+                              {host.runner_healthy ? (
+                                <span title="Runner agent is healthy (recent heartbeat)" className="inline-flex items-center gap-1 text-xs text-green-600"><Activity size={12} /> healthy</span>
+                              ) : host.runner_last_seen ? (
+                                <span title="Runner agent is stale (no recent heartbeat)" className="inline-flex items-center gap-1 text-xs text-yellow-600"><Clock size={12} /> stale</span>
+                              ) : (
+                                <span title="Runner agent not installed yet" className="text-xs text-gray-400">no agent</span>
+                              )}
                             </span>
                           ) : (
                             <span className="text-xs text-gray-400">{host.enabled ? 'enabled' : 'disabled'}</span>
