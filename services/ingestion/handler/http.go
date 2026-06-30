@@ -94,6 +94,29 @@ func (h *IngestionHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]string{"status": "ok"})
 }
 
+// IngestFacts POST /api/v1/runs/{run_id}/facts — host-runner ships the facts
+// Ansible gathered; they're upserted into host_facts (keyed by host).
+func (h *IngestionHandler) IngestFacts(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "run_id"))
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	var body struct {
+		Facts map[string]json.RawMessage `json:"facts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	if err := h.Service.StoreFacts(r.Context(), runID, body.Facts); err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.Status(r, http.StatusAccepted)
+	render.JSON(w, r, map[string]string{"status": "accepted"})
+}
+
 // StreamLog GET /api/v1/runs/{run_id}/logs?since=N
 // Streams the run's stored stdout (chunks reassembled in order) back to the
 // caller. `since` supports incremental tailing; the highest seq written is

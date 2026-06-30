@@ -31,6 +31,8 @@ type JobManifest struct {
 	PlaybookContent string                 `json:"playbook_content"` // Inline playbook content (optional)
 	ExtraVars       map[string]interface{} `json:"extra_vars"`
 	Limit           string                 `json:"limit,omitempty"` // Ansible --limit host pattern
+	UseFactCache    bool                   `json:"use_fact_cache,omitempty"`
+	CachedFacts     map[string]json.RawMessage `json:"cached_facts,omitempty"` // hostname -> ansible_facts to preload
 	EnvironmentRefs []string               `json:"environment_refs"`
 	RunnerHost      string                 `json:"runner_host,omitempty"`
 	RunnerHostID    int64                  `json:"runner_host_id,omitempty"` // Host ID for heartbeat calls

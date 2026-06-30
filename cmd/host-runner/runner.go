@@ -17,12 +17,14 @@ import (
 // Runner orchestrates the local job execution
 type Runner struct {
 	JobDir string
+	APIURL string // ingestion endpoint, for shipping fact-cache results
 	Wal    *WAL
 }
 
-func NewRunner(jobDir string) *Runner {
+func NewRunner(jobDir, apiURL string) *Runner {
 	return &Runner{
 		JobDir: jobDir,
+		APIURL: apiURL,
 		Wal:    NewWAL(filepath.Join(jobDir, "events.jsonl")),
 	}
 }
@@ -150,6 +152,12 @@ func (r *Runner) Execute() error {
 	if key := filepath.Join(r.JobDir, "id_rsa"); fileExists(key) {
 		cmd.Env = append(cmd.Env, "ANSIBLE_PRIVATE_KEY_FILE="+key)
 	}
+	// Fact caching: preload stored facts into a jsonfile cache the play can read,
+	// and point Ansible at it so freshly-gathered facts are written back there.
+	if req.JobManifest.UseFactCache {
+		writeCachedFacts(r.JobDir, req.JobManifest.CachedFacts)
+		cmd.Env = append(cmd.Env, factCacheEnv(r.JobDir)...)
+	}
 
 	// Append (not truncate): on a resume after interruption this preserves the
 	// earlier output and keeps the log syncer's byte cursor valid; the resumed
@@ -165,6 +173,11 @@ func (r *Runner) Execute() error {
 	start := time.Now()
 	err = cmd.Run()
 	duration := time.Since(start)
+
+	// Ship any facts Ansible gathered into the cache back to the control plane.
+	if req.JobManifest.UseFactCache {
+		postFacts(r.APIURL, req.ExecutionRunID.String(), collectFacts(r.JobDir))
+	}
 
 	finalState := "successful"
 	eventType := "JOB_COMPLETED"
