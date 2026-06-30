@@ -315,10 +315,10 @@ const WorkflowsPage = () => {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {workflows.map(wf => (
-              <tr key={wf.id} className="hover:bg-gray-50">
-                <td className="px-4 py-2 text-sm font-medium text-gray-900">{wf.name}</td>
+              <tr key={wf.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onView(wf)}>
+                <td className="px-4 py-2 text-sm font-medium text-brand-600 hover:underline">{wf.name}</td>
                 <td className="px-4 py-2 text-sm text-gray-500">{orgs.find(o => o.id === wf.organization_id)?.name || wf.organization_id}</td>
-                <td className="px-4 py-2 text-right space-x-1 whitespace-nowrap">
+                <td className="px-4 py-2 text-right space-x-1 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                   <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => onView(wf)}>View</Button>
                   <Button variant="secondary" size="sm" icon={<Rocket size={14} />} onClick={() => onLaunch(wf)}>Launch</Button>
                   <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => onDelete(wf)} />
