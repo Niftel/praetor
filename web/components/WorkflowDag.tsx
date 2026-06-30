@@ -6,9 +6,27 @@ import { WorkflowNode, WorkflowEdge, WorkflowEdgeType } from '../types';
 // curves colored by edge type. Shared by the builder, detail and run views.
 const NODE_W = 168;
 const NODE_H = 52;
-const GAP_X = 56;
-const GAP_Y = 26;
+const GAP_X = 76;
+const GAP_Y = 28;
 const MARGIN = 16;
+
+// edgePath routes a parent's right-center to a child's left-center as an
+// orthogonal elbow with rounded corners: horizontal out, vertical, horizontal
+// in. The final segment is horizontal so the arrowhead meets the child flush.
+function edgePath(x1: number, y1: number, x2: number, y2: number): string {
+  if (Math.abs(y2 - y1) < 1) return `M${x1},${y1} L${x2},${y2}`; // same row → straight
+  const midX = x1 + Math.max(20, (x2 - x1) / 2);
+  const dir = y2 > y1 ? 1 : -1;
+  const r = Math.min(10, Math.abs(x2 - midX), Math.abs(y2 - y1) / 2);
+  return [
+    `M${x1},${y1}`,
+    `L${midX - r},${y1}`,
+    `Q${midX},${y1} ${midX},${y1 + dir * r}`,
+    `L${midX},${y2 - dir * r}`,
+    `Q${midX},${y2} ${midX + r},${y2}`,
+    `L${x2},${y2}`,
+  ].join(' ');
+}
 
 interface Placed extends WorkflowNode { x: number; y: number; }
 
@@ -93,9 +111,8 @@ const WorkflowDag: React.FC<WorkflowDagProps> = ({ nodes, edges, statusByKey, te
           if (!p || !c) return null;
           const x1 = p.x + NODE_W, y1 = p.y + NODE_H / 2;
           const x2 = c.x, y2 = c.y + NODE_H / 2;
-          const mx = (x1 + x2) / 2;
           return (
-            <path key={i} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
+            <path key={i} d={edgePath(x1, y1, x2, y2)}
               fill="none" stroke={EDGE_COLOR[e.edge_type]} strokeWidth={2} markerEnd={`url(#arrow-${e.edge_type})`} />
           );
         })}
