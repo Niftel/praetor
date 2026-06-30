@@ -1,0 +1,45 @@
+- name: Configure PostgreSQL database
+  hosts: databases
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install PostgreSQL
+      ansible.builtin.package:
+        name: [postgresql, postgresql-client]
+        state: present
+    - name: Ensure data directory
+      ansible.builtin.file:
+        path: /var/lib/postgresql/data
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0700'
+    - name: Initialize database cluster
+      ansible.builtin.command:
+        cmd: initdb -D /var/lib/postgresql/data
+        creates: /var/lib/postgresql/data/PG_VERSION
+      become_user: postgres
+    - name: Start PostgreSQL
+      ansible.builtin.shell: pg_ctl -D /var/lib/postgresql/data -o "-k /tmp" -l /var/lib/postgresql/logfile start
+      args:
+        creates: /var/lib/postgresql/data/postmaster.pid
+      become_user: postgres
+    - name: Wait until ready
+      ansible.builtin.command: pg_isready -h /tmp
+      register: ready
+      until: ready.rc == 0
+      retries: 10
+      delay: 2
+      changed_when: false
+      become_user: postgres
+    - name: Create application database
+      ansible.builtin.shell: createdb -h /tmp appdb || true
+      become_user: postgres
+      changed_when: false
+    - name: Create demo table
+      ansible.builtin.shell: psql -h /tmp -d appdb -c "CREATE TABLE IF NOT EXISTS visits (id serial primary key, ts timestamptz default now());"
+      become_user: postgres
+      changed_when: false
+    - name: Report
+      ansible.builtin.debug:
+        msg: "PostgreSQL ready on {{ inventory_hostname }} (database 'appdb')"

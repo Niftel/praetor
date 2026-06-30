@@ -1,0 +1,37 @@
+- name: Configure web server
+  hosts: webservers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install Apache
+      ansible.builtin.package:
+        name: apache2
+        state: present
+    - name: Set ServerName
+      ansible.builtin.lineinfile:
+        path: /etc/apache2/httpd.conf
+        line: "ServerName localhost"
+        state: present
+    - name: Deploy landing page
+      ansible.builtin.copy:
+        dest: /var/www/localhost/htdocs/index.html
+        mode: '0644'
+        content: |
+          <!doctype html><html><head><title>Praetor Web Stack</title></head>
+          <body style="font-family:sans-serif;margin:3rem">
+          <h1>Provisioned by Praetor</h1>
+          <p>Web server: {{ inventory_hostname }}</p>
+          <p>Backend: db1 (PostgreSQL / appdb)</p>
+          </body></html>
+    - name: Start Apache
+      ansible.builtin.shell: httpd -k restart 2>/dev/null || httpd -k start
+      changed_when: true
+    - name: Verify it serves the page
+      ansible.builtin.uri:
+        url: http://localhost/
+        return_content: true
+      register: page
+      failed_when: "'Provisioned by Praetor' not in page.content"
+    - name: Report
+      ansible.builtin.debug:
+        msg: "Web server live on {{ inventory_hostname }}"
