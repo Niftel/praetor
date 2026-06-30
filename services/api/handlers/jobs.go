@@ -123,12 +123,14 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// carries the unified_job_template_id; map it to the job_templates row that
 	// owns the roles, and read its prompt-on-launch flags.
 	var jt struct {
-		ID                   int64 `db:"id"`
-		AskVariablesOnLaunch bool  `db:"ask_variables_on_launch"`
-		AskLimitOnLaunch     bool  `db:"ask_limit_on_launch"`
+		ID                   int64           `db:"id"`
+		AskVariablesOnLaunch bool            `db:"ask_variables_on_launch"`
+		AskLimitOnLaunch     bool            `db:"ask_limit_on_launch"`
+		SurveyEnabled        bool            `db:"survey_enabled"`
+		SurveySpec           json.RawMessage `db:"survey_spec"`
 	}
 	if err := rs.DB.GetContext(r.Context(), &jt,
-		`SELECT id, ask_variables_on_launch, ask_limit_on_launch
+		`SELECT id, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec
 		 FROM job_templates WHERE unified_job_template_id = $1`, req.UnifiedJobTemplateID); err != nil {
 		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job template")))
 		return
@@ -138,9 +140,19 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Collect launch overrides, accepting each only if the template opts in.
-	// A template that doesn't ask for an override silently ignores it.
+	// A survey, when enabled, is the variable-prompt mechanism: answers are
+	// validated against the spec (defaults filled, required enforced) and become
+	// extra_vars regardless of ask_variables_on_launch. Otherwise a plain
+	// variables prompt is honored only if the template asks for it.
 	overrides := map[string]interface{}{}
-	if jt.AskVariablesOnLaunch && len(req.ExtraVars) > 0 {
+	if jt.SurveyEnabled {
+		answers, serr := applySurvey(jt.SurveySpec, req.ExtraVars)
+		if serr != nil {
+			render.Render(w, r, ErrInvalidRequest(serr))
+			return
+		}
+		overrides["extra_vars"] = answers
+	} else if jt.AskVariablesOnLaunch && len(req.ExtraVars) > 0 {
 		overrides["extra_vars"] = req.ExtraVars
 	}
 	if jt.AskLimitOnLaunch && req.Limit != nil {
