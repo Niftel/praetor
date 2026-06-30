@@ -30,6 +30,7 @@ type JobManifest struct {
 	Playbook        string                 `json:"playbook"`         // Playbook file path within project
 	PlaybookContent string                 `json:"playbook_content"` // Inline playbook content (optional)
 	ExtraVars       map[string]interface{} `json:"extra_vars"`
+	Limit           string                 `json:"limit,omitempty"` // Ansible --limit host pattern
 	EnvironmentRefs []string               `json:"environment_refs"`
 	RunnerHost      string                 `json:"runner_host,omitempty"`
 	RunnerHostID    int64                  `json:"runner_host_id,omitempty"` // Host ID for heartbeat calls

@@ -100,6 +100,9 @@ type JobTemplate struct {
 	JobType                string          `json:"job_type" db:"job_type"`
 	Verbosity              int             `json:"verbosity" db:"verbosity"`
 	ExtraVars              json.RawMessage `json:"extra_vars,omitempty" db:"extra_vars"`
+	JobLimit               string          `json:"limit" db:"job_limit"`
+	AskVariablesOnLaunch   bool            `json:"ask_variables_on_launch" db:"ask_variables_on_launch"`
+	AskLimitOnLaunch       bool            `json:"ask_limit_on_launch" db:"ask_limit_on_launch"`
 	CreatedAt              time.Time       `json:"created_at" db:"created_at"`
 	ModifiedAt             time.Time       `json:"modified_at" db:"modified_at"`
 }

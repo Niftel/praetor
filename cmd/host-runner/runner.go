@@ -118,6 +118,19 @@ func (r *Runner) Execute() error {
 	// checkpoint from an interrupted run is present, resume the play: skip
 	// completed tasks and restore registered vars.
 	playArgs := []string{"-i", inventoryPath}
+	if req.JobManifest.Limit != "" {
+		playArgs = append(playArgs, "--limit", req.JobManifest.Limit)
+	}
+	if len(req.JobManifest.ExtraVars) > 0 {
+		varsPath := filepath.Join(r.JobDir, "extra_vars.json")
+		if b, err := json.Marshal(req.JobManifest.ExtraVars); err == nil {
+			if err := os.WriteFile(varsPath, b, 0644); err == nil {
+				playArgs = append(playArgs, "-e", "@"+varsPath)
+			} else {
+				log.Printf("Warning: could not write extra_vars: %v", err)
+			}
+		}
+	}
 	if resume := resumeArgs(r.JobDir); resume != nil {
 		log.Printf("Resuming play at task %q (restoring checkpointed vars)", resume[1])
 		playArgs = append(playArgs, resume...)

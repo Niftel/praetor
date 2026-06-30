@@ -17,6 +17,13 @@ const TemplatesPage = () => {
 
   // Form State
   const [formData, setFormData] = useState<Partial<Template>>({});
+  const [varsText, setVarsText] = useState('');
+
+  // Launch dialog
+  const [launchTpl, setLaunchTpl] = useState<Template | null>(null);
+  const [launchVars, setLaunchVars] = useState('');
+  const [launchLimit, setLaunchLimit] = useState('');
+  const [launchMsg, setLaunchMsg] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -45,29 +52,69 @@ const TemplatesPage = () => {
   const openCreateModal = () => {
     setEditingTemplate(null);
     setFormData({});
+    setVarsText('');
     setIsModalOpen(true);
   };
 
   const openEditModal = (template: Template) => {
     setEditingTemplate(template);
     setFormData(template);
+    setVarsText(
+      template.extra_vars && Object.keys(template.extra_vars).length
+        ? JSON.stringify(template.extra_vars, null, 2)
+        : ''
+    );
     setIsModalOpen(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    let extra_vars: any = {};
+    if (varsText.trim()) {
+      try { extra_vars = JSON.parse(varsText); }
+      catch { alert('Variables must be valid JSON'); return; }
+    }
+    const payload = { ...formData, extra_vars };
     try {
       if (editingTemplate) {
-        // Update existing - for now just update local state
-        setTemplates(templates.map(t => t.id === editingTemplate.id ? { ...t, ...formData } as Template : t));
+        const updated = await api.updateTemplate(editingTemplate.id, payload);
+        setTemplates(templates.map(t => t.id === editingTemplate.id ? updated : t));
       } else {
-        // Create new
-        const newTemplate = await api.createTemplate(formData);
+        const newTemplate = await api.createTemplate(payload);
         setTemplates([...templates, newTemplate]);
       }
       setIsModalOpen(false);
     } catch (err) {
       console.error('Failed to save template', err);
+    }
+  };
+
+  const openLaunch = (t: Template) => {
+    setLaunchTpl(t);
+    setLaunchVars('');
+    setLaunchLimit(t.limit || '');
+    setLaunchMsg('');
+  };
+
+  const handleLaunch = async () => {
+    if (!launchTpl) return;
+    const payload: any = {
+      unified_job_template_id: launchTpl.unified_job_template_id,
+      name: launchTpl.name,
+    };
+    if (launchTpl.ask_variables_on_launch && launchVars.trim()) {
+      try { payload.extra_vars = JSON.parse(launchVars); }
+      catch { setLaunchMsg('Variables must be valid JSON'); return; }
+    }
+    if (launchTpl.ask_limit_on_launch && launchLimit.trim()) {
+      payload.limit = launchLimit.trim();
+    }
+    try {
+      await api.launchJob(payload);
+      setLaunchTpl(null);
+    } catch (err) {
+      setLaunchMsg('Launch failed');
+      console.error(err);
     }
   };
 
@@ -126,7 +173,7 @@ const TemplatesPage = () => {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => { }} className="text-green-600 hover:text-green-900" title="Launch">
+                    <button onClick={() => openLaunch(template)} className="text-green-600 hover:text-green-900" title="Launch">
                       <Play size={18} />
                     </button>
                     <button onClick={() => openEditModal(template)} className="text-blue-600 hover:text-blue-900" title="Edit">
@@ -221,11 +268,94 @@ const TemplatesPage = () => {
               </select>
             </div>
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Default Variables (JSON)</label>
+            <textarea
+              rows={4}
+              placeholder={'{\n  "key": "value"\n}'}
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2 font-mono text-sm"
+              value={varsText}
+              onChange={e => setVarsText(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Limit (default host pattern)</label>
+            <input
+              type="text"
+              placeholder="e.g. web* or host1:host2"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
+              value={formData.limit || ''}
+              onChange={e => setFormData({ ...formData, limit: e.target.value })}
+            />
+          </div>
+          <div className="border-t pt-3">
+            <p className="text-sm font-medium text-gray-700 mb-2">Prompt on launch</p>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={!!formData.ask_variables_on_launch}
+                onChange={e => setFormData({ ...formData, ask_variables_on_launch: e.target.checked })}
+              />
+              Ask for variables when launching
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700 mt-1">
+              <input
+                type="checkbox"
+                checked={!!formData.ask_limit_on_launch}
+                onChange={e => setFormData({ ...formData, ask_limit_on_launch: e.target.checked })}
+              />
+              Ask for limit when launching
+            </label>
+          </div>
           <div className="mt-5 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button type="submit">Save Template</Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!launchTpl}
+        onClose={() => setLaunchTpl(null)}
+        title={launchTpl ? `Launch: ${launchTpl.name}` : 'Launch'}
+        size="md"
+      >
+        {launchTpl && (
+          <div className="space-y-4">
+            {!launchTpl.ask_variables_on_launch && !launchTpl.ask_limit_on_launch && (
+              <p className="text-sm text-gray-500">This template runs with its saved configuration.</p>
+            )}
+            {launchTpl.ask_variables_on_launch && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Variables (JSON)</label>
+                <textarea
+                  rows={4}
+                  placeholder={'{\n  "key": "value"\n}'}
+                  className="mt-1 block w-full rounded-md border-gray-300 border p-2 font-mono text-sm"
+                  value={launchVars}
+                  onChange={e => setLaunchVars(e.target.value)}
+                />
+              </div>
+            )}
+            {launchTpl.ask_limit_on_launch && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Limit</label>
+                <input
+                  type="text"
+                  placeholder="host pattern"
+                  className="mt-1 block w-full rounded-md border-gray-300 border p-2"
+                  value={launchLimit}
+                  onChange={e => setLaunchLimit(e.target.value)}
+                />
+              </div>
+            )}
+            {launchMsg && <p className="text-sm text-red-600">{launchMsg}</p>}
+            <div className="mt-5 flex justify-end gap-3">
+              <Button type="button" variant="secondary" onClick={() => setLaunchTpl(null)}>Cancel</Button>
+              <Button type="button" onClick={handleLaunch}>Launch</Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

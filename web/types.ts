@@ -146,6 +146,9 @@ export interface JobTemplate {
   job_type: string;
   verbosity: number;
   extra_vars?: any;
+  limit?: string;
+  ask_variables_on_launch?: boolean;
+  ask_limit_on_launch?: boolean;
   created_at: string;
   modified_at: string;
 }

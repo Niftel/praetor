@@ -80,10 +80,10 @@ func (s *Scheduler) processPendingJobs() error {
 
 	// 1. Fetch pending jobs with SKIP LOCKED
 	query := `
-		SELECT id, name, unified_job_template_id, status 
-		FROM unified_jobs 
+		SELECT id, name, unified_job_template_id, status, job_args
+		FROM unified_jobs
 		WHERE status = 'pending' AND current_run_id IS NULL
-		FOR UPDATE SKIP LOCKED 
+		FOR UPDATE SKIP LOCKED
 		LIMIT 10`
 
 	var jobs []models.UnifiedJob
@@ -224,12 +224,20 @@ func (s *Scheduler) processPendingJobs() error {
 			}
 		}
 
+		// Effective variables and limit: the template's defaults, overlaid by any
+		// prompt-on-launch overrides the launcher supplied. The launch handler has
+		// already gated those overrides by the template's ask_* flags, so anything
+		// present in job_args is allowed.
+		extraVars := mergeExtraVars(template.ExtraVars, job.JobArgs)
+		limit := effectiveLimit(template.JobLimit, job.JobArgs)
+
 		manifest := events.JobManifest{
 			Inventory:       inventoryContent,
 			ProjectURL:      projectURL,
 			Playbook:        template.Playbook,
 			PlaybookContent: pbContent,
-			ExtraVars:       map[string]interface{}{},
+			ExtraVars:       extraVars,
+			Limit:           limit,
 			EnvironmentRefs: []string{},
 			RunnerHost:      runnerHostName,
 			RunnerHostID:    runnerHostID,

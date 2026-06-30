@@ -105,10 +105,13 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 // LaunchJob creates a new unified job with status 'pending'
 // The Scheduler will pick this up, create an execution_run, and dispatch it.
 func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
-	// Simple launch payload
+	// Launch payload: the template id, an optional name, and prompt-on-launch
+	// overrides (only honored when the template opts in via its ask_* flags).
 	type LaunchRequest struct {
-		UnifiedJobTemplateID int64  `json:"unified_job_template_id"`
-		Name                 string `json:"name"`
+		UnifiedJobTemplateID int64                  `json:"unified_job_template_id"`
+		Name                 string                 `json:"name"`
+		ExtraVars            map[string]interface{} `json:"extra_vars,omitempty"`
+		Limit                *string                `json:"limit,omitempty"`
 	}
 	var req LaunchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -118,15 +121,36 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 
 	// Launching requires execute access on the job template. The launch payload
 	// carries the unified_job_template_id; map it to the job_templates row that
-	// owns the roles.
-	var jtID int64
-	if err := rs.DB.GetContext(r.Context(), &jtID,
-		`SELECT id FROM job_templates WHERE unified_job_template_id = $1`, req.UnifiedJobTemplateID); err != nil {
+	// owns the roles, and read its prompt-on-launch flags.
+	var jt struct {
+		ID                   int64 `db:"id"`
+		AskVariablesOnLaunch bool  `db:"ask_variables_on_launch"`
+		AskLimitOnLaunch     bool  `db:"ask_limit_on_launch"`
+	}
+	if err := rs.DB.GetContext(r.Context(), &jt,
+		`SELECT id, ask_variables_on_launch, ask_limit_on_launch
+		 FROM job_templates WHERE unified_job_template_id = $1`, req.UnifiedJobTemplateID); err != nil {
 		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job template")))
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actExecute) {
+	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jt.ID, actExecute) {
 		return
+	}
+
+	// Collect launch overrides, accepting each only if the template opts in.
+	// A template that doesn't ask for an override silently ignores it.
+	overrides := map[string]interface{}{}
+	if jt.AskVariablesOnLaunch && len(req.ExtraVars) > 0 {
+		overrides["extra_vars"] = req.ExtraVars
+	}
+	if jt.AskLimitOnLaunch && req.Limit != nil {
+		overrides["limit"] = *req.Limit
+	}
+	jobArgs := []byte("{}")
+	if len(overrides) > 0 {
+		if b, err := json.Marshal(overrides); err == nil {
+			jobArgs = b
+		}
 	}
 
 	// Insert unified_job in 'pending' state with NO current_run_id
@@ -137,10 +161,10 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// 4. Publish to NATS for execution
 	var jobID int64
 	err := rs.DB.QueryRowContext(r.Context(), `
-		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at)
-		VALUES ($1, $2, 'pending', $3)
+		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
+		VALUES ($1, $2, 'pending', $3, $4)
 		RETURNING id`,
-		req.Name, req.UnifiedJobTemplateID, time.Now(),
+		req.Name, req.UnifiedJobTemplateID, time.Now(), jobArgs,
 	).Scan(&jobID)
 
 	if err != nil {
