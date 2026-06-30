@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Template, Project, Inventory, Credential, PaginatedResponse } from '../types';
+import { Template, Project, Inventory, Credential, PaginatedResponse, SurveyQuestion } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
@@ -18,12 +18,18 @@ const TemplatesPage = () => {
   // Form State
   const [formData, setFormData] = useState<Partial<Template>>({});
   const [varsText, setVarsText] = useState('');
+  const [survey, setSurvey] = useState<SurveyQuestion[]>([]);
 
   // Launch dialog
   const [launchTpl, setLaunchTpl] = useState<Template | null>(null);
   const [launchVars, setLaunchVars] = useState('');
   const [launchLimit, setLaunchLimit] = useState('');
+  const [launchAnswers, setLaunchAnswers] = useState<Record<string, string>>({});
   const [launchMsg, setLaunchMsg] = useState('');
+
+  const blankQuestion = (): SurveyQuestion => ({ variable: '', question_name: '', type: 'text', required: false, default: '' });
+  const updateQ = (i: number, patch: Partial<SurveyQuestion>) =>
+    setSurvey(prev => prev.map((q, j) => (j === i ? { ...q, ...patch } : q)));
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,6 +59,7 @@ const TemplatesPage = () => {
     setEditingTemplate(null);
     setFormData({});
     setVarsText('');
+    setSurvey([]);
     setIsModalOpen(true);
   };
 
@@ -64,6 +71,7 @@ const TemplatesPage = () => {
         ? JSON.stringify(template.extra_vars, null, 2)
         : ''
     );
+    setSurvey(template.survey_spec?.spec || []);
     setIsModalOpen(true);
   };
 
@@ -74,7 +82,11 @@ const TemplatesPage = () => {
       try { extra_vars = JSON.parse(varsText); }
       catch { alert('Variables must be valid JSON'); return; }
     }
-    const payload = { ...formData, extra_vars };
+    const payload = {
+      ...formData,
+      extra_vars,
+      survey_spec: { spec: survey.filter(q => q.variable.trim()) },
+    };
     try {
       if (editingTemplate) {
         const updated = await api.updateTemplate(editingTemplate.id, payload);
@@ -93,6 +105,10 @@ const TemplatesPage = () => {
     setLaunchTpl(t);
     setLaunchVars('');
     setLaunchLimit(t.limit || '');
+    // Seed survey answers from each question's default.
+    const seed: Record<string, string> = {};
+    (t.survey_spec?.spec || []).forEach(q => { seed[q.variable] = q.default || ''; });
+    setLaunchAnswers(seed);
     setLaunchMsg('');
   };
 
@@ -102,7 +118,17 @@ const TemplatesPage = () => {
       unified_job_template_id: launchTpl.unified_job_template_id,
       name: launchTpl.name,
     };
-    if (launchTpl.ask_variables_on_launch && launchVars.trim()) {
+    if (launchTpl.survey_enabled) {
+      // Survey answers are submitted as extra_vars; the API validates them
+      // against the spec (required/defaults).
+      const answers: Record<string, any> = {};
+      for (const q of launchTpl.survey_spec?.spec || []) {
+        const raw = launchAnswers[q.variable];
+        if (raw === undefined || raw === '') continue;
+        answers[q.variable] = q.type === 'integer' ? Number(raw) : raw;
+      }
+      payload.extra_vars = answers;
+    } else if (launchTpl.ask_variables_on_launch && launchVars.trim()) {
       try { payload.extra_vars = JSON.parse(launchVars); }
       catch { setLaunchMsg('Variables must be valid JSON'); return; }
     }
@@ -307,6 +333,53 @@ const TemplatesPage = () => {
               Ask for limit when launching
             </label>
           </div>
+          <div className="border-t pt-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+              <input
+                type="checkbox"
+                checked={!!formData.survey_enabled}
+                onChange={e => setFormData({ ...formData, survey_enabled: e.target.checked })}
+              />
+              Enable survey
+            </label>
+            {formData.survey_enabled && (
+              <div className="space-y-3">
+                {survey.map((q, i) => (
+                  <div key={i} className="border rounded p-2 space-y-2 bg-gray-50">
+                    <div className="grid grid-cols-2 gap-2">
+                      <input placeholder="variable (e.g. app_version)" className="border p-1 rounded text-sm font-mono"
+                        value={q.variable} onChange={e => updateQ(i, { variable: e.target.value })} />
+                      <input placeholder="Question label" className="border p-1 rounded text-sm"
+                        value={q.question_name} onChange={e => updateQ(i, { question_name: e.target.value })} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 items-center">
+                      <select className="border p-1 rounded text-sm" value={q.type}
+                        onChange={e => updateQ(i, { type: e.target.value as SurveyQuestion['type'] })}>
+                        <option value="text">Text</option>
+                        <option value="textarea">Textarea</option>
+                        <option value="password">Password</option>
+                        <option value="integer">Integer</option>
+                        <option value="multiplechoice">Multiple choice</option>
+                      </select>
+                      <input placeholder="default" className="border p-1 rounded text-sm"
+                        value={q.default || ''} onChange={e => updateQ(i, { default: e.target.value })} />
+                      <label className="flex items-center gap-1 text-xs text-gray-600">
+                        <input type="checkbox" checked={q.required} onChange={e => updateQ(i, { required: e.target.checked })} />
+                        Required
+                      </label>
+                    </div>
+                    {q.type === 'multiplechoice' && (
+                      <textarea rows={2} placeholder="one choice per line" className="w-full border p-1 rounded text-sm"
+                        value={q.choices || ''} onChange={e => updateQ(i, { choices: e.target.value })} />
+                    )}
+                    <button type="button" className="text-xs text-red-600 hover:underline"
+                      onClick={() => setSurvey(survey.filter((_, j) => j !== i))}>Remove question</button>
+                  </div>
+                ))}
+                <Button type="button" variant="secondary" onClick={() => setSurvey([...survey, blankQuestion()])}>+ Add question</Button>
+              </div>
+            )}
+          </div>
           <div className="mt-5 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button type="submit">Save Template</Button>
@@ -322,10 +395,35 @@ const TemplatesPage = () => {
       >
         {launchTpl && (
           <div className="space-y-4">
-            {!launchTpl.ask_variables_on_launch && !launchTpl.ask_limit_on_launch && (
+            {!launchTpl.survey_enabled && !launchTpl.ask_variables_on_launch && !launchTpl.ask_limit_on_launch && (
               <p className="text-sm text-gray-500">This template runs with its saved configuration.</p>
             )}
-            {launchTpl.ask_variables_on_launch && (
+            {launchTpl.survey_enabled && (launchTpl.survey_spec?.spec || []).map((q, i) => (
+              <div key={i}>
+                <label className="block text-sm font-medium text-gray-700">
+                  {q.question_name || q.variable}{q.required && <span className="text-red-500"> *</span>}
+                </label>
+                {q.type === 'textarea' ? (
+                  <textarea rows={3} className="mt-1 block w-full rounded-md border-gray-300 border p-2 text-sm"
+                    value={launchAnswers[q.variable] || ''}
+                    onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
+                ) : q.type === 'multiplechoice' ? (
+                  <select className="mt-1 block w-full rounded-md border-gray-300 border p-2 text-sm"
+                    value={launchAnswers[q.variable] || ''}
+                    onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })}>
+                    <option value="">Select…</option>
+                    {(q.choices || '').split('\n').map(c => c.trim()).filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    type={q.type === 'password' ? 'password' : q.type === 'integer' ? 'number' : 'text'}
+                    className="mt-1 block w-full rounded-md border-gray-300 border p-2 text-sm"
+                    value={launchAnswers[q.variable] || ''}
+                    onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
+                )}
+              </div>
+            ))}
+            {!launchTpl.survey_enabled && launchTpl.ask_variables_on_launch && (
               <div>
                 <label className="block text-sm font-medium text-gray-700">Variables (JSON)</label>
                 <textarea

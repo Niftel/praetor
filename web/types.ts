@@ -149,8 +149,19 @@ export interface JobTemplate {
   limit?: string;
   ask_variables_on_launch?: boolean;
   ask_limit_on_launch?: boolean;
+  survey_enabled?: boolean;
+  survey_spec?: { name?: string; description?: string; spec?: SurveyQuestion[] };
   created_at: string;
   modified_at: string;
+}
+
+export interface SurveyQuestion {
+  variable: string;
+  question_name: string;
+  type: 'text' | 'textarea' | 'password' | 'integer' | 'multiplechoice';
+  required: boolean;
+  default?: string;
+  choices?: string; // newline-separated, for multiplechoice
 }
 
 // Alias for backwards compatibility
