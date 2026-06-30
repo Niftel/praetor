@@ -238,4 +238,43 @@ export interface Organization {
   modified_at?: string;
 }
 
+// Workflows
+export type WorkflowNodeType = 'job' | 'approval';
+export type WorkflowEdgeType = 'success' | 'failure' | 'always';
+
+export interface WorkflowNode {
+  node_key: string;
+  node_type: WorkflowNodeType;
+  job_template_id?: number | null;
+  name: string;
+}
+
+export interface WorkflowEdge {
+  parent_key: string;
+  child_key: string;
+  edge_type: WorkflowEdgeType;
+}
+
+export interface Workflow {
+  id: number;
+  organization_id: number;
+  name: string;
+  nodes?: WorkflowNode[];
+  edges?: WorkflowEdge[];
+}
+
+export interface WorkflowJobNode {
+  id: number;
+  node_key: string;
+  node_type: WorkflowNodeType;
+  unified_job_id?: number | null;
+  status: string;
+}
+
+export interface WorkflowJob {
+  id: number;
+  status: string;
+  nodes: WorkflowJobNode[];
+}
+
 // Infrastructure models

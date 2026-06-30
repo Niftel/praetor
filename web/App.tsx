@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import JobsPage from './pages/JobsPage';
 import TemplatesPage from './pages/TemplatesPage';
+import WorkflowsPage from './pages/WorkflowsPage';
 import ProjectsPage from './pages/ProjectsPage';
 import InventoriesPage from './pages/InventoriesPage';
 import CredentialsPage from './pages/CredentialsPage';
@@ -42,6 +43,7 @@ const App = () => {
           <Route index element={<DashboardPage />} />
           <Route path="jobs" element={<JobsPage />} />
           <Route path="templates" element={<TemplatesPage />} />
+          <Route path="workflows" element={<WorkflowsPage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="inventories" element={<InventoriesPage />} />
           <Route path="credentials" element={<CredentialsPage />} />
