@@ -5,6 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import ResourceAccess from '../components/ResourceAccess';
 import { Building2, Users, ShieldCheck, UserPlus, Trash2, Loader, Eye, Key, Package, Plus } from 'lucide-react';
 
 const OrganizationsPage = () => {
@@ -296,21 +297,14 @@ const OrganizationsPage = () => {
                                 </div>
                             </Card>
 
-                            {/* Roles Section */}
+                            {/* Access — all roles on this org (admin, member, and the delegated
+                                project/inventory/credential/etc. admins), with who holds them */}
                             <Card>
                                 <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
                                     <Key size={20} className="text-purple-600" />
-                                    Object Roles
+                                    Access
                                 </h3>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                    {orgRoles.map(role => (
-                                        <div key={role.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-                                            <div className="font-medium text-gray-800">{role.name || role.role_field}</div>
-                                            <div className="text-xs text-gray-500">{role.role_field}</div>
-                                        </div>
-                                    ))}
-                                    {orgRoles.length === 0 && <div className="col-span-full text-gray-500 text-center py-4">No roles found</div>}
-                                </div>
+                                <ResourceAccess contentType="organization" objectId={selectedOrg.id} />
                             </Card>
 
                             {/* Teams Section */}

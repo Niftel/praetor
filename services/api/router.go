@@ -109,8 +109,12 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 				r.Get("/organizations", content.ListUserOrganizations)
 				r.Get("/teams", content.ListUserTeams)
 				r.Get("/roles", content.ListUserRoles)
+				r.Get("/access", content.UserAccess) // roles a user holds, with resource names
 			})
 		})
+
+		// Per-resource access (who holds which role on an object): AWX-style.
+		r.Get("/access", content.ResourceAccess)
 
 		// =======================================================================
 		// Teams
