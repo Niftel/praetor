@@ -12,7 +12,8 @@ const InventoriesPage = () => {
   const [activeTab, setActiveTab] = useState<'hosts' | 'groups' | 'sources'>('hosts');
   const [sources, setSources] = useState<any[]>([]);
   const [showSourceModal, setShowSourceModal] = useState(false);
-  const [newSource, setNewSource] = useState({ name: '', source_kind: 'inventory', source: '' });
+  const [newSource, setNewSource] = useState<{ name: string; source_kind: string; source: string; credential_id: number | '' }>({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
+  const [credentials, setCredentials] = useState<any[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +54,7 @@ const InventoriesPage = () => {
 
   useEffect(() => {
     fetchInventories();
+    api.getCredentials().then(res => setCredentials(res?.items || res || [])).catch(() => { });
   }, []);
 
   // Load hosts and groups when selected inventory changes
@@ -87,9 +89,15 @@ const InventoriesPage = () => {
   };
   const handleCreateSource = async () => {
     if (!selectedInventoryId || !newSource.name.trim()) return;
-    await api.createInventorySource(selectedInventoryId, newSource);
+    const payload = {
+      name: newSource.name,
+      source_kind: newSource.source_kind,
+      source: newSource.source,
+      credential_id: newSource.credential_id === '' ? null : newSource.credential_id,
+    };
+    await api.createInventorySource(selectedInventoryId, payload);
     setShowSourceModal(false);
-    setNewSource({ name: '', source_kind: 'inventory', source: '' });
+    setNewSource({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
     refreshSources();
   };
   const handleSyncSource = async (sid: number) => {
@@ -642,6 +650,15 @@ all:
               value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
               <option value="inventory">Inventory / plugin (YAML)</option>
               <option value="script">Script (executable)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Credential <span className="text-gray-400 font-normal">(optional)</span></label>
+            <p className="text-xs text-gray-400 mb-1">A cloud credential (e.g. AWS) whose injectors set the env vars / files the inventory plugin needs to authenticate.</p>
+            <select className="mt-1 block w-full rounded-md border-gray-300 border p-2"
+              value={newSource.credential_id} onChange={e => setNewSource({ ...newSource, credential_id: e.target.value === '' ? '' : Number(e.target.value) })}>
+              <option value="">None</option>
+              {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div>

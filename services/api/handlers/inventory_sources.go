@@ -17,6 +17,7 @@ type inventorySource struct {
 	Name           string     `json:"name" db:"name"`
 	SourceKind     string     `json:"source_kind" db:"source_kind"`
 	Source         string     `json:"source" db:"source"`
+	CredentialID   *int64     `json:"credential_id" db:"credential_id"`
 	UpdateOnLaunch bool       `json:"update_on_launch" db:"update_on_launch"`
 	LastSyncedAt   *time.Time `json:"last_synced_at" db:"last_synced_at"`
 }
@@ -37,7 +38,7 @@ func (rs *InventoriesResource) ListInventorySources(w http.ResponseWriter, r *ht
 	}
 	sources := []inventorySource{}
 	if err := rs.DB.SelectContext(r.Context(), &sources,
-		`SELECT id, inventory_id, name, source_kind, source, update_on_launch, last_synced_at
+		`SELECT id, inventory_id, name, source_kind, source, credential_id, update_on_launch, last_synced_at
 		 FROM inventory_sources WHERE inventory_id = $1 ORDER BY name`, invID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -59,6 +60,7 @@ func (rs *InventoriesResource) CreateInventorySource(w http.ResponseWriter, r *h
 		Name           string `json:"name"`
 		SourceKind     string `json:"source_kind"`
 		Source         string `json:"source"`
+		CredentialID   *int64 `json:"credential_id"`
 		UpdateOnLaunch bool   `json:"update_on_launch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
@@ -68,11 +70,15 @@ func (rs *InventoriesResource) CreateInventorySource(w http.ResponseWriter, r *h
 	if body.SourceKind == "" {
 		body.SourceKind = "inventory"
 	}
+	// Attaching a credential requires use access to it (AWX attach semantics).
+	if body.CredentialID != nil && !rs.authorize(w, r, rbac.ContentTypeCredential, *body.CredentialID, actUse) {
+		return
+	}
 	var id int64
 	if err := rs.DB.QueryRowxContext(r.Context(),
-		`INSERT INTO inventory_sources (inventory_id, name, source_kind, source, update_on_launch)
-		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		invID, body.Name, body.SourceKind, body.Source, body.UpdateOnLaunch).Scan(&id); err != nil {
+		`INSERT INTO inventory_sources (inventory_id, name, source_kind, source, credential_id, update_on_launch)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		invID, body.Name, body.SourceKind, body.Source, body.CredentialID, body.UpdateOnLaunch).Scan(&id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
