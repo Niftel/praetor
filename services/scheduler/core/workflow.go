@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log"
 )
 
@@ -25,6 +26,7 @@ type wfNode struct {
 	ID            int64  `db:"id"`
 	NodeKey       string `db:"node_key"`
 	NodeType      string `db:"node_type"`
+	Name          string `db:"name"`
 	Status        string `db:"status"`
 	JobTemplateID *int64 `db:"job_template_id"`
 	UnifiedJobID  *int64 `db:"unified_job_id"`
@@ -59,14 +61,25 @@ func wfEdgeFires(edgeType, parentState string) bool {
 }
 
 func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
-	var templateID int64
-	if err := s.DB.GetContext(ctx, &templateID, `SELECT workflow_template_id FROM workflow_jobs WHERE id=$1`, wjID); err != nil {
+	var wf struct {
+		TemplateID int64  `db:"workflow_template_id"`
+		Name       string `db:"name"`
+	}
+	if err := s.DB.GetContext(ctx, &wf,
+		`SELECT wj.workflow_template_id, wt.name
+		 FROM workflow_jobs wj JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
+		 WHERE wj.id=$1`, wjID); err != nil {
 		return err
 	}
+	templateID := wf.TemplateID
 
 	var nodes []wfNode
 	if err := s.DB.SelectContext(ctx, &nodes,
-		`SELECT id, node_key, node_type, status, job_template_id, unified_job_id FROM workflow_job_nodes WHERE workflow_job_id=$1`, wjID); err != nil {
+		`SELECT wjn.id, wjn.node_key, wjn.node_type, COALESCE(wn.name, '') AS name,
+		        wjn.status, wjn.job_template_id, wjn.unified_job_id
+		 FROM workflow_job_nodes wjn
+		 LEFT JOIN workflow_nodes wn ON wn.workflow_template_id = $1 AND wn.node_key = wjn.node_key
+		 WHERE wjn.workflow_job_id = $2`, templateID, wjID); err != nil {
 		return err
 	}
 	byKey := map[string]*wfNode{}
@@ -149,10 +162,17 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			n.Status = "failed"
 			continue
 		}
+		// Name each node job uniquely per run so identical workflows/nodes don't
+		// collide in the Jobs list: "<workflow> #<run> / <node>".
+		nodeLabel := n.Name
+		if nodeLabel == "" {
+			nodeLabel = n.NodeKey
+		}
+		jobName := fmt.Sprintf("%s #%d / %s", wf.Name, wjID, nodeLabel)
 		var jobID int64
 		if err := s.DB.QueryRowContext(ctx,
 			`INSERT INTO unified_jobs (name, unified_job_template_id, status) VALUES ($1,$2,'pending') RETURNING id`,
-			"wf-"+n.NodeKey, ujtID).Scan(&jobID); err != nil {
+			jobName, ujtID).Scan(&jobID); err != nil {
 			_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status='failed' WHERE id=$1`, n.ID)
 			n.Status = "failed"
 			continue
