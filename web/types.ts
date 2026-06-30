@@ -151,6 +151,9 @@ export interface JobTemplate {
   ask_limit_on_launch?: boolean;
   survey_enabled?: boolean;
   survey_spec?: { name?: string; description?: string; spec?: SurveyQuestion[] };
+  webhook_enabled?: boolean;
+  webhook_service?: string;
+  webhook_key?: string;
   created_at: string;
   modified_at: string;
 }

@@ -105,6 +105,9 @@ type JobTemplate struct {
 	AskLimitOnLaunch       bool            `json:"ask_limit_on_launch" db:"ask_limit_on_launch"`
 	SurveyEnabled          bool            `json:"survey_enabled" db:"survey_enabled"`
 	SurveySpec             json.RawMessage `json:"survey_spec,omitempty" db:"survey_spec"`
+	WebhookEnabled         bool            `json:"webhook_enabled" db:"webhook_enabled"`
+	WebhookService         string          `json:"webhook_service" db:"webhook_service"`
+	WebhookKey             string          `json:"webhook_key" db:"webhook_key"`
 	CreatedAt              time.Time       `json:"created_at" db:"created_at"`
 	ModifiedAt             time.Time       `json:"modified_at" db:"modified_at"`
 }

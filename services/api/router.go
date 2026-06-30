@@ -56,6 +56,11 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	hosts := handlers.NewHostsResource(db)
 	r.Post("/api/v1/hosts/{hostId}/runner-heartbeat", hosts.RunnerHeartbeat)
 
+	// Public inbound webhooks (GitHub/GitLab/generic -> launch). Verified by the
+	// template's shared secret, not user auth.
+	webhooks := handlers.NewWebhooksResource(db)
+	r.Post("/api/v1/webhooks/job-templates/{id}/{service}", webhooks.Handle)
+
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware)
