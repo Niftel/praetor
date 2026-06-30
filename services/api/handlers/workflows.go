@@ -48,10 +48,21 @@ func (rs *WorkflowsResource) ListWorkflows(w http.ResponseWriter, r *http.Reques
 		Name           string `json:"name" db:"name"`
 	}
 	rows := []wf{}
-	if err := rs.DB.SelectContext(r.Context(), &rows,
-		`SELECT id, organization_id, name FROM workflow_templates ORDER BY name`); err != nil {
+	// Honor the object-role model: a user only sees workflows in organizations
+	// they can read. Superusers/auditors get everything via readableIDs.
+	orgIDs, err := rs.readableIDs(r, rbac.ContentTypeOrganization)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
+	}
+	if len(orgIDs) > 0 {
+		q, args, _ := sqlx.In(
+			`SELECT id, organization_id, name FROM workflow_templates WHERE organization_id IN (?) ORDER BY name`, orgIDs)
+		q = rs.DB.Rebind(q)
+		if err := rs.DB.SelectContext(r.Context(), &rows, q, args...); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
 	}
 	render.JSON(w, r, rows)
 }
@@ -194,6 +205,19 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 // GetWorkflowJob GET /api/v1/workflow-jobs/{id}
 func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	// Gate on the owning workflow's org so job runs aren't visible cross-tenant.
+	var org int64
+	if err := rs.DB.GetContext(r.Context(), &org, `
+		SELECT wt.organization_id
+		FROM workflow_jobs wj
+		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
+		WHERE wj.id=$1`, id); err != nil {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actRead) {
+		return
+	}
 	var status string
 	if err := rs.DB.GetContext(r.Context(), &status, `SELECT status FROM workflow_jobs WHERE id=$1`, id); err != nil {
 		render.ErrInvalidRequest(nil).Render(w, r)
