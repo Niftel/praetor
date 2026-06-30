@@ -255,7 +255,9 @@ const WorkflowsPage = () => {
   };
 
   const onView = async (wf: Workflow) => {
-    try { setViewWf(await api.getWorkflow(wf.id)); } catch { /* ignore */ }
+    // The detail endpoint returns nodes/edges but not name; keep the list row's
+    // name so the modal title reads correctly.
+    try { setViewWf({ ...wf, ...(await api.getWorkflow(wf.id)) }); } catch { /* ignore */ }
   };
 
   const onDelete = async (wf: Workflow) => {
