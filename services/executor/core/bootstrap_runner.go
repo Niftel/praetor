@@ -22,6 +22,12 @@ func NewBootstrapRunner() *BootstrapRunner {
 }
 
 func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) error {
+	// Inventory-sync runs don't bootstrap a host-runner: the executor runs
+	// ansible-inventory locally and upserts the result via ingestion.
+	if req.JobManifest.InventorySync {
+		return r.syncInventory(req, eventChan)
+	}
+
 	log.Printf("BootstrapRunner: Starting deployment for run %s", req.ExecutionRunID)
 
 	// 1. Serialize Manifest to file (to be uploaded)

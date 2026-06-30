@@ -84,6 +84,89 @@ func (s *IngestionService) StoreFacts(ctx context.Context, runID uuid.UUID, fact
 	return nil
 }
 
+// UpsertInventory parses `ansible-inventory --list` JSON and upserts its hosts,
+// groups, and memberships into the given inventory (idempotent, so re-syncing
+// updates in place). Host names that already exist keep their id; new ones are
+// inserted. Variables come from _meta.hostvars.
+func (s *IngestionService) UpsertInventory(ctx context.Context, inventoryID int64, data []byte) error {
+	var inv map[string]json.RawMessage
+	if err := json.Unmarshal(data, &inv); err != nil {
+		return fmt.Errorf("parse inventory json: %w", err)
+	}
+
+	hostvars := map[string]json.RawMessage{}
+	if meta, ok := inv["_meta"]; ok {
+		var m struct {
+			HostVars map[string]json.RawMessage `json:"hostvars"`
+		}
+		_ = json.Unmarshal(meta, &m)
+		hostvars = m.HostVars
+	}
+
+	allHosts := map[string]bool{}
+	groups := map[string][]string{} // real group -> hosts
+	for key, raw := range inv {
+		if key == "_meta" {
+			continue
+		}
+		var g struct {
+			Hosts []string `json:"hosts"`
+		}
+		_ = json.Unmarshal(raw, &g)
+		for _, h := range g.Hosts {
+			allHosts[h] = true
+		}
+		if key != "all" && key != "ungrouped" && len(g.Hosts) > 0 {
+			groups[key] = g.Hosts
+		}
+	}
+	for h := range hostvars {
+		allHosts[h] = true
+	}
+
+	hostID := map[string]int64{}
+	for h := range allHosts {
+		vars := hostvars[h]
+		if len(vars) == 0 {
+			vars = json.RawMessage("{}")
+		}
+		var id int64
+		if err := s.DB.GetContext(ctx, &id, `SELECT id FROM hosts WHERE inventory_id=$1 AND name=$2`, inventoryID, h); err != nil {
+			if ierr := s.DB.QueryRowContext(ctx,
+				`INSERT INTO hosts (inventory_id, name, variables) VALUES ($1, $2, $3::jsonb) RETURNING id`,
+				inventoryID, h, []byte(vars)).Scan(&id); ierr != nil {
+				log.Printf("sync: insert host %q failed: %v", h, ierr)
+				continue
+			}
+		} else {
+			_, _ = s.DB.ExecContext(ctx, `UPDATE hosts SET variables=$2::jsonb, modified_at=now() WHERE id=$1`, id, []byte(vars))
+		}
+		hostID[h] = id
+	}
+
+	for gname, hosts := range groups {
+		var gid int64
+		if err := s.DB.GetContext(ctx, &gid, `SELECT id FROM groups WHERE inventory_id=$1 AND name=$2`, inventoryID, gname); err != nil {
+			if ierr := s.DB.QueryRowContext(ctx,
+				`INSERT INTO groups (inventory_id, name, created_at, modified_at) VALUES ($1, $2, now(), now()) RETURNING id`,
+				inventoryID, gname).Scan(&gid); ierr != nil {
+				log.Printf("sync: insert group %q failed: %v", gname, ierr)
+				continue
+			}
+		}
+		for _, h := range hosts {
+			if hid, ok := hostID[h]; ok {
+				_, _ = s.DB.ExecContext(ctx,
+					`INSERT INTO host_group_mapping (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hid, gid)
+			}
+		}
+	}
+
+	_, _ = s.DB.ExecContext(ctx, `UPDATE inventory_sources SET last_synced_at=now() WHERE inventory_id=$1`, inventoryID)
+	log.Printf("sync: inventory %d upserted %d host(s), %d group(s)", inventoryID, len(hostID), len(groups))
+	return nil
+}
+
 // LatestLogSeq returns the highest stored chunk seq for a run, or -1 if none.
 // It lets a reader advance its tail cursor without parsing the streamed bytes.
 func (s *IngestionService) LatestLogSeq(ctx context.Context, runID uuid.UUID) (int64, error) {

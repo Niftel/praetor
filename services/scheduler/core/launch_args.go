@@ -50,6 +50,19 @@ func parseLaunchArgs(raw json.RawMessage) launchArgs {
 	return a
 }
 
+// inventorySourceID returns the inventory_source_id a sync job references, or 0
+// if this isn't a sync job.
+func inventorySourceID(raw json.RawMessage) int64 {
+	if len(raw) == 0 {
+		return 0
+	}
+	var a struct {
+		InventorySourceID int64 `json:"inventory_source_id"`
+	}
+	_ = json.Unmarshal(raw, &a)
+	return a.InventorySourceID
+}
+
 // mergeExtraVars overlays launch-supplied extra_vars on top of the template's
 // default extra_vars (launch wins on key conflicts).
 func mergeExtraVars(templateVars json.RawMessage, jobArgs json.RawMessage) map[string]interface{} {

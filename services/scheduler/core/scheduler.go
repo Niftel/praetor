@@ -119,6 +119,41 @@ func (s *Scheduler) processPendingJobs() error {
 			return err // Rollback
 		}
 
+		// Inventory-sync jobs carry no template; they reference an
+		// inventory_source and are dispatched to the executor to run
+		// `ansible-inventory` and upsert the result into the inventory.
+		if srcID := inventorySourceID(job.JobArgs); srcID > 0 {
+			var src struct {
+				InventoryID int64  `db:"inventory_id"`
+				Source      string `db:"source"`
+				Kind        string `db:"source_kind"`
+			}
+			if err := tx.GetContext(ctx, &src,
+				`SELECT inventory_id, source, source_kind FROM inventory_sources WHERE id = $1`, srcID); err != nil {
+				log.Printf("sync job %d: source %d not found: %v", job.ID, srcID, err)
+				_, _ = tx.ExecContext(ctx, "UPDATE unified_jobs SET status='failed' WHERE id=$1", job.ID)
+				continue
+			}
+			syncManifest := events.JobManifest{
+				InventorySync:       true,
+				InventorySource:     src.Source,
+				InventorySourceKind: src.Kind,
+				SyncInventoryID:     src.InventoryID,
+				APIURL:              os.Getenv("API_URL"),
+			}
+			req := &events.ExecutionRequest{ExecutionRunID: runID, UnifiedJobID: job.ID, JobManifest: syncManifest, CreatedAt: time.Now()}
+			payload, perr := json.Marshal(req)
+			if perr != nil {
+				return perr
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO execution_outbox (execution_run_id, payload) VALUES ($1, $2)`, runID, payload); err != nil {
+				return err
+			}
+			log.Printf("Enqueued inventory sync for job %d (run %s, source %d)", job.ID, runID, srcID)
+			continue
+		}
+
 		// 5. Resolve Project from Template - REQUIRES a template with a project
 		if job.UnifiedJobTemplateID == nil {
 			log.Printf("Job %d has no template - skipping (template required)", job.ID)

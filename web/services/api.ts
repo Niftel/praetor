@@ -71,6 +71,12 @@ export const api = {
     createProject: (data: any) => fetchWithAuth('/projects', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     syncProject: (id: number) => fetchWithAuth(`/projects/${id}/sync`, { method: 'POST' }),
 
+    // Inventory sources (dynamic inventory)
+    getInventorySources: (invId: number) => fetchWithAuth(`/inventories/${invId}/sources`).then(r => r.json()),
+    createInventorySource: (invId: number, data: any) => fetchWithAuth(`/inventories/${invId}/sources`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}`, { method: 'DELETE' }),
+    syncInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}/sync`, { method: 'POST' }).then(r => r.json()),
+
     // Notifications
     getNotificationTemplates: (orgId: number) => fetchWithAuth(`/notification-templates?organization_id=${orgId}`).then(r => r.json()),
     createNotificationTemplate: (data: any) => fetchWithAuth('/notification-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
