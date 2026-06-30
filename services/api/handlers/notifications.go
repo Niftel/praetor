@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -12,13 +11,6 @@ import (
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
-
-func handlerSecretKey() string {
-	if k := os.Getenv("PRAETOR_SECRET_KEY"); k != "" {
-		return k
-	}
-	return "12345678901234567890123456789012"
-}
 
 // notificationTemplate is an org-scoped notification target. The config secret
 // (the target URL) is stored encrypted and never returned to clients.
@@ -68,7 +60,7 @@ func (h *ContentHandler) CreateNotificationTemplate(w http.ResponseWriter, r *ht
 		return
 	}
 
-	enc, err := crypto.Encrypt(body.URL, handlerSecretKey())
+	enc, err := crypto.EncryptSecret(body.URL)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

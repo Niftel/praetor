@@ -88,7 +88,12 @@ services:
       dockerfile: build/package/Dockerfile.api
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
-      JWT_SECRET: "praetor-prod-secret-2025-secure-key-9Xv2" # In prod use .env
+      # Secrets are now required (no built-in fallback). Override both via .env in any
+      # real deployment. PRAETOR_SECRET_KEY must be exactly 32 bytes; rotate by setting
+      # PRAETOR_SECRET_KEY to the new key and PRAETOR_SECRET_KEY_OLD to the previous one.
+      JWT_SECRET: "${JWT_SECRET:-praetor-prod-secret-2025-secure-key-9Xv2}"
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
       PORT: 8080
       INGESTION_URL: http://ingestion:8081 # for proxying run logs from the object store
       PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
@@ -113,6 +118,8 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       NATS_URL: nats://nats:4222
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
       PRAETOR_PROJECT_DIR: /tmp/project
       API_URL: http://api:8080
     volumes:
@@ -205,6 +212,8 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       NATS_URL: nats://nats:4222
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
     depends_on:
       migrator:
         condition: service_completed_successfully

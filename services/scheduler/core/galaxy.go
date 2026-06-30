@@ -4,19 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/events"
 )
-
-func secretKey() string {
-	if k := os.Getenv("PRAETOR_SECRET_KEY"); k != "" {
-		return k
-	}
-	return "12345678901234567890123456789012"
-}
 
 // resolveGalaxyServers returns an organization's configured Ansible Galaxy /
 // Automation Hub servers, in order, with each credential's API token decrypted —
@@ -51,7 +43,7 @@ func (s *Scheduler) resolveGalaxyServers(ctx context.Context, orgID int64) []eve
 		}
 		token := f.Token
 		if token != "" {
-			if dec, err := crypto.Decrypt(token, secretKey()); err == nil {
+			if dec, err := crypto.DecryptSecret(token); err == nil {
 				token = dec // stored encrypted; fall back to as-is if not
 			}
 		}

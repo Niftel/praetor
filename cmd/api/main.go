@@ -6,11 +6,18 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/praetor/services/api"
 )
 
 func main() {
+	// Fail fast on a missing/invalid encryption or JWT secret rather than
+	// booting with a known-insecure built-in key.
+	if err := crypto.ValidateSecrets(true); err != nil {
+		log.Fatalf("secrets misconfigured: %v", err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

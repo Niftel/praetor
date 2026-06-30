@@ -5,9 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"os"
-
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/services/api/render"
 	"golang.org/x/crypto/bcrypt"
@@ -16,10 +15,7 @@ import (
 var jwtSecret = []byte(getJWTSecret())
 
 func getJWTSecret() string {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		return "praetor-secret-key-change-me"
-	}
+	secret, _ := crypto.JWTSecret()
 	return secret
 }
 

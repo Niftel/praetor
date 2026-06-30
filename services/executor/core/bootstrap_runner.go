@@ -88,6 +88,30 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
         dest: /usr/local/share/praetor/plugins/callback/praetor_checkpoint.py
         mode: '0644'
 
+    - name: Install resume systemd unit (best-effort; skipped where systemd is absent)
+      shell: |
+        if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+          cat > /etc/systemd/system/praetor-resume.service <<'UNIT'
+        [Unit]
+        Description=Praetor host-runner — resume interrupted jobs after a restart
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        ExecStart=/usr/local/bin/praetor-host-runner --resume-root=/var/lib/praetor/jobs
+        TimeoutStartSec=0
+
+        [Install]
+        WantedBy=multi-user.target
+        UNIT
+          systemctl daemon-reload
+          systemctl enable praetor-resume.service
+        fi
+      args:
+        executable: /bin/sh
+      failed_when: false
+
     - name: Copy Manifest
       copy:
         src: %s

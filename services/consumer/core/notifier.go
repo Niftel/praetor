@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -21,19 +20,11 @@ import (
 // delivery. HTTP sends run in the background so projection latency is unaffected.
 type Notifier struct {
 	DB     *sqlx.DB
-	key    string
 	client *http.Client
 }
 
 func NewNotifier(db *sqlx.DB) *Notifier {
-	return &Notifier{DB: db, key: notifierSecretKey(), client: &http.Client{Timeout: 10 * time.Second}}
-}
-
-func notifierSecretKey() string {
-	if k := os.Getenv("PRAETOR_SECRET_KEY"); k != "" {
-		return k
-	}
-	return "12345678901234567890123456789012"
+	return &Notifier{DB: db, client: &http.Client{Timeout: 10 * time.Second}}
 }
 
 // notifyEvent maps a job event type to a notification lifecycle event and a
@@ -90,7 +81,7 @@ func (n *Notifier) send(jobID int64, ev, verb string) {
 		}
 		_ = json.Unmarshal(r.Config, &cfg)
 		url := cfg.URL
-		if dec, err := crypto.Decrypt(url, n.key); err == nil {
+		if dec, err := crypto.DecryptSecret(url); err == nil {
 			url = dec // stored encrypted; fall back to as-is if not
 		}
 		if url == "" {

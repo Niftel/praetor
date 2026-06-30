@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -218,12 +217,6 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 // Helpers
 
 func (rs *CredentialsResource) processSecrets(input *models.Credential, existing *models.Credential) error {
-	secretKey := os.Getenv("PRAETOR_SECRET_KEY")
-	if secretKey == "" {
-		// Fallback for dev only!
-		secretKey = "12345678901234567890123456789012"
-	}
-
 	// Fetch Type Definition
 	var ct models.CredentialType
 	err := rs.DB.Get(&ct, "SELECT * FROM credential_types WHERE id = $1", input.CredentialTypeID)
@@ -275,7 +268,7 @@ func (rs *CredentialsResource) processSecrets(input *models.Credential, existing
 				}
 			} else {
 				// Encrypt new value
-				enc, err := crypto.Encrypt(strVal, secretKey)
+				enc, err := crypto.EncryptSecret(strVal)
 				if err != nil {
 					return err
 				}
