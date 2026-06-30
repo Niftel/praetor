@@ -113,9 +113,9 @@ const RolesPage = () => {
     return 'success';
   };
 
-  // Group roles by type
+  // Only system (singleton) roles are managed here; per-resource roles live on
+  // each resource's page.
   const systemRoles = roles.filter(r => r.singleton_name);
-  const objectRoles = roles.filter(r => !r.singleton_name);
 
   if (loading) {
     return (
@@ -127,15 +127,17 @@ const RolesPage = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div>
         <h1 className="text-2xl font-bold text-gray-900">Roles</h1>
-        <Badge variant="neutral">{roles.length} roles</Badge>
+        <p className="text-sm text-gray-500 mt-1">
+          System-wide roles. Per-resource access (organization, project, inventory, credential
+          admins, etc.) is granted on each resource's own page, not here.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Roles List */}
-        <div className="lg:col-span-1 space-y-4">
-          {/* System Roles */}
+        {/* System Roles list */}
+        <div className="lg:col-span-1">
           <Card>
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Key className="text-amber-600" size={20} />
@@ -155,35 +157,6 @@ const RolesPage = () => {
               ))}
               {systemRoles.length === 0 && (
                 <div className="text-gray-500 text-sm">No system roles found</div>
-              )}
-            </div>
-          </Card>
-
-          {/* Object Roles */}
-          <Card>
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <Layers className="text-blue-600" size={20} />
-              Resource Roles
-            </h2>
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {objectRoles.map(role => (
-                <div
-                  key={role.id}
-                  className={`p-3 rounded-lg cursor-pointer transition-colors ${selectedRole?.id === role.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'
-                    }`}
-                  onClick={() => loadRoleDetails(role)}
-                >
-                  <div className="flex items-center gap-2">
-                    {getRoleIcon(role)}
-                    <div className="font-medium text-gray-900">{role.name || role.role_field}</div>
-                  </div>
-                  <div className="text-sm text-gray-500 ml-7">
-                    {role.content_type} #{role.object_id}
-                  </div>
-                </div>
-              ))}
-              {objectRoles.length === 0 && (
-                <div className="text-gray-500 text-sm">No resource roles found. Roles are created when organizations, projects, and other resources are created.</div>
               )}
             </div>
           </Card>
