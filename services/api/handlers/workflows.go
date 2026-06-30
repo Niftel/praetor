@@ -1,0 +1,247 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/services/api/render"
+)
+
+type WorkflowsResource struct {
+	DB *sqlx.DB
+	*Authorizer
+}
+
+func NewWorkflowsResource(db *sqlx.DB) *WorkflowsResource {
+	return &WorkflowsResource{DB: db, Authorizer: NewAuthorizer(db)}
+}
+
+type workflowNode struct {
+	NodeKey       string `json:"node_key" db:"node_key"`
+	NodeType      string `json:"node_type" db:"node_type"`
+	JobTemplateID *int64 `json:"job_template_id" db:"job_template_id"`
+	Name          string `json:"name" db:"name"`
+}
+
+type workflowEdge struct {
+	ParentKey string `json:"parent_key" db:"parent_key"`
+	ChildKey  string `json:"child_key" db:"child_key"`
+	EdgeType  string `json:"edge_type" db:"edge_type"`
+}
+
+// orgOfWorkflow returns the org that owns a workflow template.
+func (rs *WorkflowsResource) orgOfWorkflow(r *http.Request, id int64) (int64, bool) {
+	var org int64
+	err := rs.DB.GetContext(r.Context(), &org, `SELECT organization_id FROM workflow_templates WHERE id=$1`, id)
+	return org, err == nil
+}
+
+// ListWorkflows GET /api/v1/workflow-templates
+func (rs *WorkflowsResource) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+	type wf struct {
+		ID             int64  `json:"id" db:"id"`
+		OrganizationID int64  `json:"organization_id" db:"organization_id"`
+		Name           string `json:"name" db:"name"`
+	}
+	rows := []wf{}
+	if err := rs.DB.SelectContext(r.Context(), &rows,
+		`SELECT id, organization_id, name FROM workflow_templates ORDER BY name`); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, rows)
+}
+
+// CreateWorkflow POST /api/v1/workflow-templates
+func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OrganizationID int64          `json:"organization_id"`
+		Name           string         `json:"name"`
+		Nodes          []workflowNode `json:"nodes"`
+		Edges          []workflowEdge `json:"edges"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, body.OrganizationID, actAdmin) {
+		return
+	}
+	tx, err := rs.DB.Beginx()
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	defer tx.Rollback()
+
+	var id int64
+	if err := tx.QueryRowxContext(r.Context(),
+		`INSERT INTO workflow_templates (organization_id, name) VALUES ($1, $2) RETURNING id`,
+		body.OrganizationID, body.Name).Scan(&id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	for _, n := range body.Nodes {
+		if n.NodeType == "" {
+			n.NodeType = "job"
+		}
+		if _, err := tx.ExecContext(r.Context(),
+			`INSERT INTO workflow_nodes (workflow_template_id, node_key, node_type, job_template_id, name)
+			 VALUES ($1, $2, $3, $4, $5)`, id, n.NodeKey, n.NodeType, n.JobTemplateID, n.Name); err != nil {
+			render.ErrInvalidRequest(err).Render(w, r)
+			return
+		}
+	}
+	for _, e := range body.Edges {
+		if e.EdgeType == "" {
+			e.EdgeType = "success"
+		}
+		if _, err := tx.ExecContext(r.Context(),
+			`INSERT INTO workflow_node_edges (workflow_template_id, parent_key, child_key, edge_type)
+			 VALUES ($1, $2, $3, $4)`, id, e.ParentKey, e.ChildKey, e.EdgeType); err != nil {
+			render.ErrInvalidRequest(err).Render(w, r)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.Created(w, r, map[string]interface{}{"id": id})
+}
+
+// GetWorkflow GET /api/v1/workflow-templates/{id}
+func (rs *WorkflowsResource) GetWorkflow(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	org, ok := rs.orgOfWorkflow(r, id)
+	if !ok {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actRead) {
+		return
+	}
+	nodes := []workflowNode{}
+	_ = rs.DB.SelectContext(r.Context(), &nodes,
+		`SELECT node_key, node_type, job_template_id, name FROM workflow_nodes WHERE workflow_template_id=$1`, id)
+	edges := []workflowEdge{}
+	_ = rs.DB.SelectContext(r.Context(), &edges,
+		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, id)
+	render.JSON(w, r, map[string]interface{}{"id": id, "organization_id": org, "nodes": nodes, "edges": edges})
+}
+
+// DeleteWorkflow DELETE /api/v1/workflow-templates/{id}
+func (rs *WorkflowsResource) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	org, ok := rs.orgOfWorkflow(r, id)
+	if !ok {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+		return
+	}
+	if _, err := rs.DB.ExecContext(r.Context(), `DELETE FROM workflow_templates WHERE id=$1`, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// LaunchWorkflow POST /api/v1/workflow-templates/{id}/launch — snapshot nodes into
+// a workflow_jobs run that the scheduler's workflow runner then walks.
+func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	org, ok := rs.orgOfWorkflow(r, id)
+	if !ok {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+		return
+	}
+	tx, err := rs.DB.Beginx()
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	defer tx.Rollback()
+
+	var wjID int64
+	if err := tx.QueryRowxContext(r.Context(),
+		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`, id).Scan(&wjID); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(),
+		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, status)
+		 SELECT $1, node_key, node_type, job_template_id, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+		wjID, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.Created(w, r, map[string]interface{}{"workflow_job_id": wjID, "status": "running"})
+}
+
+// GetWorkflowJob GET /api/v1/workflow-jobs/{id}
+func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var status string
+	if err := rs.DB.GetContext(r.Context(), &status, `SELECT status FROM workflow_jobs WHERE id=$1`, id); err != nil {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	type node struct {
+		ID            int64  `json:"id" db:"id"`
+		NodeKey       string `json:"node_key" db:"node_key"`
+		NodeType      string `json:"node_type" db:"node_type"`
+		UnifiedJobID  *int64 `json:"unified_job_id" db:"unified_job_id"`
+		Status        string `json:"status" db:"status"`
+	}
+	nodes := []node{}
+	_ = rs.DB.SelectContext(r.Context(), &nodes,
+		`SELECT id, node_key, node_type, unified_job_id, status FROM workflow_job_nodes WHERE workflow_job_id=$1 ORDER BY id`, id)
+	render.JSON(w, r, map[string]interface{}{"id": id, "status": status, "nodes": nodes})
+}
+
+func (rs *WorkflowsResource) setNodeApproval(w http.ResponseWriter, r *http.Request, status string) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	// Gate on the owning workflow's org.
+	var org int64
+	if err := rs.DB.GetContext(r.Context(), &org, `
+		SELECT wt.organization_id
+		FROM workflow_job_nodes wjn
+		JOIN workflow_jobs wj ON wj.id = wjn.workflow_job_id
+		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
+		WHERE wjn.id=$1`, id); err != nil {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+		return
+	}
+	if _, err := rs.DB.ExecContext(r.Context(),
+		`UPDATE workflow_job_nodes SET status=$1 WHERE id=$2 AND status='awaiting_approval'`, status, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ApproveNode POST /api/v1/workflow-job-nodes/{id}/approve
+func (rs *WorkflowsResource) ApproveNode(w http.ResponseWriter, r *http.Request) {
+	rs.setNodeApproval(w, r, "approved")
+}
+
+// DenyNode POST /api/v1/workflow-job-nodes/{id}/deny
+func (rs *WorkflowsResource) DenyNode(w http.ResponseWriter, r *http.Request) {
+	rs.setNodeApproval(w, r, "rejected")
+}
