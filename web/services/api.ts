@@ -71,6 +71,14 @@ export const api = {
     createProject: (data: any) => fetchWithAuth('/projects', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     syncProject: (id: number) => fetchWithAuth(`/projects/${id}/sync`, { method: 'POST' }),
 
+    // Notifications
+    getNotificationTemplates: (orgId: number) => fetchWithAuth(`/notification-templates?organization_id=${orgId}`).then(r => r.json()),
+    createNotificationTemplate: (data: any) => fetchWithAuth('/notification-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteNotificationTemplate: (id: number) => fetchWithAuth(`/notification-templates/${id}`, { method: 'DELETE' }),
+    getTemplateNotifications: (jtId: number) => fetchWithAuth(`/job-templates/${jtId}/notifications`).then(r => r.json()),
+    attachTemplateNotification: (jtId: number, data: any) => fetchWithAuth(`/job-templates/${jtId}/notifications`, { method: 'POST', body: JSON.stringify(data) }),
+    detachTemplateNotification: (jtId: number, ntId: number, event: string) => fetchWithAuth(`/job-templates/${jtId}/notifications/${ntId}/${event}`, { method: 'DELETE' }),
+
     // Logs
     getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
     // Full playbook stdout, reassembled from the object store (returns plain text).

@@ -19,6 +19,10 @@ const TemplatesPage = () => {
   const [formData, setFormData] = useState<Partial<Template>>({});
   const [varsText, setVarsText] = useState('');
   const [survey, setSurvey] = useState<SurveyQuestion[]>([]);
+  // Notifications (edit mode): org targets + this template's attachments.
+  const [notifTargets, setNotifTargets] = useState<any[]>([]);
+  const [notifAttached, setNotifAttached] = useState<any[]>([]);
+  const [newNotif, setNewNotif] = useState({ name: '', notification_type: 'webhook', url: '' });
 
   // Launch dialog
   const [launchTpl, setLaunchTpl] = useState<Template | null>(null);
@@ -72,7 +76,29 @@ const TemplatesPage = () => {
         : ''
     );
     setSurvey(template.survey_spec?.spec || []);
+    setNewNotif({ name: '', notification_type: 'webhook', url: '' });
+    if (template.organization_id) {
+      api.getNotificationTemplates(template.organization_id).then(d => setNotifTargets(d || [])).catch(() => setNotifTargets([]));
+      api.getTemplateNotifications(template.id).then(d => setNotifAttached(d || [])).catch(() => setNotifAttached([]));
+    }
     setIsModalOpen(true);
+  };
+
+  const isAttached = (ntId: number, event: string) =>
+    notifAttached.some(a => a.notification_template_id === ntId && a.event === event);
+
+  const toggleNotif = async (ntId: number, event: string) => {
+    if (!editingTemplate) return;
+    if (isAttached(ntId, event)) await api.detachTemplateNotification(editingTemplate.id, ntId, event);
+    else await api.attachTemplateNotification(editingTemplate.id, { notification_template_id: ntId, event });
+    api.getTemplateNotifications(editingTemplate.id).then(d => setNotifAttached(d || [])).catch(() => {});
+  };
+
+  const addNotifTarget = async () => {
+    if (!editingTemplate || !newNotif.name.trim() || !newNotif.url.trim()) return;
+    await api.createNotificationTemplate({ organization_id: editingTemplate.organization_id, ...newNotif });
+    setNewNotif({ name: '', notification_type: 'webhook', url: '' });
+    api.getNotificationTemplates(editingTemplate.organization_id).then(d => setNotifTargets(d || [])).catch(() => {});
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -380,6 +406,37 @@ const TemplatesPage = () => {
               </div>
             )}
           </div>
+          {editingTemplate && (
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-gray-700 mb-2">Notifications</p>
+              {notifTargets.length === 0 && (
+                <p className="text-xs text-gray-500 mb-2">No notification targets in this organization yet — add one below.</p>
+              )}
+              {notifTargets.map(nt => (
+                <div key={nt.id} className="flex items-center gap-3 text-sm py-1">
+                  <span className="flex-1 truncate">{nt.name} <span className="text-xs text-gray-400">({nt.notification_type})</span></span>
+                  {['success', 'error', 'started'].map(ev => (
+                    <label key={ev} className="flex items-center gap-1 text-xs text-gray-600">
+                      <input type="checkbox" checked={isAttached(nt.id, ev)} onChange={() => toggleNotif(nt.id, ev)} />
+                      {ev}
+                    </label>
+                  ))}
+                </div>
+              ))}
+              <div className="flex gap-2 mt-2">
+                <input placeholder="name" className="border p-1 rounded text-sm w-1/4"
+                  value={newNotif.name} onChange={e => setNewNotif({ ...newNotif, name: e.target.value })} />
+                <select className="border p-1 rounded text-sm"
+                  value={newNotif.notification_type} onChange={e => setNewNotif({ ...newNotif, notification_type: e.target.value })}>
+                  <option value="webhook">Webhook</option>
+                  <option value="slack">Slack</option>
+                </select>
+                <input placeholder="URL" className="border p-1 rounded text-sm flex-1"
+                  value={newNotif.url} onChange={e => setNewNotif({ ...newNotif, url: e.target.value })} />
+                <Button type="button" variant="secondary" onClick={addNotifTarget}>Add</Button>
+              </div>
+            </div>
+          )}
           <div className="mt-5 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button type="submit">Save Template</Button>

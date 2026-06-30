@@ -29,8 +29,9 @@ func main() {
 	}
 	defer bus.Close()
 
-	// 3. Create Consumer
+	// 3. Create Consumer (with notification dispatch on lifecycle events)
 	writer := core.NewDBWriter(database)
+	writer.Notifier = core.NewNotifier(database)
 	consumer := core.NewConsumer(bus, writer)
 
 	// 4. Start

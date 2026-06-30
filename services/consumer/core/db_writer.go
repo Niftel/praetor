@@ -11,7 +11,8 @@ import (
 )
 
 type DBWriter struct {
-	DB *sqlx.DB
+	DB       *sqlx.DB
+	Notifier *Notifier // optional; fires notifications on newly-projected lifecycle events
 }
 
 func NewDBWriter(db *sqlx.DB) *DBWriter {
@@ -52,7 +53,7 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	// constraint means a redelivered or replayed event is silently skipped
 	// rather than failing the transaction. This is what allows the consumer to
 	// safely ack-after-commit and tolerate at-least-once delivery.
-	_, err = tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO job_events (
 			unified_job_id, execution_run_id, seq, event_type,
 			host_id, task_name, play_name, event_data, stdout_snippet, created_at
@@ -64,13 +65,26 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	if err != nil {
 		return fmt.Errorf("insert job_event failed: %w", err)
 	}
+	// Whether this event is new (not a redelivery). Notifications fire only for
+	// newly-projected events so at-least-once delivery doesn't double-send.
+	newlyInserted := false
+	if n, _ := res.RowsAffected(); n > 0 {
+		newlyInserted = true
+	}
 
 	// 2. Update execution_run state
 	if err := w.updateRunState(ctx, tx, evt); err != nil {
 		return fmt.Errorf("update run state failed: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if newlyInserted {
+		w.Notifier.Dispatch(evt) // no-op on a nil notifier; sends in the background
+	}
+	return nil
 }
 
 func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.JobEvent) error {
