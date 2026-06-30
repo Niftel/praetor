@@ -172,6 +172,11 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		templates := handlers.NewTemplatesResource(db)
 		r.Mount("/job-templates", templates.Routes())
 
+		// Notification templates (org-scoped targets; attachments live under job-templates)
+		r.Get("/notification-templates", content.ListNotificationTemplates)
+		r.Post("/notification-templates", content.CreateNotificationTemplate)
+		r.Delete("/notification-templates/{id}", content.DeleteNotificationTemplate)
+
 		// =======================================================================
 		// Inventories with nested hosts/groups
 		// =======================================================================

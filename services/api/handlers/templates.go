@@ -31,6 +31,10 @@ func (rs *TemplatesResource) Routes() chi.Router {
 	r.Get("/{id}", rs.GetTemplate)
 	r.Put("/{id}", rs.UpdateTemplate)
 	r.Delete("/{id}", rs.DeleteTemplate)
+	// Notification attachments (which notification fires on which event).
+	r.Get("/{id}/notifications", rs.ListJobTemplateNotifications)
+	r.Post("/{id}/notifications", rs.AttachJobTemplateNotification)
+	r.Delete("/{id}/notifications/{ntId}/{event}", rs.DetachJobTemplateNotification)
 	return r
 }
 
