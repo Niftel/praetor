@@ -59,6 +59,7 @@ func main() {
 	r.Get("/api/v1/runs/{run_id}/logs", h.StreamLog)
 	r.Post("/api/v1/runs/{run_id}/heartbeat", h.Heartbeat)
 	r.Post("/api/v1/runs/{run_id}/facts", h.IngestFacts)
+	r.Post("/api/v1/inventories/{id}/sync-data", h.IngestInventorySync)
 
 	// 5. Start
 	log.Printf("Ingestion listening on port %s", port)

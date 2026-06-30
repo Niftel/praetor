@@ -117,6 +117,27 @@ func (h *IngestionHandler) IngestFacts(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]string{"status": "accepted"})
 }
 
+// IngestInventorySync POST /api/v1/inventories/{id}/sync-data — body is the
+// `ansible-inventory --list` JSON; it's upserted into the inventory.
+func (h *IngestionHandler) IngestInventorySync(w http.ResponseWriter, r *http.Request) {
+	invID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, 32<<20)) // cap 32MB
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	if err := h.Service.UpsertInventory(r.Context(), invID, data); err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.Status(r, http.StatusAccepted)
+	render.JSON(w, r, map[string]string{"status": "accepted"})
+}
+
 // StreamLog GET /api/v1/runs/{run_id}/logs?since=N
 // Streams the run's stored stdout (chunks reassembled in order) back to the
 // caller. `since` supports incremental tailing; the highest seq written is

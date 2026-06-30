@@ -9,7 +9,10 @@ import { Server, Users, Settings, Plus, Trash, Loader, Play, Activity, Clock } f
 const InventoriesPage = () => {
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [selectedInventoryId, setSelectedInventoryId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'hosts' | 'groups'>('hosts');
+  const [activeTab, setActiveTab] = useState<'hosts' | 'groups' | 'sources'>('hosts');
+  const [sources, setSources] = useState<any[]>([]);
+  const [showSourceModal, setShowSourceModal] = useState(false);
+  const [newSource, setNewSource] = useState({ name: '', source_kind: 'inventory', source: '' });
   const [hosts, setHosts] = useState<Host[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,18 +61,49 @@ const InventoriesPage = () => {
 
     const fetchHostsAndGroups = async () => {
       try {
-        const [hostsData, groupsData] = await Promise.all([
+        const [hostsData, groupsData, sourcesData] = await Promise.all([
           api.getHosts(selectedInventoryId),
-          api.getGroups(selectedInventoryId)
+          api.getGroups(selectedInventoryId),
+          api.getInventorySources(selectedInventoryId).catch(() => [])
         ]);
         setHosts(hostsData || []);
         setGroups(groupsData || []);
+        setSources(sourcesData || []);
       } catch (err) {
         console.error('Failed to load hosts/groups', err);
       }
     };
     fetchHostsAndGroups();
   }, [selectedInventoryId]);
+
+  const refreshSources = () => {
+    if (selectedInventoryId) api.getInventorySources(selectedInventoryId).then(d => setSources(d || [])).catch(() => {});
+  };
+  const refreshHosts = () => {
+    if (selectedInventoryId) {
+      api.getHosts(selectedInventoryId).then(d => setHosts(d || [])).catch(() => {});
+      api.getGroups(selectedInventoryId).then(d => setGroups(d || [])).catch(() => {});
+    }
+  };
+  const handleCreateSource = async () => {
+    if (!selectedInventoryId || !newSource.name.trim()) return;
+    await api.createInventorySource(selectedInventoryId, newSource);
+    setShowSourceModal(false);
+    setNewSource({ name: '', source_kind: 'inventory', source: '' });
+    refreshSources();
+  };
+  const handleSyncSource = async (sid: number) => {
+    if (!selectedInventoryId) return;
+    await api.syncInventorySource(selectedInventoryId, sid);
+    // Sync runs async; poll the host list a few times so the UI reflects it.
+    setTimeout(() => { refreshHosts(); refreshSources(); }, 4000);
+    setTimeout(() => { refreshHosts(); refreshSources(); }, 9000);
+  };
+  const handleDeleteSource = async (sid: number) => {
+    if (!selectedInventoryId) return;
+    await api.deleteInventorySource(selectedInventoryId, sid);
+    refreshSources();
+  };
 
   // Load host groups when selected host changes
   useEffect(() => {
@@ -273,10 +307,41 @@ const InventoriesPage = () => {
             >
               Groups ({groups.length})
             </button>
+            <button
+              className={`flex-1 py-3 text-sm font-medium border-b-2 ${activeTab === 'sources' ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setActiveTab('sources')}
+            >
+              Sources ({sources.length})
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {activeTab === 'hosts' ? (
+            {activeTab === 'sources' ? (
+              <ul className="divide-y divide-gray-100">
+                {sources.map(s => (
+                  <li key={s.id} className="p-4 hover:bg-gray-50">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">{s.name}</span>
+                        <span className="ml-2 text-xs text-gray-400">{s.source_kind}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleSyncSource(s.id)} className="text-brand-600 hover:text-brand-700" title="Sync now">
+                          <Play size={14} />
+                        </button>
+                        <button onClick={() => handleDeleteSource(s.id)} className="text-gray-400 hover:text-red-600" title="Delete">
+                          <Trash size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {s.last_synced_at && (
+                      <p className="mt-1 text-xs text-gray-400">Last synced {new Date(s.last_synced_at).toLocaleString()}</p>
+                    )}
+                  </li>
+                ))}
+                {sources.length === 0 && <p className="p-4 text-sm text-gray-500">No sources. Add one to populate this inventory dynamically.</p>}
+              </ul>
+            ) : activeTab === 'hosts' ? (
               <ul className="divide-y divide-gray-100">
                 {hosts.map(host => (
                   <li
@@ -351,10 +416,10 @@ const InventoriesPage = () => {
               size="sm"
               className="w-full"
               icon={<Plus size={14} />}
-              onClick={() => activeTab === 'hosts' ? setShowHostModal(true) : setShowGroupModal(true)}
+              onClick={() => activeTab === 'hosts' ? setShowHostModal(true) : activeTab === 'groups' ? setShowGroupModal(true) : setShowSourceModal(true)}
               disabled={!selectedInventoryId}
             >
-              Add {activeTab === 'hosts' ? 'Host' : 'Group'}
+              Add {activeTab === 'hosts' ? 'Host' : activeTab === 'groups' ? 'Group' : 'Source'}
             </Button>
           </div>
         </Card>
@@ -560,6 +625,34 @@ all:
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowImportModal(false)}>Cancel</Button>
             <Button onClick={handleImport} disabled={!importContent.trim()}>Import</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showSourceModal} onClose={() => setShowSourceModal(false)} title="New Inventory Source">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <input type="text" className="mt-1 block w-full rounded-md border-gray-300 border p-2"
+              value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Kind</label>
+            <select className="mt-1 block w-full rounded-md border-gray-300 border p-2"
+              value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
+              <option value="inventory">Inventory / plugin (YAML)</option>
+              <option value="script">Script (executable)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Source</label>
+            <p className="text-xs text-gray-400 mb-1">A YAML inventory/plugin config, or a script that outputs Ansible inventory JSON. `ansible-inventory --list` is run against it on sync.</p>
+            <textarea rows={8} className="mt-1 block w-full rounded-md border-gray-300 border p-2 font-mono text-xs"
+              value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} />
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => setShowSourceModal(false)}>Cancel</Button>
+            <Button onClick={handleCreateSource}>Create</Button>
           </div>
         </div>
       </Modal>
