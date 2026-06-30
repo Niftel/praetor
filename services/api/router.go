@@ -59,6 +59,10 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware)
+		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
+
+		// Activity stream (audit log) — superuser/auditor only
+		r.Get("/activity-stream", content.ListActivityStream)
 
 		// =======================================================================
 		// Organizations (AWX-style with RBAC)

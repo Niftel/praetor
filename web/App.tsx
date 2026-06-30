@@ -12,6 +12,7 @@ import SchedulesPage from './pages/SchedulesPage';
 import UsersPage from './pages/UsersPage';
 import TeamsPage from './pages/TeamsPage';
 import RolesPage from './pages/RolesPage';
+import ActivityPage from './pages/ActivityPage';
 import OrganizationsPage from './pages/OrganizationsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
 import { getAuthToken, removeAuthToken } from './services/api';
@@ -51,6 +52,7 @@ const App = () => {
           <Route path="users" element={<UsersPage />} />
           <Route path="teams" element={<TeamsPage />} />
           <Route path="roles" element={<RolesPage />} />
+          <Route path="activity" element={<ActivityPage />} />
           <Route path="auth-providers" element={<AuthProvidersPage />} />
 
           {/* Fallback */}

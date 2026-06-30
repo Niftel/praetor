@@ -71,6 +71,9 @@ export const api = {
     createProject: (data: any) => fetchWithAuth('/projects', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     syncProject: (id: number) => fetchWithAuth(`/projects/${id}/sync`, { method: 'POST' }),
 
+    // Activity stream (audit log)
+    getActivityStream: (limit = 100) => fetchWithAuth(`/activity-stream?limit=${limit}`).then(r => r.json()),
+
     // Inventory sources (dynamic inventory)
     getInventorySources: (invId: number) => fetchWithAuth(`/inventories/${invId}/sources`).then(r => r.json()),
     createInventorySource: (invId: number, data: any) => fetchWithAuth(`/inventories/${invId}/sources`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
