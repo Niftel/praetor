@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	core "github.com/praetordev/praetor/services/scheduler/core"
@@ -14,6 +15,12 @@ import (
 
 func main() {
 	log.Println("Starting Scheduler Service...")
+
+	// Fail fast on a missing/invalid encryption key (used to decrypt Galaxy
+	// credential tokens when building manifests).
+	if err := crypto.ValidateSecrets(false); err != nil {
+		log.Fatalf("secrets misconfigured: %v", err)
+	}
 
 	// 1. Connect to DB
 	database, err := db.InitDB()

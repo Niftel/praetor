@@ -26,6 +26,10 @@ func TestResolveGalaxyServers(t *testing.T) {
 	}
 	defer db.Close()
 
+	// Encryption and the resolver's decryption both read PRAETOR_SECRET_KEY, so
+	// pin it for this process to keep them symmetric.
+	t.Setenv("PRAETOR_SECRET_KEY", "0123456789abcdef0123456789abcdef")
+
 	ctx := context.Background()
 	uniq := time.Now().UnixNano()
 
@@ -41,7 +45,7 @@ func TestResolveGalaxyServers(t *testing.T) {
 	}
 
 	// Token is stored encrypted, exactly as the credentials handler writes it.
-	encToken, err := crypto.Encrypt("s3cr3t-token", secretKey())
+	encToken, err := crypto.EncryptSecret("s3cr3t-token")
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
