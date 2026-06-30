@@ -177,6 +177,17 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		r.Post("/notification-templates", content.CreateNotificationTemplate)
 		r.Delete("/notification-templates/{id}", content.DeleteNotificationTemplate)
 
+		// Workflows (DAG of templates with success/failure/approval edges)
+		wf := handlers.NewWorkflowsResource(db)
+		r.Get("/workflow-templates", wf.ListWorkflows)
+		r.Post("/workflow-templates", wf.CreateWorkflow)
+		r.Get("/workflow-templates/{id}", wf.GetWorkflow)
+		r.Delete("/workflow-templates/{id}", wf.DeleteWorkflow)
+		r.Post("/workflow-templates/{id}/launch", wf.LaunchWorkflow)
+		r.Get("/workflow-jobs/{id}", wf.GetWorkflowJob)
+		r.Post("/workflow-job-nodes/{id}/approve", wf.ApproveNode)
+		r.Post("/workflow-job-nodes/{id}/deny", wf.DenyNode)
+
 		// =======================================================================
 		// Inventories with nested hosts/groups
 		// =======================================================================

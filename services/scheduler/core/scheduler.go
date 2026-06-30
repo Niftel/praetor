@@ -58,6 +58,7 @@ func (s *Scheduler) Start() {
 			if err := s.processTimedOutJobs(); err != nil {
 				log.Printf("Error processing timed out jobs: %v", err)
 			}
+			s.processWorkflows()
 		}
 	}
 }
