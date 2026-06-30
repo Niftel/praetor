@@ -139,7 +139,6 @@ export interface JobTemplate {
   project_id?: number;
   playbook: string;
   playbook_content?: string;
-  execution_environment_id?: number;
   unified_job_template_id?: number;
   credential_id?: number;
   forks: number;
@@ -240,22 +239,3 @@ export interface Organization {
 }
 
 // Infrastructure models
-export interface Instance {
-  id: number;
-  hostname: string;
-  ip_address?: string;
-  capacity: number;
-  version?: string;
-  enabled: boolean;
-  instance_type?: string; // executor, controller, hybrid
-  healthy?: boolean;
-  last_heartbeat?: string;
-  groups?: InstanceGroup[];
-}
-
-export interface InstanceGroup {
-  id: number;
-  name: string;
-  created_at: string;
-  modified_at?: string;
-}

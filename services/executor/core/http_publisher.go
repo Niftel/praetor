@@ -55,9 +55,10 @@ func (p *HttpEventPublisher) PublishJobEvent(event *events.JobEvent) error {
 	return nil
 }
 
+// PublishLogChunk is intentionally a no-op for the executor: bulk stdout is
+// streamed to the object store by the host-runner's log syncer (POST
+// /runs/{id}/logs), not the executor. The method only satisfies the
+// EventPublisher interface.
 func (p *HttpEventPublisher) PublishLogChunk(chunk *events.LogChunk) error {
-	// Not implemented yet for Ingestion Service HTTP API?
-	// Or maybe we use the same endpoint if it supports it, or a differnet one.
-	// For now, logging to stdout/stderr which the executor infrastructure might capture is default.
 	return nil
 }

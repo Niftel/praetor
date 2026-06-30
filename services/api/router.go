@@ -47,11 +47,6 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		praetorRender.JSON(w, r, map[string]string{"status": "pong"})
 	})
 
-	// Public Infrastructure Routes (for service auto-registration)
-	infra := handlers.NewInfrastructureResource(db)
-	r.Post("/api/v1/instances/register", infra.RegisterInstance)
-	r.Post("/api/v1/instances/{id}/heartbeat", infra.HeartbeatInstance)
-
 	// Public Host Runner Heartbeat (for host-runner agents)
 	hosts := handlers.NewHostsResource(db)
 	r.Post("/api/v1/hosts/{hostId}/runner-heartbeat", hosts.RunnerHeartbeat)
@@ -221,11 +216,6 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		schedules := handlers.NewSchedulesResource(db)
 		r.Mount("/schedules", schedules.Routes())
 
-		// =======================================================================
-		// Infrastructure (instances, instance groups)
-		// =======================================================================
-		infraHandler := handlers.NewInfrastructureResource(db)
-		r.Mount("/", infraHandler.Routes())
 	})
 
 	return r

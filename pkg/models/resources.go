@@ -74,16 +74,6 @@ type Credential struct {
 	ModifiedAt       time.Time       `json:"modified_at" db:"modified_at"`
 }
 
-type ExecutionEnvironment struct {
-	ID             int64     `json:"id" db:"id"`
-	OrganizationID *int64    `json:"organization_id,omitempty" db:"organization_id"`
-	Name           string    `json:"name" db:"name"`
-	Image          string    `json:"image" db:"image"`
-	Description    *string   `json:"description,omitempty" db:"description"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
-	ModifiedAt     time.Time `json:"modified_at" db:"modified_at"`
-}
-
 type JobTemplate struct {
 	ID                     int64           `json:"id" db:"id"`
 	OrganizationID         int64           `json:"organization_id" db:"organization_id"`
@@ -93,7 +83,6 @@ type JobTemplate struct {
 	ProjectID              *int64          `json:"project_id,omitempty" db:"project_id"`
 	Playbook               string          `json:"playbook" db:"playbook"`
 	PlaybookContent        *string         `json:"playbook_content,omitempty" db:"playbook_content"`
-	ExecutionEnvironmentID *int64          `json:"execution_environment_id,omitempty" db:"execution_environment_id"`
 	UnifiedJobTemplateID   *int64          `json:"unified_job_template_id,omitempty" db:"unified_job_template_id"`
 	CredentialID           *int64          `json:"credential_id,omitempty" db:"credential_id"`
 	Forks                  int             `json:"forks" db:"forks"`

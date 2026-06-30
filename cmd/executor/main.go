@@ -1,14 +1,13 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
-	"github.com/praetordev/praetor/pkg/registration"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/executor/core"
 )
@@ -74,39 +73,32 @@ func main() {
 			doneChan <- true
 		}()
 
-		// Run job
-		if err := runner.Run(&req, eventChan); err != nil {
-			log.Printf("Job execution failed: %v", err)
-			// TODO: Publish failure event?
-			os.Exit(1)
+		// Run job. On failure, emit a JOB_FAILED event (as the daemon path does)
+		// so the run is marked failed promptly instead of waiting for the
+		// reconciler's heartbeat timeout, then flush before exiting.
+		runErr := runner.Run(&req, eventChan)
+		if runErr != nil {
+			log.Printf("Job execution failed: %v", runErr)
+			failMsg := fmt.Sprintf("Runner failed: %v", runErr)
+			eventChan <- events.JobEvent{
+				ExecutionRunID: req.ExecutionRunID,
+				UnifiedJobID:   req.UnifiedJobID,
+				EventType:      "JOB_FAILED",
+				Timestamp:      time.Now(),
+				StdoutSnippet:  &failMsg,
+			}
 		}
 
 		close(eventChan)
 		<-doneChan // Wait for events to flush
+		if runErr != nil {
+			os.Exit(1)
+		}
 		log.Println("One-shot execution finished successfully.")
 		return
 	}
 
-	// 2. Instance Registration (Daemon Mode only)
-	apiURL := os.Getenv("API_URL")
-	if apiURL == "" {
-		apiURL = "http://api:8080/api/v1"
-	}
-	regClient := registration.NewClient(registration.Config{
-		APIBaseURL:      apiURL,
-		InstanceType:    "executor",
-		Capacity:        100,
-		HeartbeatPeriod: 30 * time.Second,
-	})
-
-	ctx := context.Background()
-	if err := regClient.Register(ctx); err != nil {
-		log.Printf("[registration] Failed to register (will retry): %v", err)
-	}
-	regClient.StartHeartbeat(ctx)
-	defer regClient.Stop()
-
-	// 3. Create Agent (Daemon Mode)
+	// 2. Create Agent (Daemon Mode)
 	// We use NATS for Subscription (bus), and our selected publisher for Events
 	agent := core.NewAgent(bus, publisher, runner)
 

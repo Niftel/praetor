@@ -247,7 +247,6 @@ func (s *Scheduler) processPendingJobs() error {
 			Limit:           limit,
 			UseFactCache:    template.UseFactCache,
 			CachedFacts:     cachedFacts,
-			EnvironmentRefs: []string{},
 			RunnerHost:      runnerHostName,
 			RunnerHostID:    runnerHostID,
 			APIURL:          os.Getenv("API_URL"),
