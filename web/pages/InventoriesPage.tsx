@@ -4,12 +4,13 @@ import { Inventory, Host, Group } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import ResourceAccess from '../components/ResourceAccess';
 import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock } from 'lucide-react';
 
 const InventoriesPage = () => {
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [selectedInventoryId, setSelectedInventoryId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'hosts' | 'groups' | 'sources'>('hosts');
+  const [activeTab, setActiveTab] = useState<'hosts' | 'groups' | 'sources' | 'access'>('hosts');
   const [sources, setSources] = useState<any[]>([]);
   const [showSourceModal, setShowSourceModal] = useState(false);
   const [newSource, setNewSource] = useState<{ name: string; source_kind: string; source: string; credential_id: number | '' }>({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
@@ -322,15 +323,22 @@ const InventoriesPage = () => {
             <Card className="overflow-hidden">
               <div className="flex items-center justify-between border-b border-gray-200 px-2">
                 <div className="flex">
-                  {(['hosts', 'groups', 'sources'] as const).map(t => (
+                  {(['hosts', 'groups', 'sources', 'access'] as const).map(t => (
                     <button key={t} onClick={() => setActiveTab(t)}
                       className={`px-4 py-3 text-sm font-medium border-b-2 capitalize ${activeTab === t ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                      {t} <span className="text-gray-400">({t === 'hosts' ? hosts.length : t === 'groups' ? groups.length : sources.length})</span>
+                      {t}{t !== 'access' && <span className="text-gray-400"> ({t === 'hosts' ? hosts.length : t === 'groups' ? groups.length : sources.length})</span>}
                     </button>
                   ))}
                 </div>
-                <Button size="sm" icon={<Plus size={14} />} onClick={onAdd}>Add {addLabel}</Button>
+                {activeTab !== 'access' && <Button size="sm" icon={<Plus size={14} />} onClick={onAdd}>Add {addLabel}</Button>}
               </div>
+
+              {/* Access */}
+              {activeTab === 'access' && (
+                <div className="p-4">
+                  <ResourceAccess contentType="inventory" objectId={selectedInv.id} />
+                </div>
+              )}
 
               {/* Hosts */}
               {activeTab === 'hosts' && (

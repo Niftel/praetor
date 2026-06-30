@@ -12,7 +12,6 @@ import {
   Users,
   LogOut,
   Building2,
-  Shield,
   UserCog,
   History
 } from 'lucide-react';
@@ -57,7 +56,6 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { name: 'Organizations', path: '/organizations', icon: <Building2 size={20} /> },
         { name: 'Users', path: '/users', icon: <Users size={20} /> },
         { name: 'Teams', path: '/teams', icon: <UserCog size={20} /> },
-        { name: 'Roles', path: '/roles', icon: <Shield size={20} /> },
         { name: 'Auth Providers', path: '/auth-providers', icon: <Key size={20} /> },
         { name: 'Activity', path: '/activity', icon: <History size={20} /> },
       ]

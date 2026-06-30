@@ -171,6 +171,9 @@ export const api = {
     // Roles (AWX-style)
     getRoles: () => fetchWithAuth('/roles').then(r => r.json()),
     getRole: (id: number) => fetchWithAuth(`/roles/${id}`).then(r => r.json()),
+    // AWX-style access: roles on a resource, and roles a user holds.
+    getResourceAccess: (contentType: string, objectId: number) => fetchWithAuth(`/access?content_type=${contentType}&object_id=${objectId}`).then(r => r.json()),
+    getUserAccess: (userId: number) => fetchWithAuth(`/users/${userId}/access`).then(r => r.json()),
     getRoleUsers: (roleId: number) => fetchWithAuth(`/roles/${roleId}/users`).then(r => r.json()),
     addRoleUser: (roleId: number, userId: number) => fetchWithAuth(`/roles/${roleId}/users`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
     removeRoleUser: (roleId: number, userId: number) => fetchWithAuth(`/roles/${roleId}/users/${userId}`, { method: 'DELETE' }),

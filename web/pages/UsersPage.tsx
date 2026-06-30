@@ -5,13 +5,22 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { UserPlus, Shield, Trash2, Loader } from 'lucide-react';
+import { roleLabel } from '../components/ResourceAccess';
+import { UserPlus, Shield, Trash2, Loader, KeyRound } from 'lucide-react';
 
 const UsersPage = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ username: '', email: '', password: '', is_superuser: false });
+  const [accessUser, setAccessUser] = useState<User | null>(null);
+  const [accessRows, setAccessRows] = useState<any[]>([]);
+
+  const openAccess = (user: User) => {
+    setAccessUser(user);
+    setAccessRows([]);
+    api.getUserAccess(user.id).then(d => setAccessRows(d || [])).catch(() => setAccessRows([]));
+  };
 
   const fetchUsers = async () => {
     try {
@@ -81,7 +90,7 @@ const UsersPage = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {users.map((user) => (
-              <tr key={user.id} className="hover:bg-gray-50">
+              <tr key={user.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openAccess(user)}>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
                     <div className="h-8 w-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-medium">
@@ -106,7 +115,14 @@ const UsersPage = () => {
                     {user.is_active !== false ? 'Active' : 'Inactive'}
                   </Badge>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right">
+                <td className="px-6 py-4 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+                  <button
+                    onClick={() => openAccess(user)}
+                    className="text-gray-400 hover:text-brand-600 mr-3"
+                    title="View access"
+                  >
+                    <KeyRound size={18} />
+                  </button>
                   <button
                     onClick={() => handleDelete(user.id)}
                     className="text-gray-400 hover:text-red-600"
@@ -170,6 +186,44 @@ const UsersPage = () => {
             <Button onClick={handleCreate}>Create</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Per-user access: the roles this user holds and where */}
+      <Modal isOpen={!!accessUser} onClose={() => setAccessUser(null)} title={accessUser ? `Access — ${accessUser.username}` : ''} size="lg">
+        {accessUser && (
+          <div className="space-y-4">
+            {accessUser.is_superuser && (
+              <div className="text-sm bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-800">
+                <Shield size={14} className="inline mr-1" /> System Administrator — full access to everything.
+              </div>
+            )}
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Resource</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {accessRows.map((r, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-sm text-gray-500 capitalize">{r.singleton_name ? 'System' : (r.content_type || '').replace('_', ' ')}</td>
+                    <td className="px-4 py-2 text-sm font-medium text-gray-900">{r.singleton_name ? '—' : (r.resource_name || `#${r.object_id}`)}</td>
+                    <td className="px-4 py-2 text-sm">
+                      <Badge variant={r.singleton_name === 'system_administrator' ? 'warning' : r.role_field === 'admin_role' ? 'warning' : r.role_field === 'member_role' ? 'info' : 'neutral'}>
+                        {r.singleton_name ? r.singleton_name.replace(/_/g, ' ') : roleLabel(r.role_field)}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+                {accessRows.length === 0 && (
+                  <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-400">No roles assigned. Grant access from a resource's Access tab.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Modal>
     </div>
   );
