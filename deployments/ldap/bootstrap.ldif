@@ -1,58 +1,244 @@
+# =============================================================================
+# Praetor Industries — company directory
+#
+# A realistic mid-size cloud-automation company used to demo Praetor's LDAP
+# sync. Structure (what Praetor consumes):
+#   ou=organizations  -> departments    => Praetor organizations
+#   ou=teams          -> groupOfNames    => Praetor teams (linked to a dept via `ou`)
+#   ou=users          -> inetOrgPerson   => Praetor users; team `member` => membership
+#
+# The reporting hierarchy (C-level -> VP/Director -> Manager -> IC) is expressed
+# with the `manager` (DN) and `title` attributes so the directory reflects a
+# real org chart, even though Praetor only mirrors orgs/teams/users.
+#
+# Demo passwords: existing users keep <name>123 (alice123, ...); admin = admin;
+# everyone added here uses `praetor123`.
+# =============================================================================
+
+# --- Top-level containers ----------------------------------------------------
 dn: ou=users,dc=praetor,dc=local
 objectClass: organizationalUnit
 ou: users
-description: All Praetor users
+description: All Praetor Industries staff
 
 dn: ou=organizations,dc=praetor,dc=local
 objectClass: organizationalUnit
 ou: organizations
-description: Praetor organizations
+description: Departments (Praetor organizations)
 
 dn: ou=teams,dc=praetor,dc=local
 objectClass: organizationalUnit
 ou: teams
-description: Praetor teams
+description: Teams within departments
 
+# --- Departments (=> Praetor organizations) ----------------------------------
 dn: ou=Engineering,ou=organizations,dc=praetor,dc=local
 objectClass: organizationalUnit
 ou: Engineering
-description: Engineering department
+description: Builds and ships the Praetor product
 
 dn: ou=Operations,ou=organizations,dc=praetor,dc=local
 objectClass: organizationalUnit
 ou: Operations
-description: Operations department
+description: Infrastructure, SRE and networking
 
 dn: ou=Security,ou=organizations,dc=praetor,dc=local
 objectClass: organizationalUnit
 ou: Security
-description: Security team
+description: Information security and compliance
 
-dn: uid=admin,ou=users,dc=praetor,dc=local
+dn: ou=Data,ou=organizations,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: Data
+description: Data engineering and analytics
+
+dn: ou=QualityAssurance,ou=organizations,dc=praetor,dc=local
+objectClass: organizationalUnit
+ou: QualityAssurance
+description: Test engineering and release quality
+
+# =============================================================================
+# People (=> Praetor users)
+# =============================================================================
+
+# --- Executive ---------------------------------------------------------------
+dn: uid=ctran,ou=users,dc=praetor,dc=local
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
-uid: admin
-sn: Administrator
-givenName: System
-cn: System Administrator
-displayName: System Administrator
-mail: admin@praetor.local
-uidNumber: 1000
+uid: ctran
+givenName: Cassandra
+sn: Tran
+cn: Cassandra Tran
+displayName: Cassandra Tran
+mail: cassandra.tran@praetor.local
+title: Chief Technology Officer
+o: Praetor Industries
+uidNumber: 1006
 gidNumber: 1000
-homeDirectory: /home/admin
-userPassword: admin
+homeDirectory: /home/ctran
+userPassword: praetor123
 
+# --- Department heads (report to CTO) ----------------------------------------
+dn: uid=vengels,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: vengels
+givenName: Victor
+sn: Engels
+cn: Victor Engels
+displayName: Victor Engels
+mail: victor.engels@praetor.local
+title: VP of Engineering
+departmentNumber: Engineering
+manager: uid=ctran,ou=users,dc=praetor,dc=local
+uidNumber: 1007
+gidNumber: 1000
+homeDirectory: /home/vengels
+userPassword: praetor123
+
+dn: uid=opark,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: opark
+givenName: Olivia
+sn: Park
+cn: Olivia Park
+displayName: Olivia Park
+mail: olivia.park@praetor.local
+title: Director of Operations
+departmentNumber: Operations
+manager: uid=ctran,ou=users,dc=praetor,dc=local
+uidNumber: 1008
+gidNumber: 1000
+homeDirectory: /home/opark
+userPassword: praetor123
+
+dn: uid=scho,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: scho
+givenName: Samuel
+sn: Cho
+cn: Samuel Cho
+displayName: Samuel Cho
+mail: samuel.cho@praetor.local
+title: Chief Information Security Officer
+departmentNumber: Security
+manager: uid=ctran,ou=users,dc=praetor,dc=local
+uidNumber: 1009
+gidNumber: 1000
+homeDirectory: /home/scho
+userPassword: praetor123
+
+dn: uid=dreyes,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: dreyes
+givenName: Dana
+sn: Reyes
+cn: Dana Reyes
+displayName: Dana Reyes
+mail: dana.reyes@praetor.local
+title: Director of Data
+departmentNumber: Data
+manager: uid=ctran,ou=users,dc=praetor,dc=local
+uidNumber: 1010
+gidNumber: 1000
+homeDirectory: /home/dreyes
+userPassword: praetor123
+
+dn: uid=qalvarez,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: qalvarez
+givenName: Quinn
+sn: Alvarez
+cn: Quinn Alvarez
+displayName: Quinn Alvarez
+mail: quinn.alvarez@praetor.local
+title: Head of Quality Assurance
+departmentNumber: QualityAssurance
+manager: uid=ctran,ou=users,dc=praetor,dc=local
+uidNumber: 1011
+gidNumber: 1000
+homeDirectory: /home/qalvarez
+userPassword: praetor123
+
+# --- Engineering managers (report to VP Eng) ---------------------------------
+dn: uid=pnair,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: pnair
+givenName: Priya
+sn: Nair
+cn: Priya Nair
+displayName: Priya Nair
+mail: priya.nair@praetor.local
+title: Platform Engineering Manager
+departmentNumber: Engineering
+manager: uid=vengels,ou=users,dc=praetor,dc=local
+uidNumber: 1012
+gidNumber: 1000
+homeDirectory: /home/pnair
+userPassword: praetor123
+
+dn: uid=blee,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: blee
+givenName: Brian
+sn: Lee
+cn: Brian Lee
+displayName: Brian Lee
+mail: brian.lee@praetor.local
+title: Backend Engineering Manager
+departmentNumber: Engineering
+manager: uid=vengels,ou=users,dc=praetor,dc=local
+uidNumber: 1013
+gidNumber: 1000
+homeDirectory: /home/blee
+userPassword: praetor123
+
+dn: uid=fwalsh,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: fwalsh
+givenName: Fiona
+sn: Walsh
+cn: Fiona Walsh
+displayName: Fiona Walsh
+mail: fiona.walsh@praetor.local
+title: Frontend Engineering Manager
+departmentNumber: Engineering
+manager: uid=vengels,ou=users,dc=praetor,dc=local
+uidNumber: 1014
+gidNumber: 1000
+homeDirectory: /home/fwalsh
+userPassword: praetor123
+
+# --- Engineering individual contributors -------------------------------------
 dn: uid=alice,ou=users,dc=praetor,dc=local
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
 uid: alice
-sn: Smith
 givenName: Alice
+sn: Smith
 cn: Alice Smith
 displayName: Alice Smith
 mail: alice@praetor.local
+title: Senior Platform Engineer
+departmentNumber: Engineering
+manager: uid=pnair,ou=users,dc=praetor,dc=local
 uidNumber: 1001
 gidNumber: 1000
 homeDirectory: /home/alice
@@ -63,90 +249,439 @@ objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
 uid: bob
-sn: Johnson
 givenName: Bob
+sn: Johnson
 cn: Bob Johnson
 displayName: Bob Johnson
 mail: bob@praetor.local
+title: Platform Engineer
+departmentNumber: Engineering
+manager: uid=pnair,ou=users,dc=praetor,dc=local
 uidNumber: 1002
 gidNumber: 1000
 homeDirectory: /home/bob
 userPassword: bob123
-
-dn: uid=charlie,ou=users,dc=praetor,dc=local
-objectClass: inetOrgPerson
-objectClass: posixAccount
-objectClass: shadowAccount
-uid: charlie
-sn: Brown
-givenName: Charlie
-cn: Charlie Brown
-displayName: Charlie Brown
-mail: charlie@praetor.local
-uidNumber: 1003
-gidNumber: 1000
-homeDirectory: /home/charlie
-userPassword: charlie123
-
-dn: uid=diana,ou=users,dc=praetor,dc=local
-objectClass: inetOrgPerson
-objectClass: posixAccount
-objectClass: shadowAccount
-uid: diana
-sn: Prince
-givenName: Diana
-cn: Diana Prince
-displayName: Diana Prince
-mail: diana@praetor.local
-uidNumber: 1004
-gidNumber: 1000
-homeDirectory: /home/diana
-userPassword: diana123
 
 dn: uid=eve,ou=users,dc=praetor,dc=local
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
 uid: eve
-sn: Wilson
 givenName: Eve
+sn: Wilson
 cn: Eve Wilson
 displayName: Eve Wilson
 mail: eve@praetor.local
+title: Platform Engineer
+departmentNumber: Engineering
+manager: uid=pnair,ou=users,dc=praetor,dc=local
 uidNumber: 1005
 gidNumber: 1000
 homeDirectory: /home/eve
 userPassword: eve123
 
+dn: uid=fmuller,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: fmuller
+givenName: Frank
+sn: Muller
+cn: Frank Muller
+displayName: Frank Muller
+mail: frank.muller@praetor.local
+title: Senior Backend Engineer
+departmentNumber: Engineering
+manager: uid=blee,ou=users,dc=praetor,dc=local
+uidNumber: 1015
+gidNumber: 1000
+homeDirectory: /home/fmuller
+userPassword: praetor123
+
+dn: uid=gkim,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: gkim
+givenName: Grace
+sn: Kim
+cn: Grace Kim
+displayName: Grace Kim
+mail: grace.kim@praetor.local
+title: Backend Engineer
+departmentNumber: Engineering
+manager: uid=blee,ou=users,dc=praetor,dc=local
+uidNumber: 1016
+gidNumber: 1000
+homeDirectory: /home/gkim
+userPassword: praetor123
+
+dn: uid=hadams,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: hadams
+givenName: Henry
+sn: Adams
+cn: Henry Adams
+displayName: Henry Adams
+mail: henry.adams@praetor.local
+title: Senior Frontend Engineer
+departmentNumber: Engineering
+manager: uid=fwalsh,ou=users,dc=praetor,dc=local
+uidNumber: 1017
+gidNumber: 1000
+homeDirectory: /home/hadams
+userPassword: praetor123
+
+dn: uid=ichen,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: ichen
+givenName: Ivy
+sn: Chen
+cn: Ivy Chen
+displayName: Ivy Chen
+mail: ivy.chen@praetor.local
+title: Frontend Engineer
+departmentNumber: Engineering
+manager: uid=fwalsh,ou=users,dc=praetor,dc=local
+uidNumber: 1018
+gidNumber: 1000
+homeDirectory: /home/ichen
+userPassword: praetor123
+
+# --- Operations --------------------------------------------------------------
+dn: uid=charlie,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: charlie
+givenName: Charlie
+sn: Brown
+cn: Charlie Brown
+displayName: Charlie Brown
+mail: charlie@praetor.local
+title: SRE Team Lead
+departmentNumber: Operations
+manager: uid=opark,ou=users,dc=praetor,dc=local
+uidNumber: 1003
+gidNumber: 1000
+homeDirectory: /home/charlie
+userPassword: charlie123
+
+dn: uid=lnovak,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: lnovak
+givenName: Liam
+sn: Novak
+cn: Liam Novak
+displayName: Liam Novak
+mail: liam.novak@praetor.local
+title: Network Engineering Lead
+departmentNumber: Operations
+manager: uid=opark,ou=users,dc=praetor,dc=local
+uidNumber: 1019
+gidNumber: 1000
+homeDirectory: /home/lnovak
+userPassword: praetor123
+
+dn: uid=jryan,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: jryan
+givenName: Jack
+sn: Ryan
+cn: Jack Ryan
+displayName: Jack Ryan
+mail: jack.ryan@praetor.local
+title: Site Reliability Engineer
+departmentNumber: Operations
+manager: uid=charlie,ou=users,dc=praetor,dc=local
+uidNumber: 1020
+gidNumber: 1000
+homeDirectory: /home/jryan
+userPassword: praetor123
+
+dn: uid=kdiaz,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: kdiaz
+givenName: Karen
+sn: Diaz
+cn: Karen Diaz
+displayName: Karen Diaz
+mail: karen.diaz@praetor.local
+title: Site Reliability Engineer
+departmentNumber: Operations
+manager: uid=charlie,ou=users,dc=praetor,dc=local
+uidNumber: 1021
+gidNumber: 1000
+homeDirectory: /home/kdiaz
+userPassword: praetor123
+
+dn: uid=mrossi,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: mrossi
+givenName: Mia
+sn: Rossi
+cn: Mia Rossi
+displayName: Mia Rossi
+mail: mia.rossi@praetor.local
+title: Network Engineer
+departmentNumber: Operations
+manager: uid=lnovak,ou=users,dc=praetor,dc=local
+uidNumber: 1022
+gidNumber: 1000
+homeDirectory: /home/mrossi
+userPassword: praetor123
+
+dn: uid=admin,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: admin
+givenName: System
+sn: Administrator
+cn: System Administrator
+displayName: System Administrator
+mail: admin@praetor.local
+title: Systems Administrator
+departmentNumber: Operations
+manager: uid=opark,ou=users,dc=praetor,dc=local
+uidNumber: 1000
+gidNumber: 1000
+homeDirectory: /home/admin
+userPassword: admin
+
+# --- Security ----------------------------------------------------------------
+dn: uid=diana,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: diana
+givenName: Diana
+sn: Prince
+cn: Diana Prince
+displayName: Diana Prince
+mail: diana@praetor.local
+title: Security Engineering Lead
+departmentNumber: Security
+manager: uid=scho,ou=users,dc=praetor,dc=local
+uidNumber: 1004
+gidNumber: 1000
+homeDirectory: /home/diana
+userPassword: diana123
+
+dn: uid=nbennett,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: nbennett
+givenName: Noah
+sn: Bennett
+cn: Noah Bennett
+displayName: Noah Bennett
+mail: noah.bennett@praetor.local
+title: Security Engineer
+departmentNumber: Security
+manager: uid=diana,ou=users,dc=praetor,dc=local
+uidNumber: 1023
+gidNumber: 1000
+homeDirectory: /home/nbennett
+userPassword: praetor123
+
+dn: uid=ocole,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: ocole
+givenName: Oscar
+sn: Cole
+cn: Oscar Cole
+displayName: Oscar Cole
+mail: oscar.cole@praetor.local
+title: Compliance Analyst
+departmentNumber: Security
+manager: uid=scho,ou=users,dc=praetor,dc=local
+uidNumber: 1024
+gidNumber: 1000
+homeDirectory: /home/ocole
+userPassword: praetor123
+
+# --- Data & Analytics --------------------------------------------------------
+dn: uid=pmendes,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: pmendes
+givenName: Paula
+sn: Mendes
+cn: Paula Mendes
+displayName: Paula Mendes
+mail: paula.mendes@praetor.local
+title: Senior Data Engineer
+departmentNumber: Data
+manager: uid=dreyes,ou=users,dc=praetor,dc=local
+uidNumber: 1025
+gidNumber: 1000
+homeDirectory: /home/pmendes
+userPassword: praetor123
+
+dn: uid=rpatel,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: rpatel
+givenName: Ravi
+sn: Patel
+cn: Ravi Patel
+displayName: Ravi Patel
+mail: ravi.patel@praetor.local
+title: Data Engineer
+departmentNumber: Data
+manager: uid=dreyes,ou=users,dc=praetor,dc=local
+uidNumber: 1026
+gidNumber: 1000
+homeDirectory: /home/rpatel
+userPassword: praetor123
+
+# --- Quality Assurance -------------------------------------------------------
+dn: uid=slin,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: slin
+givenName: Sara
+sn: Lin
+cn: Sara Lin
+displayName: Sara Lin
+mail: sara.lin@praetor.local
+title: Senior QA Engineer
+departmentNumber: QualityAssurance
+manager: uid=qalvarez,ou=users,dc=praetor,dc=local
+uidNumber: 1027
+gidNumber: 1000
+homeDirectory: /home/slin
+userPassword: praetor123
+
+dn: uid=tbecker,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: tbecker
+givenName: Tom
+sn: Becker
+cn: Tom Becker
+displayName: Tom Becker
+mail: tom.becker@praetor.local
+title: QA Engineer
+departmentNumber: QualityAssurance
+manager: uid=qalvarez,ou=users,dc=praetor,dc=local
+uidNumber: 1028
+gidNumber: 1000
+homeDirectory: /home/tbecker
+userPassword: praetor123
+
+# =============================================================================
+# Teams (=> Praetor teams; `ou` links to the department/org)
+# =============================================================================
+
+# --- Engineering teams -------------------------------------------------------
 dn: cn=platform-team,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
 cn: platform-team
-description: Platform Engineering Team
+description: Platform engineering - CI/CD, internal tooling, automation
 ou: Engineering
+member: uid=pnair,ou=users,dc=praetor,dc=local
 member: uid=alice,ou=users,dc=praetor,dc=local
 member: uid=bob,ou=users,dc=praetor,dc=local
 member: uid=eve,ou=users,dc=praetor,dc=local
 
+dn: cn=backend-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: backend-team
+description: Backend services and APIs
+ou: Engineering
+member: uid=blee,ou=users,dc=praetor,dc=local
+member: uid=fmuller,ou=users,dc=praetor,dc=local
+member: uid=gkim,ou=users,dc=praetor,dc=local
+
+dn: cn=frontend-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: frontend-team
+description: Web UI and design system
+ou: Engineering
+member: uid=fwalsh,ou=users,dc=praetor,dc=local
+member: uid=hadams,ou=users,dc=praetor,dc=local
+member: uid=ichen,ou=users,dc=praetor,dc=local
+
+# --- Operations teams --------------------------------------------------------
 dn: cn=sre-team,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
 cn: sre-team
-description: Site Reliability Engineering Team
+description: Site reliability - availability, on-call, incident response
 ou: Operations
-member: uid=bob,ou=users,dc=praetor,dc=local
 member: uid=charlie,ou=users,dc=praetor,dc=local
+member: uid=jryan,ou=users,dc=praetor,dc=local
+member: uid=kdiaz,ou=users,dc=praetor,dc=local
 
-dn: cn=security-team,ou=teams,dc=praetor,dc=local
+dn: cn=network-team,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
-cn: security-team
-description: Security Operations Team
-ou: Security
-member: uid=diana,ou=users,dc=praetor,dc=local
-member: uid=alice,ou=users,dc=praetor,dc=local
+cn: network-team
+description: Network and connectivity engineering
+ou: Operations
+member: uid=lnovak,ou=users,dc=praetor,dc=local
+member: uid=mrossi,ou=users,dc=praetor,dc=local
 
 dn: cn=admins,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
 cn: admins
-description: System Administrators
+description: Privileged systems administrators
 ou: Operations
 member: uid=admin,ou=users,dc=praetor,dc=local
-member: uid=alice,ou=users,dc=praetor,dc=local
+member: uid=opark,ou=users,dc=praetor,dc=local
+
+# --- Security teams ----------------------------------------------------------
+dn: cn=security-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: security-team
+description: Security operations and engineering
+ou: Security
+member: uid=diana,ou=users,dc=praetor,dc=local
+member: uid=nbennett,ou=users,dc=praetor,dc=local
+
+dn: cn=compliance-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: compliance-team
+description: Audit, compliance and governance
+ou: Security
+member: uid=scho,ou=users,dc=praetor,dc=local
+member: uid=ocole,ou=users,dc=praetor,dc=local
+
+# --- Data team ---------------------------------------------------------------
+dn: cn=data-engineering-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: data-engineering-team
+description: Pipelines, warehousing and analytics platform
+ou: Data
+member: uid=dreyes,ou=users,dc=praetor,dc=local
+member: uid=pmendes,ou=users,dc=praetor,dc=local
+member: uid=rpatel,ou=users,dc=praetor,dc=local
+
+# --- QA team -----------------------------------------------------------------
+dn: cn=qa-team,ou=teams,dc=praetor,dc=local
+objectClass: groupOfNames
+cn: qa-team
+description: Test automation and release quality
+ou: QualityAssurance
+member: uid=qalvarez,ou=users,dc=praetor,dc=local
+member: uid=slin,ou=users,dc=praetor,dc=local
+member: uid=tbecker,ou=users,dc=praetor,dc=local
