@@ -94,6 +94,7 @@ export const api = {
     createWorkflow: (data: any) => fetchWithAuth('/workflow-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     deleteWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'DELETE' }),
     launchWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: '{}' }).then(r => r.json()),
+    getWorkflowJobs: () => fetchWithAuth('/workflow-jobs').then(r => r.json()),
     getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
     approveWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/approve`, { method: 'POST' }),
     denyWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/deny`, { method: 'POST' }),

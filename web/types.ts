@@ -267,14 +267,30 @@ export interface WorkflowJobNode {
   id: number;
   node_key: string;
   node_type: WorkflowNodeType;
+  name?: string;
   unified_job_id?: number | null;
   status: string;
 }
 
 export interface WorkflowJob {
   id: number;
+  workflow_template_id?: number;
+  name?: string;
   status: string;
+  created_at?: string;
+  finished_at?: string | null;
   nodes: WorkflowJobNode[];
+  edges?: WorkflowEdge[];
+}
+
+export interface WorkflowRunSummary {
+  id: number;
+  workflow_template_id: number;
+  template_name: string;
+  organization_id: number;
+  status: string;
+  created_at: string;
+  finished_at?: string | null;
 }
 
 // Infrastructure models
