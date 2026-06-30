@@ -231,6 +231,13 @@ func (s *Scheduler) processPendingJobs() error {
 		extraVars := mergeExtraVars(template.ExtraVars, job.JobArgs)
 		limit := effectiveLimit(template.JobLimit, job.JobArgs)
 
+		// When fact caching is on, ship the inventory's stored facts so the
+		// host-runner can preload them into Ansible's cache before the play.
+		var cachedFacts map[string]json.RawMessage
+		if template.UseFactCache && template.InventoryID != nil {
+			cachedFacts = loadHostFacts(ctx, tx, *template.InventoryID)
+		}
+
 		manifest := events.JobManifest{
 			Inventory:       inventoryContent,
 			ProjectURL:      projectURL,
@@ -238,6 +245,8 @@ func (s *Scheduler) processPendingJobs() error {
 			PlaybookContent: pbContent,
 			ExtraVars:       extraVars,
 			Limit:           limit,
+			UseFactCache:    template.UseFactCache,
+			CachedFacts:     cachedFacts,
 			EnvironmentRefs: []string{},
 			RunnerHost:      runnerHostName,
 			RunnerHostID:    runnerHostID,

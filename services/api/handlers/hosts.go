@@ -53,7 +53,25 @@ func (rs *HostsResource) HostRoutes() chi.Router {
 	r.Delete("/{hostId}", rs.DeleteHost)
 	r.Get("/{hostId}/groups", rs.GetHostGroups)
 	r.Post("/{hostId}/set-runner", rs.SetRunnerHost)
+	r.Get("/{hostId}/facts", rs.GetHostFacts)
 	return r
+}
+
+// GetHostFacts GET /api/v1/hosts/{hostId}/facts — the host's cached ansible_facts.
+func (rs *HostsResource) GetHostFacts(w http.ResponseWriter, r *http.Request) {
+	hostId, err := strconv.ParseInt(chi.URLParam(r, "hostId"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	if !rs.authorizeHost(w, r, hostId, actRead) {
+		return
+	}
+	var facts json.RawMessage
+	if err := rs.DB.Get(&facts, `SELECT facts FROM host_facts WHERE host_id = $1`, hostId); err != nil {
+		facts = json.RawMessage("{}")
+	}
+	render.JSON(w, r, facts)
 }
 
 // ListHosts GET /api/v1/inventories/{inventoryId}/hosts

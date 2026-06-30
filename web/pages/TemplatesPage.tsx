@@ -358,6 +358,14 @@ const TemplatesPage = () => {
               />
               Ask for limit when launching
             </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700 mt-3 pt-2 border-t">
+              <input
+                type="checkbox"
+                checked={!!formData.use_fact_cache}
+                onChange={e => setFormData({ ...formData, use_fact_cache: e.target.checked })}
+              />
+              Use fact cache (persist &amp; reuse gathered facts across runs)
+            </label>
           </div>
           <div className="border-t pt-3">
             <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">

@@ -53,6 +53,37 @@ func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID)
 	return nil
 }
 
+// StoreFacts upserts the facts a run gathered, keyed by host. Each entry's host
+// name is resolved to a host_id within the run's inventory; names that don't map
+// to a host in that inventory are ignored.
+func (s *IngestionService) StoreFacts(ctx context.Context, runID uuid.UUID, facts map[string]json.RawMessage) error {
+	if len(facts) == 0 {
+		return nil
+	}
+	var inventoryID *int64
+	err := s.DB.GetContext(ctx, &inventoryID, `
+		SELECT jt.inventory_id
+		FROM execution_runs er
+		JOIN unified_jobs uj ON uj.id = er.unified_job_id
+		JOIN job_templates jt ON jt.unified_job_template_id = uj.unified_job_template_id
+		WHERE er.id = $1`, runID)
+	if err != nil || inventoryID == nil {
+		return nil // no inventory => nowhere to attach facts
+	}
+
+	for host, f := range facts {
+		if _, err := s.DB.ExecContext(ctx, `
+			INSERT INTO host_facts (host_id, facts, modified_at)
+			SELECT h.id, $3::jsonb, now() FROM hosts h
+			WHERE h.inventory_id = $1 AND h.name = $2
+			ON CONFLICT (host_id) DO UPDATE SET facts = EXCLUDED.facts, modified_at = now()`,
+			*inventoryID, host, []byte(f)); err != nil {
+			log.Printf("facts: upsert for host %q failed: %v", host, err)
+		}
+	}
+	return nil
+}
+
 // LatestLogSeq returns the highest stored chunk seq for a run, or -1 if none.
 // It lets a reader advance its tail cursor without parsing the streamed bytes.
 func (s *IngestionService) LatestLogSeq(ctx context.Context, runID uuid.UUID) (int64, error) {

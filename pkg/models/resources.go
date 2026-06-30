@@ -108,6 +108,7 @@ type JobTemplate struct {
 	WebhookEnabled         bool            `json:"webhook_enabled" db:"webhook_enabled"`
 	WebhookService         string          `json:"webhook_service" db:"webhook_service"`
 	WebhookKey             string          `json:"webhook_key" db:"webhook_key"`
+	UseFactCache           bool            `json:"use_fact_cache" db:"use_fact_cache"`
 	CreatedAt              time.Time       `json:"created_at" db:"created_at"`
 	ModifiedAt             time.Time       `json:"modified_at" db:"modified_at"`
 }

@@ -94,7 +94,7 @@ func runJob(jobDir, apiURL, runID string) error {
 		}()
 	}
 
-	return NewRunner(jobDir).Execute()
+	return NewRunner(jobDir, apiURL).Execute()
 }
 
 // resumeAll scans root for job directories that did not reach a terminal state
