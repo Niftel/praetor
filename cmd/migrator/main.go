@@ -169,6 +169,61 @@ func seedCredentialTypes(db *sqlx.DB) {
 			}`,
 			Injectors: `{}`,
 		},
+		{
+			Name:        "Amazon Web Services",
+			Description: "Access keys for AWS dynamic inventory (aws_ec2) and modules",
+			Inputs: `{
+				"fields": [
+					{"id": "access_key", "label": "Access Key ID", "type": "text"},
+					{"id": "secret_key", "label": "Secret Access Key", "type": "password", "secret": true},
+					{"id": "security_token", "label": "STS Session Token", "type": "password", "secret": true}
+				]
+			}`,
+			Injectors: `{
+				"env": {
+					"AWS_ACCESS_KEY_ID": "{{ access_key }}",
+					"AWS_SECRET_ACCESS_KEY": "{{ secret_key }}",
+					"AWS_SECURITY_TOKEN": "{{ security_token }}"
+				}
+			}`,
+		},
+		{
+			Name:        "Microsoft Azure Resource Manager",
+			Description: "Service principal for Azure dynamic inventory (azure_rm) and modules",
+			Inputs: `{
+				"fields": [
+					{"id": "client", "label": "Client ID", "type": "text"},
+					{"id": "secret", "label": "Client Secret", "type": "password", "secret": true},
+					{"id": "tenant", "label": "Tenant ID", "type": "text"},
+					{"id": "subscription", "label": "Subscription ID", "type": "text"}
+				]
+			}`,
+			Injectors: `{
+				"env": {
+					"AZURE_CLIENT_ID": "{{ client }}",
+					"AZURE_SECRET": "{{ secret }}",
+					"AZURE_TENANT": "{{ tenant }}",
+					"AZURE_SUBSCRIPTION_ID": "{{ subscription }}"
+				}
+			}`,
+		},
+		{
+			Name:        "Google Compute Engine",
+			Description: "Service account JSON for GCP dynamic inventory (gcp_compute) and modules",
+			Inputs: `{
+				"fields": [
+					{"id": "service_account_content", "label": "Service Account JSON", "type": "textarea", "secret": true}
+				]
+			}`,
+			Injectors: `{
+				"env": {
+					"GCP_AUTH_KIND": "serviceaccount"
+				},
+				"file": {
+					"GCP_SERVICE_ACCOUNT_FILE": "{{ service_account_content }}"
+				}
+			}`,
+		},
 	}
 
 	for _, t := range types {

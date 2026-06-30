@@ -41,7 +41,20 @@ func (r *BootstrapRunner) syncInventory(req *events.ExecutionRequest, eventChan 
 	}
 
 	cmd := exec.Command("ansible-inventory", "-i", srcPath, "--list")
-	cmd.Env = os.Environ()
+	// Apply credential injectors so the inventory plugin can authenticate.
+	env := os.Environ()
+	for k, v := range m.CredentialEnv {
+		env = append(env, k+"="+v)
+	}
+	for k, content := range m.CredentialFiles {
+		// k is an env var name (alnum/underscore), safe to use as a filename.
+		fp := filepath.Join(dir, "cred_"+k)
+		if err := os.WriteFile(fp, []byte(content), 0o600); err != nil {
+			return r.syncFail(req, eventChan, fmt.Errorf("writing credential file %s: %w", k, err))
+		}
+		env = append(env, k+"="+fp)
+	}
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return r.syncFail(req, eventChan, fmt.Errorf("ansible-inventory failed: %v: %s", err, out))

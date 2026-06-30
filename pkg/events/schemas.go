@@ -50,6 +50,15 @@ type JobManifest struct {
 	SSHUser       string `json:"ssh_user,omitempty"`
 	SSHPrivateKey string `json:"ssh_private_key,omitempty"`
 
+	// CredentialEnv / CredentialFiles are resolved from a credential's
+	// AWX-style injectors by the scheduler. CredentialEnv maps an environment
+	// variable name to its (already-decrypted) value. CredentialFiles maps an
+	// environment variable name to file content; the executor writes the content
+	// to a temp file and points the env var at that path. Used to authenticate
+	// cloud dynamic-inventory plugins (e.g. AWS_ACCESS_KEY_ID for aws_ec2).
+	CredentialEnv   map[string]string `json:"credential_env,omitempty"`
+	CredentialFiles map[string]string `json:"credential_files,omitempty"`
+
 	// GalaxyServers are the Ansible Galaxy / Automation Hub servers to install
 	// project requirements from. Empty means the public galaxy.ansible.com.
 	GalaxyServers []GalaxyServer `json:"galaxy_servers,omitempty"`
