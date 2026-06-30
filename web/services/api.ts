@@ -63,6 +63,7 @@ export const api = {
     // Templates
     getTemplates: () => fetchWithAuth('/job-templates').then(r => r.json()),
     createTemplate: (data: any) => fetchWithAuth('/job-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateTemplate: (id: number, data: any) => fetchWithAuth(`/job-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteTemplate: (id: number) => fetchWithAuth(`/job-templates/${id}`, { method: 'DELETE' }),
 
     // Projects
