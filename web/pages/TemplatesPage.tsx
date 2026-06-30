@@ -437,6 +437,36 @@ const TemplatesPage = () => {
               </div>
             </div>
           )}
+          <div className="border-t pt-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+              <input
+                type="checkbox"
+                checked={!!formData.webhook_enabled}
+                onChange={e => setFormData({ ...formData, webhook_enabled: e.target.checked })}
+              />
+              Enable webhook trigger
+            </label>
+            {formData.webhook_enabled && (
+              <div className="space-y-2">
+                <select className="border p-1 rounded text-sm"
+                  value={formData.webhook_service || 'generic'}
+                  onChange={e => setFormData({ ...formData, webhook_service: e.target.value })}>
+                  <option value="github">GitHub</option>
+                  <option value="gitlab">GitLab</option>
+                  <option value="generic">Generic</option>
+                </select>
+                {editingTemplate && formData.webhook_key ? (
+                  <div className="text-xs text-gray-600 space-y-1">
+                    <div>URL: <code className="bg-gray-100 px-1 break-all">{window.location.origin}/api/v1/webhooks/job-templates/{editingTemplate.id}/{formData.webhook_service || 'generic'}</code></div>
+                    <div>Secret: <code className="bg-gray-100 px-1 break-all">{formData.webhook_key}</code></div>
+                    <p className="text-gray-400">Configure this URL + secret in your Git provider (GitHub HMAC, GitLab token, or generic X-Praetor-Token).</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400">Save the template to generate the webhook URL and secret.</p>
+                )}
+              </div>
+            )}
+          </div>
           <div className="mt-5 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button type="submit">Save Template</Button>
