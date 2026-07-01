@@ -93,33 +93,40 @@ const CredentialsPage = () => {
 
   const renderFields = () => {
     const fields = getTypeFields();
-    return fields.map((field: any) => (
-      <div key={field.id}>
-        <label className="block text-sm font-medium text-gray-700">{field.label || field.id}</label>
-        {field.secret ? (
-          <input
-            type="password"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
-            value={formFields[field.id] || ''}
-            onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-          />
-        ) : field.multiline ? (
-          <textarea
-            rows={4}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-xs"
-            value={formFields[field.id] || ''}
-            onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-          />
-        ) : (
-          <input
-            type="text"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
-            value={formFields[field.id] || ''}
-            onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-          />
-        )}
-      </div>
-    ));
+    return fields.map((field: any) => {
+      // A multi-line field (e.g. an SSH private key) needs a textarea — pasting a
+      // PEM key into a single-line password box is unusable. Keys are pasted
+      // visibly (as in AWX), so a secret textarea still renders as a textarea.
+      const isTextarea = field.type === 'textarea' || field.multiline;
+      return (
+        <div key={field.id}>
+          <label className="block text-sm font-medium text-gray-700">{field.label || field.id}</label>
+          {isTextarea ? (
+            <textarea
+              rows={6}
+              placeholder={field.secret ? '-----BEGIN OPENSSH PRIVATE KEY-----\n...' : ''}
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-xs"
+              value={formFields[field.id] || ''}
+              onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
+            />
+          ) : field.secret ? (
+            <input
+              type="password"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
+              value={formFields[field.id] || ''}
+              onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
+            />
+          ) : (
+            <input
+              type="text"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
+              value={formFields[field.id] || ''}
+              onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
+            />
+          )}
+        </div>
+      );
+    });
   };
 
   if (loading) {
