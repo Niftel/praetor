@@ -198,7 +198,7 @@ export interface EventTrigger {
 }
 
 export interface WebhookTrigger {
-  kind: 'workflow' | 'job_template';
+  kind: 'workflow' | 'job_template' | 'execution_pack';
   id: number;
   name: string;
   service: string;

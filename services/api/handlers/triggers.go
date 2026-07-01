@@ -123,5 +123,14 @@ func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) 
 		out = append(out, webhookTrigger{Kind: "job_template", ID: x.ID, Name: x.Name, Service: x.Service,
 			URL: fmt.Sprintf("/api/v1/webhooks/job-templates/%d/%s", x.ID, x.Service)})
 	}
+	// Execution packs with a git-push build trigger (webhook_key set). Packs have no
+	// stored service; the webhook URL takes it as a path param — default generic.
+	ep := []row{}
+	_ = rs.DB.SelectContext(r.Context(), &ep,
+		`SELECT id, name, 'generic' AS service FROM execution_packs WHERE webhook_key IS NOT NULL AND webhook_key <> '' ORDER BY name`)
+	for _, x := range ep {
+		out = append(out, webhookTrigger{Kind: "execution_pack", ID: x.ID, Name: x.Name, Service: x.Service,
+			URL: fmt.Sprintf("/api/v1/webhooks/execution-packs/%d/%s", x.ID, x.Service)})
+	}
 	render.JSON(w, r, out)
 }

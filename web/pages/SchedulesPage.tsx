@@ -190,7 +190,7 @@ const SchedulesPage = () => {
             {webhookTriggers.map((t, i) => (
               <div key={i} className="p-4 flex items-center justify-between hover:bg-gray-50">
                 <div className="min-w-0">
-                  <h3 className="text-base font-medium text-gray-900">{t.name} <span className="text-xs text-gray-400">({t.kind === 'workflow' ? 'workflow' : 'template'} · {t.service})</span></h3>
+                  <h3 className="text-base font-medium text-gray-900">{t.name} <span className="text-xs text-gray-400">({t.kind === 'workflow' ? 'workflow' : t.kind === 'execution_pack' ? 'execution pack (build on push)' : 'template'} · {t.service})</span></h3>
                   <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-1 inline-block text-gray-600 truncate max-w-full">POST {t.url}</code>
                 </div>
                 <button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}${t.url}`)} className="p-2 rounded-full text-gray-400 hover:text-brand-600 hover:bg-brand-50 shrink-0" title="Copy URL"><Copy size={18} /></button>
