@@ -25,6 +25,7 @@ type Spec struct {
 	Pip         []string `yaml:"pip"`         // extra pip packages (module deps: docker, jmespath, boto3, ...)
 	Collections []string `yaml:"collections"` // extra ansible-galaxy collections
 	Arches      []string `yaml:"arches"`      // target CPU arches: arm64, amd64
+	Libc        []string `yaml:"libc"`        // target C libs: gnu (glibc), musl (alpine); default [gnu]
 }
 
 func main() {
@@ -57,33 +58,52 @@ func main() {
 	if len(spec.Arches) == 0 {
 		spec.Arches = []string{"arm64"}
 	}
+	if len(spec.Libc) == 0 {
+		spec.Libc = []string{"gnu"}
+	}
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		log.Fatalf("create out dir: %v", err)
 	}
 
 	for _, arch := range spec.Arches {
-		log.Printf("Building Execution Pack %q for linux/%s (python %s, ansible %q, %d collections, %d pip)...",
-			spec.Name, arch, spec.Python, spec.Ansible, len(spec.Collections), len(spec.Pip))
-		args := []string{
-			"buildx", "build",
-			"--build-arg", "TARGETARCH=" + arch,
-			"--build-arg", "PY_VERSION=" + spec.Python,
-			"--build-arg", "ANSIBLE_SPEC=" + spec.Ansible,
-			"--build-arg", "EXTRA_PIP=" + strings.Join(spec.Pip, " "),
-			"--build-arg", "GALAXY_COLLECTIONS=" + strings.Join(spec.Collections, " "),
-			"--build-arg", "PACK_NAME=" + spec.Name,
-			"--target", "export",
-			"-o", "type=local,dest=" + *out,
-			"build/ansible-runtime",
+		for _, libc := range spec.Libc {
+			// musl is gated off: python-build-standalone's musl CPython is static and
+			// can't dlopen Ansible's C extensions ("Dynamic loading not supported"),
+			// and has no aarch64 build. Plumbing stays for a future dynamic musl python.
+			if libc == "musl" {
+				log.Printf("skipping %s+musl: PBS musl python is static and can't load Ansible's C extensions", arch)
+				continue
+			}
+			suf, baseImage := "", "debian:12-slim"
+			if libc == "musl" {
+				suf, baseImage = "-musl", "alpine:3.19"
+			}
+			log.Printf("Building Execution Pack %q for linux/%s (%s) (python %s, ansible %q, %d collections, %d pip)...",
+				spec.Name, arch, libc, spec.Python, spec.Ansible, len(spec.Collections), len(spec.Pip))
+			args := []string{
+				"buildx", "build",
+				"--platform", "linux/" + arch,
+				"--build-arg", "BUILD_IMAGE=" + baseImage,
+				"--build-arg", "TARGETARCH=" + arch,
+				"--build-arg", "LIBC=" + libc,
+				"--build-arg", "PY_VERSION=" + spec.Python,
+				"--build-arg", "ANSIBLE_SPEC=" + spec.Ansible,
+				"--build-arg", "EXTRA_PIP=" + strings.Join(spec.Pip, " "),
+				"--build-arg", "GALAXY_COLLECTIONS=" + strings.Join(spec.Collections, " "),
+				"--build-arg", "PACK_NAME=" + spec.Name,
+				"--target", "export",
+				"-o", "type=local,dest=" + *out,
+				"build/ansible-runtime",
+			}
+			cmd := exec.Command("docker", args...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				log.Fatalf("docker build for %s/%s failed: %v", arch, libc, err)
+			}
+			fmt.Printf("  -> %s/%s-linux-%s%s.tar.gz\n", *out, spec.Name, arch, suf)
 		}
-		cmd := exec.Command("docker", args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			log.Fatalf("docker build for %s failed: %v", arch, err)
-		}
-		fmt.Printf("  -> %s/%s-linux-%s.tar.gz\n", *out, spec.Name, arch)
 	}
 	log.Printf("Execution Pack %q built.", spec.Name)
 }
