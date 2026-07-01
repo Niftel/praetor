@@ -608,17 +608,11 @@ func generateInventoryINI(tx *sqlx.Tx, ctx context.Context, hosts []models.Host,
 
 	// Process each group
 	for _, g := range groups {
-		// Get hosts in this group. Membership lives in two tables for historical
-		// reasons: host_groups (written by the API/UI and inventory import) and
-		// host_group_mapping (written by dynamic inventory sync). Read the union so
-		// UI-built and sync-built inventories both render their groups — otherwise
-		// a hand-built inventory renders with empty groups and plays silently match
-		// no hosts. TODO: consolidate onto a single membership table.
+		// Get hosts in this group. Membership is stored in host_groups (written by
+		// the API/UI, inventory import and dynamic sync alike — consolidated in
+		// migration 000030).
 		var groupHostIDs []int64
-		tx.SelectContext(ctx, &groupHostIDs, `
-			SELECT host_id FROM host_groups WHERE group_id = $1
-			UNION
-			SELECT host_id FROM host_group_mapping WHERE group_id = $1`, g.ID)
+		tx.SelectContext(ctx, &groupHostIDs, "SELECT host_id FROM host_groups WHERE group_id = $1", g.ID)
 
 		if len(groupHostIDs) > 0 {
 			sb.WriteString(fmt.Sprintf("[%s]\n", g.Name))

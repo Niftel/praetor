@@ -157,7 +157,7 @@ func (s *IngestionService) UpsertInventory(ctx context.Context, inventoryID int6
 		for _, h := range hosts {
 			if hid, ok := hostID[h]; ok {
 				_, _ = s.DB.ExecContext(ctx,
-					`INSERT INTO host_group_mapping (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hid, gid)
+					`INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hid, gid)
 			}
 		}
 	}
