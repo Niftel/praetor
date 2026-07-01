@@ -10,7 +10,7 @@ const Layout: React.FC<LayoutProps> = ({ onLogout }) => {
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar onLogout={onLogout} />
-      <div className="ml-64 flex-1 flex flex-col">
+      <div className="ml-64 flex-1 flex flex-col min-w-0">
         <header className="bg-white shadow-sm h-16 flex items-center px-8 justify-between sticky top-0 z-10 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-800">Praetor Automation Controller</h2>
           <div className="flex items-center gap-4">

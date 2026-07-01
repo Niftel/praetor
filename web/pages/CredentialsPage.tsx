@@ -159,9 +159,9 @@ const CredentialsPage = () => {
               <p className="text-xs text-gray-500 mt-0.5 mb-2">
                 Add this <b>public</b> key to a host's <code className="text-[11px] bg-gray-100 px-1 rounded">~/.ssh/authorized_keys</code> — via cloud-init, your image, config management, or by hand — and Praetor can run against it with no per-host credential. The matching private key never leaves Praetor.
               </p>
-              <div className="flex items-stretch gap-2">
-                <code className="flex-1 min-w-0 block truncate bg-white border border-gray-200 rounded-md px-2 py-1.5 text-[11px] font-mono text-gray-700" title={automationKey}>{automationKey}</code>
-                <Button size="sm" variant="secondary" icon={keyCopied ? <Check size={14} /> : <Copy size={14} />}
+              <div className="flex items-center gap-2">
+                <code className="flex-1 min-w-0 block overflow-x-auto whitespace-nowrap bg-white border border-gray-200 rounded-md px-2 py-1.5 text-[11px] font-mono text-gray-700">{automationKey}</code>
+                <Button size="sm" variant="secondary" className="shrink-0" icon={keyCopied ? <Check size={14} /> : <Copy size={14} />}
                   onClick={() => { navigator.clipboard.writeText(automationKey); setKeyCopied(true); setTimeout(() => setKeyCopied(false), 2000); }}>
                   {keyCopied ? 'Copied' : 'Copy'}
                 </Button>
