@@ -5,7 +5,8 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import ResourceAccess from '../components/ResourceAccess';
-import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock } from 'lucide-react';
+import { splitConnection, mergeConnection, emptyConnection, HostConnection } from '../lib/hostConnection';
+import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock, Plug, Save, ChevronDown, ChevronRight } from 'lucide-react';
 
 const InventoriesPage = () => {
   const [inventories, setInventories] = useState<Inventory[]>([]);
@@ -23,6 +24,14 @@ const InventoriesPage = () => {
   const [showHostDetail, setShowHostDetail] = useState(false);
   const [hostGroups, setHostGroups] = useState<number[]>([]); // Group IDs the selected host belongs to
   const [settingRunner, setSettingRunner] = useState(false);
+  // Editable SSH connection for the selected host + any non-connection vars we
+  // preserve verbatim, and a save state.
+  const [connForm, setConnForm] = useState<HostConnection>(emptyConnection());
+  const [extraVars, setExtraVars] = useState<Record<string, any>>({});
+  const [showExtraVars, setShowExtraVars] = useState(false);
+  const [savingHost, setSavingHost] = useState(false);
+  // Connection fields for the New Host modal.
+  const [newHostConn, setNewHostConn] = useState<HostConnection>(emptyConnection());
 
   // Modal states
   const [showInventoryModal, setShowInventoryModal] = useState(false);
@@ -126,6 +135,33 @@ const InventoriesPage = () => {
       .catch(err => console.error('Failed to load host groups', err));
   }, [selectedHostId]);
 
+  // Populate the connection form from the selected host's variables.
+  useEffect(() => {
+    const host = hosts.find(h => h.id === selectedHostId);
+    if (!host) return;
+    const { conn, extra } = splitConnection(host.variables);
+    setConnForm(conn);
+    setExtraVars(extra);
+    setShowExtraVars(false);
+  }, [selectedHostId, hosts]);
+
+  // Save the connection form back into the host's variables (extras preserved).
+  const handleSaveConnection = async () => {
+    const host = hosts.find(h => h.id === selectedHostId);
+    if (!host) return;
+    setSavingHost(true);
+    try {
+      const variables = mergeConnection(connForm, extraVars);
+      const updated = await api.updateHost(host.id, { variables });
+      setHosts(prev => prev.map(h => (h.id === host.id ? updated : h)));
+    } catch (err) {
+      console.error('Failed to save host connection', err);
+      alert('Failed to save connection. You need admin on this inventory.');
+    } finally {
+      setSavingHost(false);
+    }
+  };
+
   // Create Inventory
   const handleCreateInventory = async () => {
     if (!newInventoryName.trim()) return;
@@ -164,9 +200,11 @@ const InventoriesPage = () => {
     try {
       await api.createHost(selectedInventoryId, {
         name: newHostName,
-        enabled: true
+        enabled: true,
+        variables: mergeConnection(newHostConn, {}),
       });
       setNewHostName('');
+      setNewHostConn(emptyConnection());
       setShowHostModal(false);
       // Refresh hosts
       const hostsData = await api.getHosts(selectedInventoryId);
@@ -481,11 +519,59 @@ const InventoriesPage = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Variables</label>
-              <pre className="w-full max-h-64 overflow-auto font-mono text-xs bg-slate-50 border border-gray-200 rounded-md p-3 text-gray-700">
-                {(() => { try { return JSON.stringify(typeof selectedHost.variables === 'string' ? JSON.parse(selectedHost.variables || '{}') : (selectedHost.variables || {}), null, 2); } catch { return String(selectedHost.variables || '{}'); } })()}
-              </pre>
+              <label className="block text-sm font-medium text-gray-700 mb-2"><Plug size={14} className="inline mr-1" /> Connection</label>
+              <div className="bg-gray-50 border border-gray-200 rounded-md p-3 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Address <span className="text-gray-400">(ansible_host)</span></label>
+                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder={selectedHost.name}
+                      value={connForm.ansible_host} onChange={e => setConnForm({ ...connForm, ansible_host: e.target.value })} />
+                    <p className="text-[11px] text-gray-400 mt-0.5">IP or DNS name. Defaults to the hostname.</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Port <span className="text-gray-400">(ansible_port)</span></label>
+                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="22" inputMode="numeric"
+                      value={connForm.ansible_port} onChange={e => setConnForm({ ...connForm, ansible_port: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">User <span className="text-gray-400">(ansible_user)</span></label>
+                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="root"
+                      value={connForm.ansible_user} onChange={e => setConnForm({ ...connForm, ansible_user: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Connection <span className="text-gray-400">(ansible_connection)</span></label>
+                    <select className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
+                      value={connForm.ansible_connection} onChange={e => setConnForm({ ...connForm, ansible_connection: e.target.value })}>
+                      <option value="">ssh (default)</option>
+                      <option value="ssh">ssh</option>
+                      <option value="local">local</option>
+                      <option value="paramiko">paramiko</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Python <span className="text-gray-400">(interpreter)</span></label>
+                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="/usr/bin/python3"
+                      value={connForm.ansible_python_interpreter} onChange={e => setConnForm({ ...connForm, ansible_python_interpreter: e.target.value })} />
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" icon={savingHost ? <Loader size={14} className="animate-spin" /> : <Save size={14} />} disabled={savingHost} onClick={handleSaveConnection}>Save connection</Button>
+                </div>
+              </div>
             </div>
+
+            {Object.keys(extraVars).length > 0 && (
+              <div>
+                <button onClick={() => setShowExtraVars(v => !v)} className="flex items-center gap-1 text-sm font-medium text-gray-700">
+                  {showExtraVars ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Other variables ({Object.keys(extraVars).length})
+                </button>
+                {showExtraVars && (
+                  <pre className="mt-2 w-full max-h-56 overflow-auto font-mono text-xs bg-slate-50 border border-gray-200 rounded-md p-3 text-gray-700">
+                    {JSON.stringify(extraVars, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>
@@ -523,8 +609,29 @@ const InventoriesPage = () => {
               placeholder="web-server-01"
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2"><Plug size={14} className="inline mr-1" /> Connection <span className="text-gray-400 font-normal">(optional)</span></label>
+            <div className="grid grid-cols-2 gap-3 bg-gray-50 border border-gray-200 rounded-md p-3">
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Address</label>
+                <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder={newHostName || 'ansible_host'}
+                  value={newHostConn.ansible_host} onChange={e => setNewHostConn({ ...newHostConn, ansible_host: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Port</label>
+                <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="22" inputMode="numeric"
+                  value={newHostConn.ansible_port} onChange={e => setNewHostConn({ ...newHostConn, ansible_port: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">User</label>
+                <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="root"
+                  value={newHostConn.ansible_user} onChange={e => setNewHostConn({ ...newHostConn, ansible_user: e.target.value })} />
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">Leave address blank to connect by hostname. You can edit these later on the host.</p>
+          </div>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowHostModal(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => { setShowHostModal(false); setNewHostConn(emptyConnection()); }}>Cancel</Button>
             <Button onClick={handleCreateHost}>Create</Button>
           </div>
         </div>
