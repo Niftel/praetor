@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,15 +24,25 @@ func NewWorkflowsResource(db *sqlx.DB) *WorkflowsResource {
 
 type workflowNode struct {
 	NodeKey       string `json:"node_key" db:"node_key"`
-	NodeType      string `json:"node_type" db:"node_type"`
+	NodeType      string `json:"node_type" db:"node_type"` // job | approval | webhook_in | webhook_out
 	JobTemplateID *int64 `json:"job_template_id" db:"job_template_id"`
 	Name          string `json:"name" db:"name"`
+	WebhookURL    string `json:"webhook_url" db:"webhook_url"`   // webhook_out
+	WebhookBody   string `json:"webhook_body" db:"webhook_body"` // webhook_out
 }
 
 type workflowEdge struct {
 	ParentKey string `json:"parent_key" db:"parent_key"`
 	ChildKey  string `json:"child_key" db:"child_key"`
 	EdgeType  string `json:"edge_type" db:"edge_type"`
+}
+
+// nullIfEmpty stores NULL for an empty optional string instead of "".
+func nullIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // orgOfWorkflow returns the org that owns a workflow template.
@@ -73,6 +84,9 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 	var body struct {
 		OrganizationID int64          `json:"organization_id"`
 		Name           string         `json:"name"`
+		WebhookEnabled bool           `json:"webhook_enabled"`
+		WebhookService string         `json:"webhook_service"`
+		WebhookKey     string         `json:"webhook_key"`
 		Nodes          []workflowNode `json:"nodes"`
 		Edges          []workflowEdge `json:"edges"`
 	}
@@ -92,8 +106,9 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 
 	var id int64
 	if err := tx.QueryRowxContext(r.Context(),
-		`INSERT INTO workflow_templates (organization_id, name) VALUES ($1, $2) RETURNING id`,
-		body.OrganizationID, body.Name).Scan(&id); err != nil {
+		`INSERT INTO workflow_templates (organization_id, name, webhook_enabled, webhook_service, webhook_key)
+		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		body.OrganizationID, body.Name, body.WebhookEnabled, nullIfEmpty(body.WebhookService), nullIfEmpty(body.WebhookKey)).Scan(&id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -102,8 +117,9 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 			n.NodeType = "job"
 		}
 		if _, err := tx.ExecContext(r.Context(),
-			`INSERT INTO workflow_nodes (workflow_template_id, node_key, node_type, job_template_id, name)
-			 VALUES ($1, $2, $3, $4, $5)`, id, n.NodeKey, n.NodeType, n.JobTemplateID, n.Name); err != nil {
+			`INSERT INTO workflow_nodes (workflow_template_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			id, n.NodeKey, n.NodeType, n.JobTemplateID, n.Name, nullIfEmpty(n.WebhookURL), nullIfEmpty(n.WebhookBody)); err != nil {
 			render.ErrInvalidRequest(err).Render(w, r)
 			return
 		}
@@ -139,11 +155,22 @@ func (rs *WorkflowsResource) GetWorkflow(w http.ResponseWriter, r *http.Request)
 	}
 	nodes := []workflowNode{}
 	_ = rs.DB.SelectContext(r.Context(), &nodes,
-		`SELECT node_key, node_type, job_template_id, name FROM workflow_nodes WHERE workflow_template_id=$1`, id)
+		`SELECT node_key, node_type, job_template_id, name,
+		        COALESCE(webhook_url,'') AS webhook_url, COALESCE(webhook_body,'') AS webhook_body
+		 FROM workflow_nodes WHERE workflow_template_id=$1`, id)
 	edges := []workflowEdge{}
 	_ = rs.DB.SelectContext(r.Context(), &edges,
 		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, id)
-	render.JSON(w, r, map[string]interface{}{"id": id, "organization_id": org, "nodes": nodes, "edges": edges})
+	var wh struct {
+		Enabled bool   `db:"webhook_enabled"`
+		Service string `db:"webhook_service"`
+	}
+	_ = rs.DB.GetContext(r.Context(), &wh,
+		`SELECT webhook_enabled, COALESCE(webhook_service,'') AS webhook_service FROM workflow_templates WHERE id=$1`, id)
+	render.JSON(w, r, map[string]interface{}{
+		"id": id, "organization_id": org, "nodes": nodes, "edges": edges,
+		"webhook_enabled": wh.Enabled, "webhook_service": wh.Service,
+	})
 }
 
 // DeleteWorkflow DELETE /api/v1/workflow-templates/{id}
@@ -269,6 +296,10 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 		UnifiedJobID *int64  `json:"unified_job_id" db:"unified_job_id"`
 		RunID        *string `json:"run_id" db:"run_id"`
 		Status       string  `json:"status" db:"status"`
+		EventToken   string  `json:"-" db:"event_token"`
+		// CallbackURL is populated only while a webhook_in node is awaiting_event,
+		// so an operator can wire the external system that releases it.
+		CallbackURL string `json:"callback_url,omitempty" db:"-"`
 	}
 	nodes := []node{}
 	// run_id is the node's latest execution run, so the UI can show the engine
@@ -276,6 +307,7 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 	_ = rs.DB.SelectContext(r.Context(), &nodes, `
 		SELECT wjn.id, wjn.node_key, wjn.node_type,
 		       COALESCE(wn.name, '') AS name, wjn.unified_job_id, wjn.status,
+		       COALESCE(wjn.event_token, '') AS event_token,
 		       er.id AS run_id
 		FROM workflow_job_nodes wjn
 		LEFT JOIN workflow_nodes wn
@@ -287,6 +319,12 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 		) er ON true
 		WHERE wjn.workflow_job_id = $2
 		ORDER BY wjn.id`, meta.TemplateID, id)
+	for i := range nodes {
+		if nodes[i].Status == "awaiting_event" && nodes[i].EventToken != "" {
+			nodes[i].CallbackURL = fmt.Sprintf(
+				"/api/v1/webhooks/workflow-job-nodes/%d/callback?token=%s", nodes[i].ID, nodes[i].EventToken)
+		}
+	}
 	edges := []workflowEdge{}
 	_ = rs.DB.SelectContext(r.Context(), &edges,
 		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, meta.TemplateID)

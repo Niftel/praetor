@@ -55,6 +55,9 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	// template's shared secret, not user auth.
 	webhooks := handlers.NewWebhooksResource(db)
 	r.Post("/api/v1/webhooks/job-templates/{id}/{service}", webhooks.Handle)
+	r.Post("/api/v1/webhooks/workflow-templates/{id}/{service}", webhooks.HandleWorkflow)
+	// A waiting webhook_in workflow node is released by its per-run event_token.
+	r.Post("/api/v1/webhooks/workflow-job-nodes/{id}/callback", webhooks.HandleNodeCallback)
 
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {

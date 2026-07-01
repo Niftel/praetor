@@ -85,6 +85,114 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"job_id": jobID, "status": "pending"})
 }
 
+// HandleWorkflow POST /api/v1/webhooks/workflow-templates/{id}/{service}
+// A remote event launches a whole workflow run (the workflow equivalent of Handle).
+func (rs *WebhooksResource) HandleWorkflow(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	service := chi.URLParam(r, "service")
+
+	var t struct {
+		WebhookEnabled bool   `db:"webhook_enabled"`
+		WebhookKey     string `db:"webhook_key"`
+	}
+	if err := rs.DB.Get(&t,
+		`SELECT webhook_enabled, webhook_key FROM workflow_templates WHERE id = $1`, id); err != nil || !t.WebhookEnabled {
+		http.NotFound(w, r)
+		return
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if !verifyWebhook(service, t.WebhookKey, r, body) {
+		http.Error(w, "signature verification failed", http.StatusUnauthorized)
+		return
+	}
+
+	// Snapshot the template's nodes into a running workflow_jobs run, exactly as
+	// LaunchWorkflow does; the scheduler's workflow runner then walks it.
+	tx, err := rs.DB.Beginx()
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	defer tx.Rollback()
+	var wjID int64
+	if err := tx.QueryRowx(
+		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`, id).Scan(&wjID); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, status)
+		 SELECT $1, node_key, node_type, job_template_id, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+		wjID, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"workflow_job_id": wjID, "status": "running"})
+}
+
+// HandleNodeCallback POST /api/v1/webhooks/workflow-job-nodes/{id}/callback
+// Releases a 'webhook_in' node that is waiting at 'awaiting_event'. The caller
+// authenticates with the node's per-run event_token (header X-Praetor-Token or
+// ?token=). An optional {"status":"failed"} body (or ?result=failed) sends the
+// workflow down the node's failure edges instead of success.
+func (rs *WebhooksResource) HandleNodeCallback(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	var n struct {
+		Status     string `db:"status"`
+		EventToken string `db:"event_token"`
+	}
+	if err := rs.DB.Get(&n,
+		`SELECT status, COALESCE(event_token,'') AS event_token FROM workflow_job_nodes WHERE id=$1`, id); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	tok := r.Header.Get("X-Praetor-Token")
+	if tok == "" {
+		tok = r.URL.Query().Get("token")
+	}
+	// Constant-time compare; a blank stored token can never be matched.
+	if n.EventToken == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(n.EventToken)) != 1 {
+		http.Error(w, "token verification failed", http.StatusUnauthorized)
+		return
+	}
+	if n.Status != "awaiting_event" {
+		http.Error(w, "node is not awaiting an event", http.StatusConflict)
+		return
+	}
+
+	result := "successful"
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	var payload struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if payload.Status == "failed" || r.URL.Query().Get("result") == "failed" {
+		result = "failed"
+	}
+	if _, err := rs.DB.Exec(
+		`UPDATE workflow_job_nodes SET status=$1 WHERE id=$2 AND status='awaiting_event'`, result, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"node_id": id, "status": result})
+}
+
 // verifyWebhook checks the request against the template's shared secret using
 // each provider's scheme: GitHub HMAC-SHA256, GitLab token header, or a generic
 // token (header or query). All comparisons are constant-time.
