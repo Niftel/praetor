@@ -36,6 +36,11 @@ const WorkflowsPage = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // Webhook trigger (a remote event launches the whole workflow)
+  const [whEnabled, setWhEnabled] = useState(false);
+  const [whService, setWhService] = useState('generic');
+  const [whKey, setWhKey] = useState('');
+
   // Template preview modal
   const [viewWf, setViewWf] = useState<Workflow | null>(null);
 
@@ -76,6 +81,7 @@ const WorkflowsPage = () => {
   // Builder helpers
   const openBuilder = () => {
     setName(''); setOrgId(orgs[0]?.id ?? ''); setNodes([]); setEdges([]); setNodeSeq(1); setError('');
+    setWhEnabled(false); setWhService('generic'); setWhKey('');
     setBuilderOpen(true);
   };
   const addNode = () => {
@@ -103,13 +109,23 @@ const WorkflowsPage = () => {
     for (const n of nodes) {
       if (!n.name.trim()) return setError('Every node needs a name.');
       if (n.node_type === 'job' && !n.job_template_id) return setError(`Node "${n.name}" needs a job template.`);
+      if (n.node_type === 'webhook_out' && !n.webhook_url?.trim()) return setError(`Node "${n.name}" needs a URL to call.`);
     }
+    if (whEnabled && !whKey.trim()) return setError('A webhook trigger needs a secret key.');
     for (const e of edges) if (e.parent_key === e.child_key) return setError('An edge cannot connect a node to itself.');
     setSaving(true);
     try {
       await api.createWorkflow({
         organization_id: orgId, name: name.trim(),
-        nodes: nodes.map(n => ({ node_key: n.node_key, node_type: n.node_type, name: n.name.trim(), job_template_id: n.node_type === 'job' ? n.job_template_id : null })),
+        webhook_enabled: whEnabled,
+        webhook_service: whEnabled ? whService : '',
+        webhook_key: whEnabled ? whKey.trim() : '',
+        nodes: nodes.map(n => ({
+          node_key: n.node_key, node_type: n.node_type, name: n.name.trim(),
+          job_template_id: n.node_type === 'job' ? n.job_template_id : null,
+          webhook_url: n.node_type === 'webhook_out' ? (n.webhook_url || '').trim() : '',
+          webhook_body: n.node_type === 'webhook_out' ? (n.webhook_body || '') : '',
+        })),
         edges,
       });
       setBuilderOpen(false);
@@ -138,7 +154,7 @@ const WorkflowsPage = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><WorkflowIcon size={24} /> Workflows</h1>
-          <p className="text-sm text-gray-500 mt-1">Chain job templates into a DAG with success / failure / always edges and manual approval gates.</p>
+          <p className="text-sm text-gray-500 mt-1">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps — call out to a URL, or pause until a remote event. Trigger whole workflows from inbound webhooks.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={load} disabled={loading} className="text-gray-600 hover:text-gray-900 p-2 rounded-lg hover:bg-gray-100" title="Refresh">
@@ -234,6 +250,33 @@ const WorkflowsPage = () => {
             </div>
           </div>
 
+          {/* Webhook trigger — a remote event launches the whole workflow */}
+          <div className="border border-gray-200 rounded-md p-3 bg-gray-50">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input type="checkbox" checked={whEnabled} onChange={e => setWhEnabled(e.target.checked)} />
+              Trigger this workflow from an inbound webhook
+            </label>
+            {whEnabled && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Provider</label>
+                  <select value={whService} onChange={e => setWhService(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    <option value="generic">Generic (token)</option>
+                    <option value="github">GitHub (HMAC)</option>
+                    <option value="gitlab">GitLab (token)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Secret key</label>
+                  <input value={whKey} onChange={e => setWhKey(e.target.value)} placeholder="shared secret" className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" />
+                </div>
+                <p className="col-span-2 text-[11px] text-gray-500">
+                  After saving, POST to <span className="font-mono">/api/v1/webhooks/workflow-templates/&lt;id&gt;/{whService}</span> with this secret to launch a run.
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <div className="flex justify-between items-center mb-2">
@@ -242,20 +285,31 @@ const WorkflowsPage = () => {
               </div>
               <div className="space-y-2 max-h-64 overflow-auto pr-1">
                 {nodes.map(n => (
-                  <div key={n.node_key} className="flex items-center gap-2 bg-gray-50 rounded-md p-2 border border-gray-200">
-                    <span className="text-xs font-mono text-gray-400 w-8">{n.node_key}</span>
-                    <input value={n.name} onChange={e => updateNode(n.node_key, { name: e.target.value })} placeholder="name" className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm min-w-0" />
-                    <select value={n.node_type} onChange={e => updateNode(n.node_key, { node_type: e.target.value as WorkflowNodeType })} className="border border-gray-300 rounded px-1 py-1 text-xs">
-                      <option value="job">job</option>
-                      <option value="approval">approval</option>
-                    </select>
-                    {n.node_type === 'job' && (
-                      <select value={n.job_template_id ?? ''} onChange={e => updateNode(n.node_key, { job_template_id: Number(e.target.value) })} className="border border-gray-300 rounded px-1 py-1 text-xs max-w-[120px]">
-                        <option value="">template…</option>
-                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  <div key={n.node_key} className="bg-gray-50 rounded-md p-2 border border-gray-200 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-gray-400 w-8">{n.node_key}</span>
+                      <input value={n.name} onChange={e => updateNode(n.node_key, { name: e.target.value })} placeholder="name" className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm min-w-0" />
+                      <select value={n.node_type} onChange={e => updateNode(n.node_key, { node_type: e.target.value as WorkflowNodeType })} className="border border-gray-300 rounded px-1 py-1 text-xs">
+                        <option value="job">job</option>
+                        <option value="approval">approval</option>
+                        <option value="webhook_in">webhook in (wait)</option>
+                        <option value="webhook_out">webhook out (call)</option>
                       </select>
+                      {n.node_type === 'job' && (
+                        <select value={n.job_template_id ?? ''} onChange={e => updateNode(n.node_key, { job_template_id: Number(e.target.value) })} className="border border-gray-300 rounded px-1 py-1 text-xs max-w-[120px]">
+                          <option value="">template…</option>
+                          {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      )}
+                      <button onClick={() => removeNode(n.node_key)} className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+                    </div>
+                    {n.node_type === 'webhook_out' && (
+                      <input value={n.webhook_url || ''} onChange={e => updateNode(n.node_key, { webhook_url: e.target.value })}
+                        placeholder="https://example.com/hook  (URL to POST)" className="w-full border border-gray-300 rounded px-2 py-1 text-xs font-mono" />
                     )}
-                    <button onClick={() => removeNode(n.node_key)} className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+                    {n.node_type === 'webhook_in' && (
+                      <p className="text-[11px] text-purple-700 pl-10">Pauses here until an external system POSTs the node's callback URL (shown on the run page).</p>
+                    )}
                   </div>
                 ))}
                 {nodes.length === 0 && <p className="text-xs text-gray-400 italic">No nodes yet.</p>}
@@ -305,6 +359,13 @@ const WorkflowsPage = () => {
       <Modal isOpen={!!viewWf} onClose={() => setViewWf(null)} title={viewWf ? `Workflow: ${viewWf.name}` : ''} size="full">
         {viewWf && (
           <div className="space-y-4">
+            {viewWf.webhook_enabled && (
+              <div className="text-xs bg-cyan-50 border border-cyan-200 rounded-md px-3 py-2 text-cyan-900">
+                <b>Webhook trigger enabled</b> ({viewWf.webhook_service || 'generic'}). POST to{' '}
+                <span className="font-mono">/api/v1/webhooks/workflow-templates/{viewWf.id}/{viewWf.webhook_service || 'generic'}</span>{' '}
+                with the configured secret to launch a run.
+              </div>
+            )}
             <WorkflowDag nodes={viewWf.nodes || []} edges={viewWf.edges || []} templateName={templateName} />
             <div className="flex justify-end">
               <Button icon={<Rocket size={16} />} onClick={() => { const w = viewWf; setViewWf(null); if (w) onLaunch(w); }}>Launch</Button>

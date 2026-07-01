@@ -240,7 +240,7 @@ export interface Organization {
 }
 
 // Workflows
-export type WorkflowNodeType = 'job' | 'approval';
+export type WorkflowNodeType = 'job' | 'approval' | 'webhook_in' | 'webhook_out';
 export type WorkflowEdgeType = 'success' | 'failure' | 'always';
 
 export interface WorkflowNode {
@@ -248,6 +248,8 @@ export interface WorkflowNode {
   node_type: WorkflowNodeType;
   job_template_id?: number | null;
   name: string;
+  webhook_url?: string;   // webhook_out: URL to POST
+  webhook_body?: string;  // webhook_out: optional JSON body
 }
 
 export interface WorkflowEdge {
@@ -260,6 +262,8 @@ export interface Workflow {
   id: number;
   organization_id: number;
   name: string;
+  webhook_enabled?: boolean;
+  webhook_service?: string;
   nodes?: WorkflowNode[];
   edges?: WorkflowEdge[];
 }
@@ -272,6 +276,7 @@ export interface WorkflowJobNode {
   unified_job_id?: number | null;
   run_id?: string | null;
   status: string;
+  callback_url?: string; // webhook_in: populated while awaiting_event
 }
 
 export interface WorkflowJob {

@@ -61,9 +61,22 @@ const WorkflowRunPage = () => {
     }
   };
 
+  const release = async (nodeId: number, callbackUrl: string, fail: boolean) => {
+    setActing(nodeId);
+    try {
+      await api.releaseWorkflowNode(callbackUrl, fail);
+      await refresh();
+    } catch (e: any) {
+      setError(e.message || 'Callback failed.');
+    } finally {
+      setActing(null);
+    }
+  };
+
   const statusByKey: Record<string, string> = {};
   (job?.nodes || []).forEach(n => { statusByKey[n.node_key] = n.status; });
   const gates = (job?.nodes || []).filter(n => n.status === 'awaiting_approval');
+  const waiters = (job?.nodes || []).filter(n => n.status === 'awaiting_event');
   const isTerminal = job ? TERMINAL.includes(job.status) : false;
 
   return (
@@ -101,6 +114,32 @@ const WorkflowRunPage = () => {
                   <Button variant="primary" size="sm" icon={<Check size={14} />} disabled={acting === g.id} onClick={() => decide(g.id, true)}>Approve</Button>
                   <Button variant="danger" size="sm" icon={<X size={14} />} disabled={acting === g.id} onClick={() => decide(g.id, false)}>Deny</Button>
                 </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Webhook_in nodes waiting on a remote event. Shows the callback URL to wire
+          an external system, or release/fail the node manually. */}
+      {waiters.length > 0 && (
+        <Card title="Waiting for events">
+          <div className="space-y-3">
+            {waiters.map(wnode => (
+              <div key={wnode.id} className="bg-purple-50 border border-purple-200 rounded-md px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-purple-900">📥 <b>{wnode.name || wnode.node_key}</b> is waiting for a remote event.</span>
+                  <div className="flex gap-2">
+                    <Button variant="primary" size="sm" icon={<Check size={14} />} disabled={acting === wnode.id || !wnode.callback_url} onClick={() => wnode.callback_url && release(wnode.id, wnode.callback_url, false)}>Release</Button>
+                    <Button variant="danger" size="sm" icon={<X size={14} />} disabled={acting === wnode.id || !wnode.callback_url} onClick={() => wnode.callback_url && release(wnode.id, wnode.callback_url, true)}>Fail</Button>
+                  </div>
+                </div>
+                {wnode.callback_url && (
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-[11px] bg-white border border-purple-200 rounded px-2 py-1 text-purple-800 truncate">POST {wnode.callback_url}</code>
+                    <button className="text-xs text-purple-700 hover:underline whitespace-nowrap" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}${wnode.callback_url}`)}>Copy</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

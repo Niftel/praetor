@@ -78,6 +78,7 @@ export function statusFill(status?: string): { fill: string; stroke: string; tex
     case 'rejected': return { fill: '#fee2e2', stroke: '#dc2626', text: '#991b1b' };
     case 'running': return { fill: '#dbeafe', stroke: '#2563eb', text: '#1e40af' };
     case 'awaiting_approval': return { fill: '#fef3c7', stroke: '#d97706', text: '#92400e' };
+    case 'awaiting_event': return { fill: '#f3e8ff', stroke: '#9333ea', text: '#6b21a8' };
     case 'skipped': return { fill: '#f1f5f9', stroke: '#94a3b8', text: '#475569' };
     case 'pending': return { fill: '#f8fafc', stroke: '#cbd5e1', text: '#64748b' };
     default: return { fill: '#ffffff', stroke: '#cbd5e1', text: '#334155' };
@@ -118,12 +119,25 @@ const WorkflowDag: React.FC<WorkflowDagProps> = ({ nodes, edges, statusByKey, te
         })}
         {Array.from(placed.values()).map(n => {
           const st = statusByKey?.[n.node_key];
-          const tone = statusByKey ? statusFill(st) : (n.node_type === 'approval'
-            ? { fill: '#fef3c7', stroke: '#d97706', text: '#92400e' }
-            : { fill: '#eef2ff', stroke: '#6366f1', text: '#3730a3' });
-          const sub = n.node_type === 'approval'
-            ? (st || 'approval')
-            : (statusByKey ? (st || 'pending') : (templateName ? templateName(n.job_template_id) : 'job'));
+          // Builder/detail (no live status): tint by node type. Run view: by status.
+          const typeTone: Record<string, { fill: string; stroke: string; text: string }> = {
+            approval: { fill: '#fef3c7', stroke: '#d97706', text: '#92400e' },
+            webhook_in: { fill: '#f3e8ff', stroke: '#9333ea', text: '#6b21a8' },
+            webhook_out: { fill: '#cffafe', stroke: '#0891b2', text: '#155e75' },
+            job: { fill: '#eef2ff', stroke: '#6366f1', text: '#3730a3' },
+          };
+          const tone = statusByKey ? statusFill(st) : (typeTone[n.node_type] || typeTone.job);
+          const typeLabel: Record<string, string> = {
+            approval: 'approval', webhook_in: 'wait for event', webhook_out: n.webhook_url || 'call out',
+          };
+          const sub = statusByKey
+            ? (st || 'pending')
+            : (n.node_type === 'job'
+              ? (templateName ? templateName(n.job_template_id) : 'job')
+              : (typeLabel[n.node_type] || n.node_type));
+          const icon = n.node_type === 'approval' ? '⏸ '
+            : n.node_type === 'webhook_in' ? '📥 '
+            : n.node_type === 'webhook_out' ? '📤 ' : '▶ ';
           return (
             <g key={n.node_key}>
               <rect x={n.x} y={n.y} width={NODE_W} height={NODE_H} rx={8} fill={tone.fill} stroke={tone.stroke} strokeWidth={1.5} />
@@ -131,7 +145,7 @@ const WorkflowDag: React.FC<WorkflowDagProps> = ({ nodes, edges, statusByKey, te
                 {(n.name && n.name.length > 20) ? n.name.slice(0, 19) + '…' : (n.name || n.node_key)}
               </text>
               <text x={n.x + 10} y={n.y + 39} fontSize={11} fill={tone.text} opacity={0.85}>
-                {n.node_type === 'approval' ? '⏸ ' : '▶ '}{String(sub).length > 22 ? String(sub).slice(0, 21) + '…' : sub}
+                {icon}{String(sub).length > 22 ? String(sub).slice(0, 21) + '…' : sub}
               </text>
             </g>
           );

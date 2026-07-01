@@ -98,6 +98,13 @@ export const api = {
     getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
     approveWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/approve`, { method: 'POST' }),
     denyWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/deny`, { method: 'POST' }),
+    // Release a waiting webhook_in node via its (public, token-bearing) callback URL.
+    releaseWorkflowNode: (callbackUrl: string, fail?: boolean) =>
+      fetch(`${callbackUrl}${fail ? '&result=failed' : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: fail ? 'failed' : 'successful' }),
+      }).then(r => { if (!r.ok) throw new Error('callback failed'); return r; }),
 
     // Logs
     getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
