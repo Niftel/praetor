@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
-import { Package, Plus, Trash2, Loader } from 'lucide-react';
+import { Package, Plus, Trash2, Loader, GitBranch, Copy } from 'lucide-react';
 
 interface Pack {
   id: number;
@@ -12,6 +12,9 @@ interface Pack {
   spec?: string;
   status: string;
   build_log?: string;
+  scm_url?: string;
+  scm_branch?: string;
+  spec_path?: string;
   created_at: string;
 }
 
@@ -31,7 +34,7 @@ const ExecutionPacksPage = () => {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', spec: '' });
+  const [form, setForm] = useState({ name: '', description: '', spec: '', scm_url: '', scm_branch: 'main', spec_path: '', webhook_key: '' });
 
   const load = () => {
     api.getExecutionPacks().then(d => setPacks(d || [])).catch(() => setPacks([])).finally(() => setLoading(false));
@@ -50,9 +53,20 @@ const ExecutionPacksPage = () => {
 
   const create = async () => {
     if (!form.name.trim()) return;
+    const gitBacked = !!form.scm_url.trim();
     try {
-      await api.createExecutionPack({ name: form.name.trim(), description: form.description || null, spec: form.spec || null });
-      setShowModal(false); setForm({ name: '', description: '', spec: '' }); load();
+      await api.createExecutionPack({
+        name: form.name.trim(),
+        description: form.description || null,
+        spec: form.spec || null,
+        scm_url: gitBacked ? form.scm_url.trim() : null,
+        scm_branch: gitBacked ? (form.scm_branch.trim() || 'main') : null,
+        spec_path: gitBacked ? form.spec_path.trim() : null,
+        webhook_key: gitBacked ? (form.webhook_key.trim() || null) : null,
+      });
+      setShowModal(false);
+      setForm({ name: '', description: '', spec: '', scm_url: '', scm_branch: 'main', spec_path: '', webhook_key: '' });
+      load();
     } catch (e) { alert('Failed to create pack (name may already exist).'); }
   };
   const remove = async (id: number) => {
@@ -91,10 +105,27 @@ const ExecutionPacksPage = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {packs.map(p => (
               <tr key={p.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="px-6 py-4">
                   <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
                     <Package size={16} className="text-brand-600" /> {p.name}
                   </span>
+                  {p.scm_url && (
+                    <div className="mt-1.5 ml-6 space-y-1">
+                      <div className="flex items-center gap-1 text-[11px] text-gray-500">
+                        <GitBranch size={11} /> <span className="font-mono truncate max-w-[220px]">{p.scm_url}</span>
+                        <span className="text-gray-300">·</span><span className="font-mono">{p.spec_path}</span>
+                        <span className="text-gray-300">·</span><span>{p.scm_branch || 'main'}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <code className="text-[11px] bg-cyan-50 border border-cyan-200 rounded px-1.5 py-0.5 text-cyan-800 truncate max-w-[260px]">
+                          POST …/webhooks/execution-packs/{p.id}/generic?token=…
+                        </code>
+                        <button title="Copy push-to-build webhook URL (add your secret as ?token=)"
+                          onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/api/v1/webhooks/execution-packs/${p.id}/generic?token=YOUR_SECRET`)}
+                          className="text-gray-400 hover:text-brand-600"><Copy size={12} /></button>
+                      </div>
+                    </div>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap" title={p.status === 'failed' ? (p.build_log || '') : ''}><StatusBadge s={p.status} /></td>
                 <td className="px-6 py-4 text-sm text-gray-500">{p.description || '—'}</td>
@@ -128,6 +159,25 @@ const ExecutionPacksPage = () => {
               placeholder={'name: docker-tools\nansible: ansible-core\ncollections:\n  - community.docker'}
               value={form.spec} onChange={e => setForm({ ...form, spec: e.target.value })} />
           </div>
+
+          {/* Git-backed: pull the spec from a repo; a push webhook rebuilds it. */}
+          <div className="border border-gray-200 rounded-md p-3 bg-gray-50 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <GitBranch size={14} className="text-cyan-600" /> Git source (optional)
+            </div>
+            <p className="text-xs text-gray-500 -mt-1">Point the pack at a repo + the path to its YAML. Praetor pulls the spec and builds; add the webhook below to your git host so a <b>push rebuilds the pack</b>. Leave blank to manage the spec inline above.</p>
+            <div className="grid grid-cols-3 gap-2">
+              <input className="col-span-2 border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="https://gitea.local/me/packs.git"
+                value={form.scm_url} onChange={e => setForm({ ...form, scm_url: e.target.value })} />
+              <input className="border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="main"
+                value={form.scm_branch} onChange={e => setForm({ ...form, scm_branch: e.target.value })} />
+            </div>
+            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="path/in/repo/docker.yml"
+              value={form.spec_path} onChange={e => setForm({ ...form, spec_path: e.target.value })} />
+            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="webhook secret (token) for the push trigger"
+              value={form.webhook_key} onChange={e => setForm({ ...form, webhook_key: e.target.value })} />
+          </div>
+
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
             <Button onClick={create}>Register</Button>

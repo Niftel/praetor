@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -138,6 +139,37 @@ func (rs *WebhooksResource) HandleWorkflow(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"workflow_job_id": wjID, "status": "running"})
+}
+
+// HandlePack POST /api/v1/webhooks/execution-packs/{id}/{service}
+// A git push re-queues a git-backed Execution Pack: the packbuilder then pulls the
+// latest spec from the repo and rebuilds it.
+func (rs *WebhooksResource) HandlePack(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	service := chi.URLParam(r, "service")
+	var t struct {
+		Name       string         `db:"name"`
+		WebhookKey sql.NullString `db:"webhook_key"`
+	}
+	if err := rs.DB.Get(&t, `SELECT name, webhook_key FROM execution_packs WHERE id=$1`, id); err != nil || !t.WebhookKey.Valid || t.WebhookKey.String == "" {
+		http.NotFound(w, r)
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if !verifyWebhook(service, t.WebhookKey.String, r, body) {
+		http.Error(w, "signature verification failed", http.StatusUnauthorized)
+		return
+	}
+	if _, err := rs.DB.Exec(`UPDATE execution_packs SET status='pending' WHERE id=$1`, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"pack": t.Name, "status": "pending"})
 }
 
 // HandleNodeCallback POST /api/v1/webhooks/workflow-job-nodes/{id}/callback

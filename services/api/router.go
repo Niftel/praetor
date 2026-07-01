@@ -56,6 +56,8 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	webhooks := handlers.NewWebhooksResource(db)
 	r.Post("/api/v1/webhooks/job-templates/{id}/{service}", webhooks.Handle)
 	r.Post("/api/v1/webhooks/workflow-templates/{id}/{service}", webhooks.HandleWorkflow)
+	// A git push rebuilds a git-backed Execution Pack.
+	r.Post("/api/v1/webhooks/execution-packs/{id}/{service}", webhooks.HandlePack)
 	// A waiting webhook_in workflow node is released by its per-run event_token.
 	r.Post("/api/v1/webhooks/workflow-job-nodes/{id}/callback", webhooks.HandleNodeCallback)
 

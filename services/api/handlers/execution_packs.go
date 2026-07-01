@@ -29,7 +29,13 @@ type executionPack struct {
 	Spec        *string   `json:"spec,omitempty" db:"spec"`
 	Status      string    `json:"status" db:"status"`
 	BuildLog    *string   `json:"build_log,omitempty" db:"build_log"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	// Git source: when set, the packbuilder pulls the spec from the repo and a push
+	// webhook rebuilds it. WebhookKey is write-only (accepted, never returned).
+	SCMURL     *string `json:"scm_url,omitempty" db:"scm_url"`
+	SCMBranch  *string `json:"scm_branch,omitempty" db:"scm_branch"`
+	SpecPath   *string `json:"spec_path,omitempty" db:"spec_path"`
+	WebhookKey *string `json:"webhook_key,omitempty" db:"webhook_key"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
 }
 
 func (rs *ExecutionPacksResource) Routes() chi.Router {
@@ -43,7 +49,7 @@ func (rs *ExecutionPacksResource) Routes() chi.Router {
 func (rs *ExecutionPacksResource) List(w http.ResponseWriter, r *http.Request) {
 	packs := []executionPack{}
 	if err := rs.DB.SelectContext(r.Context(), &packs,
-		`SELECT id, name, description, spec, status, build_log, created_at FROM execution_packs ORDER BY name`); err != nil {
+		`SELECT id, name, description, spec, status, build_log, scm_url, scm_branch, spec_path, created_at FROM execution_packs ORDER BY name`); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -56,17 +62,19 @@ func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request)
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	// A pack with a spec is queued for the packbuilder to build; one registered
-	// without a spec (a pre-built artifact) is immediately usable.
+	// A pack with a spec OR a git source is queued for the packbuilder; one
+	// registered without either (a pre-built artifact) is immediately usable.
+	hasGit := in.SCMURL != nil && strings.TrimSpace(*in.SCMURL) != ""
 	status := "ready"
-	if in.Spec != nil && strings.TrimSpace(*in.Spec) != "" {
+	if hasGit || (in.Spec != nil && strings.TrimSpace(*in.Spec) != "") {
 		status = "pending"
 	}
 	var created executionPack
 	if err := rs.DB.QueryRowxContext(r.Context(),
-		`INSERT INTO execution_packs (name, description, spec, status) VALUES ($1, $2, $3, $4)
-		 RETURNING id, name, description, spec, status, build_log, created_at`,
-		in.Name, in.Description, in.Spec, status).StructScan(&created); err != nil {
+		`INSERT INTO execution_packs (name, description, spec, status, scm_url, scm_branch, spec_path, webhook_key)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, name, description, spec, status, build_log, scm_url, scm_branch, spec_path, created_at`,
+		in.Name, in.Description, in.Spec, status, in.SCMURL, in.SCMBranch, in.SpecPath, in.WebhookKey).StructScan(&created); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

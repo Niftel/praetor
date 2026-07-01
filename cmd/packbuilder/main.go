@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,11 +38,14 @@ func main() {
 
 	for {
 		var pack struct {
-			ID   int64          `db:"id"`
-			Name string         `db:"name"`
-			Spec sql.NullString `db:"spec"`
+			ID        int64          `db:"id"`
+			Name      string         `db:"name"`
+			Spec      sql.NullString `db:"spec"`
+			SCMURL    sql.NullString `db:"scm_url"`
+			SCMBranch sql.NullString `db:"scm_branch"`
+			SpecPath  sql.NullString `db:"spec_path"`
 		}
-		if err := database.Get(&pack, `SELECT id, name, spec FROM execution_packs WHERE status='pending' ORDER BY id LIMIT 1`); err != nil {
+		if err := database.Get(&pack, `SELECT id, name, spec, scm_url, scm_branch, spec_path FROM execution_packs WHERE status='pending' ORDER BY id LIMIT 1`); err != nil {
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -49,7 +53,24 @@ func main() {
 		log.Printf("Building Execution Pack %q (id %d)...", pack.Name, pack.ID)
 		database.Exec(`UPDATE execution_packs SET status='building', build_log=NULL WHERE id=$1`, pack.ID)
 
-		out, berr := buildPack(pack.Name, pack.Spec.String)
+		var pre string
+		specYAML := pack.Spec.String
+		// Git-backed pack: pull the spec from the repo so a push rebuilds the pushed
+		// content. The fetched YAML becomes the pack's stored spec.
+		if pack.SCMURL.String != "" {
+			fetched, log_, err := fetchSpecFromGit(pack.SCMURL.String, pack.SCMBranch.String, pack.SpecPath.String)
+			pre = log_
+			if err != nil {
+				database.Exec(`UPDATE execution_packs SET status='failed', build_log=$2 WHERE id=$1`, pack.ID, tail(pre+"\nGIT SYNC FAILED: "+err.Error(), 8000))
+				log.Printf("Pack %q git sync failed: %v", pack.Name, err)
+				continue
+			}
+			specYAML = fetched
+			database.Exec(`UPDATE execution_packs SET spec=$2 WHERE id=$1`, pack.ID, specYAML)
+		}
+
+		out, berr := buildPack(pack.Name, specYAML)
+		out = pre + out
 		status := "ready"
 		if berr != nil {
 			status = "failed"
@@ -116,6 +137,39 @@ func buildPack(name, specYAML string) (string, error) {
 		out.WriteString(fmt.Sprintf("\nbuilt %s-linux-%s.tar.gz\n", name, arch))
 	}
 	return out.String(), nil
+}
+
+// fetchSpecFromGit shallow-clones the pack's repo/branch and returns the YAML at
+// spec_path (plus a log of what it did). This is what makes a git push rebuild the
+// pushed spec.
+func fetchSpecFromGit(url, branch, specPath string) (string, string, error) {
+	if specPath == "" {
+		return "", "", fmt.Errorf("git-backed pack has no spec_path")
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	dir, err := os.MkdirTemp("", "packspec-")
+	if err != nil {
+		return "", "", err
+	}
+	defer os.RemoveAll(dir)
+
+	var lg strings.Builder
+	fmt.Fprintf(&lg, "git clone --depth=1 --branch %s %s\n", branch, url)
+	b, err := exec.Command("git", "clone", "--depth=1", "--branch", branch, url, dir).CombinedOutput()
+	lg.Write(b)
+	if err != nil {
+		return "", lg.String(), fmt.Errorf("git clone: %w", err)
+	}
+	// filepath.Clean("/"+specPath) prevents ../ escaping the checkout.
+	full := filepath.Join(dir, filepath.Clean("/"+specPath))
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return "", lg.String(), fmt.Errorf("read %s: %w", specPath, err)
+	}
+	fmt.Fprintf(&lg, "read spec %s (%d bytes)\n", specPath, len(data))
+	return string(data), lg.String(), nil
 }
 
 func tail(s string, n int) string {

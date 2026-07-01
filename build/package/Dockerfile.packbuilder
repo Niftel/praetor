@@ -9,6 +9,9 @@ COPY . .
 RUN go build -o /praetor-packbuilder ./cmd/packbuilder
 
 FROM alpine:3.19
-RUN apk add --no-cache docker-cli
+# docker-cli-buildx: buildPack sets DOCKER_BUILDKIT=1 + --platform (for amd64 via
+# qemu), which needs the buildx component, not just the classic docker CLI.
+RUN apk add --no-cache docker-cli docker-cli-buildx git \
+ && git config --global --add safe.directory '*'
 COPY --from=builder /praetor-packbuilder /praetor-packbuilder
 CMD ["/praetor-packbuilder"]
