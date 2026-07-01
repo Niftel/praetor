@@ -65,9 +65,13 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Validation
-	if sched.Name == "" || sched.RRule == "" || sched.UnifiedJobTemplateID == 0 {
-		render.Render(w, r, ErrInvalidRequest(nil)) // Todo: better error
+	// Validation: name + rrule, and exactly one target (job template XOR workflow).
+	if sched.Name == "" || sched.RRule == "" {
+		render.Render(w, r, ErrInvalidRequest(nil))
+		return
+	}
+	if (sched.UnifiedJobTemplateID == nil) == (sched.WorkflowTemplateID == nil) {
+		render.Render(w, r, ErrInvalidRequest(nil))
 		return
 	}
 
@@ -83,10 +87,13 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 	sched.CreatedAt = time.Now()
 	sched.ModifiedAt = time.Now()
 	sched.Enabled = true // Default enabled
+	if len(sched.ExtraVars) == 0 {
+		sched.ExtraVars = json.RawMessage("{}") // jsonb column rejects an empty value
+	}
 
 	query := `
-		INSERT INTO schedules (name, description, unified_job_template_id, rrule, next_run, enabled, extra_vars, created_at, modified_at)
-		VALUES (:name, :description, :unified_job_template_id, :rrule, :next_run, :enabled, :extra_vars, :created_at, :modified_at)
+		INSERT INTO schedules (name, description, unified_job_template_id, workflow_template_id, rrule, next_run, enabled, extra_vars, created_at, modified_at)
+		VALUES (:name, :description, :unified_job_template_id, :workflow_template_id, :rrule, :next_run, :enabled, :extra_vars, :created_at, :modified_at)
 		RETURNING id`
 
 	rows, err := rs.DB.NamedQuery(query, sched)
@@ -128,12 +135,16 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 	// Recalculate NextRun
 	sched.NextRun = rule.After(time.Now(), false)
 	sched.ModifiedAt = time.Now()
+	if len(sched.ExtraVars) == 0 {
+		sched.ExtraVars = json.RawMessage("{}")
+	}
 
 	query := `
-		UPDATE schedules 
-		SET name=:name, description=:description, rrule=:rrule, next_run=:next_run, 
+		UPDATE schedules
+		SET name=:name, description=:description, rrule=:rrule, next_run=:next_run,
 		    enabled=:enabled, extra_vars=:extra_vars, modified_at=:modified_at,
-		    unified_job_template_id=:unified_job_template_id
+		    unified_job_template_id=:unified_job_template_id,
+		    workflow_template_id=:workflow_template_id
 		WHERE id = :id`
 
 	if _, err := rs.DB.NamedExecContext(r.Context(), query, sched); err != nil {

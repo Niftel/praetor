@@ -59,6 +59,7 @@ func (s *Scheduler) Start() {
 				log.Printf("Error processing timed out jobs: %v", err)
 			}
 			s.processWorkflows()
+			s.processEventTriggers()
 		}
 	}
 }
@@ -454,19 +455,12 @@ func (s *Scheduler) processSchedules() error {
 	for _, sched := range schedules {
 		log.Printf("Processing schedule %d (%s) due at %s", sched.ID, sched.Name, sched.NextRun)
 
-		// 2. Launch Job
-		var jobID int64
-		err := tx.QueryRowContext(ctx, `
-			INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at)
-			VALUES ($1, $2, 'pending', $3)
-			RETURNING id`,
-			sched.Name, sched.UnifiedJobTemplateID, time.Now(),
-		).Scan(&jobID)
-		if err != nil {
-			log.Printf("Failed to spawn job for schedule %d: %v", sched.ID, err)
+		// 2. Launch the schedule's target — a workflow run or a job template.
+		if err := launchTarget(ctx, tx, sched.Name, sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); err != nil {
+			log.Printf("Failed to launch target for schedule %d: %v", sched.ID, err)
 			continue
 		}
-		log.Printf("Spawned job %d from schedule %d", jobID, sched.ID)
+		log.Printf("Launched target for schedule %d", sched.ID)
 
 		// 3. (Skipped) We do NOT create execution_run here.
 		// The existing processPendingJobs loop picks up 'pending' jobs with no current_run_id and handles it.

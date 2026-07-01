@@ -107,7 +107,8 @@ type Schedule struct {
 	ID                   int64           `json:"id" db:"id"`
 	Name                 string          `json:"name" db:"name"`
 	Description          *string         `json:"description,omitempty" db:"description"`
-	UnifiedJobTemplateID int64           `json:"unified_job_template_id" db:"unified_job_template_id"`
+	UnifiedJobTemplateID *int64          `json:"unified_job_template_id,omitempty" db:"unified_job_template_id"`
+	WorkflowTemplateID   *int64          `json:"workflow_template_id,omitempty" db:"workflow_template_id"`
 	RRule                string          `json:"rrule" db:"rrule"`
 	NextRun              time.Time       `json:"next_run" db:"next_run"`
 	Enabled              bool            `json:"enabled" db:"enabled"`

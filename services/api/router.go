@@ -207,6 +207,9 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		r.Post("/workflow-job-nodes/{id}/approve", wf.ApproveNode)
 		r.Post("/workflow-job-nodes/{id}/deny", wf.DenyNode)
 
+		// Triggers: event triggers (job outcome -> launch) + webhook trigger surface
+		r.Mount("/triggers", handlers.NewTriggersResource(db).Routes())
+
 		// =======================================================================
 		// Inventories with nested hosts/groups
 		// =======================================================================
