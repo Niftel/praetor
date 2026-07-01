@@ -25,7 +25,6 @@ type Spec struct {
 	Pip         []string `yaml:"pip"`
 	Collections []string `yaml:"collections"`
 	Arches      []string `yaml:"arches"`
-	Libc        []string `yaml:"libc"` // gnu (glibc) and/or musl (alpine); default [gnu]
 }
 
 func main() {
@@ -81,60 +80,40 @@ func buildPack(name, specYAML string) (string, error) {
 	if len(spec.Arches) == 0 {
 		spec.Arches = []string{"arm64"}
 	}
-	if len(spec.Libc) == 0 {
-		spec.Libc = []string{"gnu"}
-	}
 
 	var out strings.Builder
 	for _, arch := range spec.Arches {
-		for _, libc := range spec.Libc {
-			// musl is gated off: python-build-standalone's musl CPython is
-			// statically linked and cannot dlopen Ansible's C extensions
-			// (cryptography/PyYAML/cffi) — "Dynamic loading not supported" — and it
-			// has no aarch64 build at all. The Dockerfile/executor plumbing is in
-			// place for when we ship a dynamically-linked musl python.
-			if libc == "musl" {
-				out.WriteString("\nskipped " + arch + "+musl: PBS musl python is static and can't load Ansible's C extensions\n")
-				continue
-			}
-			suf, baseImage := "", "debian:12-slim"
-			if libc == "musl" {
-				suf, baseImage = "-musl", "alpine:3.19"
-			}
-			img := "praetor-execpack-" + name + "-" + arch + "-" + libc
-			build := exec.Command("docker", "build", "--target", "build",
-				"--platform", "linux/"+arch,
-				"--build-arg", "BUILD_IMAGE="+baseImage,
-				"--build-arg", "TARGETARCH="+arch,
-				"--build-arg", "LIBC="+libc,
-				"--build-arg", "PY_VERSION="+spec.Python,
-				"--build-arg", "ANSIBLE_SPEC="+spec.Ansible,
-				"--build-arg", "EXTRA_PIP="+strings.Join(spec.Pip, " "),
-				"--build-arg", "GALAXY_COLLECTIONS="+strings.Join(spec.Collections, " "),
-				"--build-arg", "PACK_NAME="+name,
-				"-t", img, "/build/ansible-runtime")
-			// --platform needs buildkit for cross-arch (qemu) builds.
-			build.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
-			b, err := build.CombinedOutput()
-			out.Write(b)
-			if err != nil {
-				return out.String(), fmt.Errorf("docker build (%s/%s): %w", arch, libc, err)
-			}
-
-			// Extract the pack tarball from the built image into the shared dir.
-			cid, err := exec.Command("docker", "create", img).Output()
-			if err != nil {
-				return out.String(), fmt.Errorf("docker create: %w", err)
-			}
-			id := strings.TrimSpace(string(cid))
-			if cp, err := exec.Command("docker", "cp", id+":/out/.", "/build/runtime/").CombinedOutput(); err != nil {
-				out.Write(cp)
-				return out.String(), fmt.Errorf("docker cp: %w", err)
-			}
-			exec.Command("docker", "rm", id).Run()
-			exec.Command("docker", "rmi", img).Run()
-			out.WriteString(fmt.Sprintf("\nbuilt %s-linux-%s%s.tar.gz\n", name, arch, suf))
+		img := "praetor-execpack-" + name + "-" + arch
+		build := exec.Command("docker", "build", "--target", "build",
+			"--platform", "linux/"+arch,
+			"--build-arg", "TARGETARCH="+arch,
+			"--build-arg", "PY_VERSION="+spec.Python,
+			"--build-arg", "ANSIBLE_SPEC="+spec.Ansible,
+			"--build-arg", "EXTRA_PIP="+strings.Join(spec.Pip, " "),
+			"--build-arg", "GALAXY_COLLECTIONS="+strings.Join(spec.Collections, " "),
+			"--build-arg", "PACK_NAME="+name,
+			"-t", img, "/build/ansible-runtime")
+		// --platform needs buildkit for cross-arch (qemu) builds.
+		build.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+		b, err := build.CombinedOutput()
+		out.Write(b)
+		if err != nil {
+			return out.String(), fmt.Errorf("docker build (%s): %w", arch, err)
 		}
+
+		// Extract the pack tarball from the built image into the shared dir.
+		cid, err := exec.Command("docker", "create", img).Output()
+		if err != nil {
+			return out.String(), fmt.Errorf("docker create: %w", err)
+		}
+		id := strings.TrimSpace(string(cid))
+		if cp, err := exec.Command("docker", "cp", id+":/out/.", "/build/runtime/").CombinedOutput(); err != nil {
+			out.Write(cp)
+			return out.String(), fmt.Errorf("docker cp: %w", err)
+		}
+		exec.Command("docker", "rm", id).Run()
+		exec.Command("docker", "rmi", img).Run()
+		out.WriteString(fmt.Sprintf("\nbuilt %s-linux-%s.tar.gz\n", name, arch))
 	}
 	return out.String(), nil
 }

@@ -145,38 +145,30 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 }
 
 // pushRuntime streams the named Execution Pack onto the target and extracts it
-// under /opt/praetor/packs/<pack>. It probes the host's CPU arch and C library so
-// it pushes the matching pack variant (<pack>-linux-<arch>[-musl].tar.gz); if it's
-// already present it does nothing. Packs are name-scoped so several coexist.
+// under /opt/praetor/packs/<pack>. It probes the host's CPU arch so it pushes the
+// matching pack (<pack>-linux-<arch>.tar.gz); if it's already present it does
+// nothing. Packs are name-scoped so several coexist on one host.
 func (r *BootstrapRunner) pushRuntime(client *ssh.Client, pack string) error {
 	detect, err := runSSH(client, fmt.Sprintf(`if [ -x /opt/praetor/packs/%s/bin/ansible-playbook ]; then echo present; else
-  case "$(uname -m)" in aarch64|arm64) A=arm64 ;; x86_64|amd64) A=amd64 ;; *) A=unknown ;; esac
-  if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then L=musl; else L=gnu; fi
-  echo "$A $L"
+  case "$(uname -m)" in aarch64|arm64) echo arm64 ;; x86_64|amd64) echo amd64 ;; *) echo unknown ;; esac
 fi`, pack))
 	if err != nil {
 		return err
 	}
-	detect = strings.TrimSpace(detect)
-	if detect == "present" {
+	arch := strings.TrimSpace(detect)
+	if arch == "present" {
 		return nil
 	}
-	fields := strings.Fields(detect)
-	if len(fields) != 2 || fields[0] == "unknown" {
-		return fmt.Errorf("unsupported host platform for Execution Pack: %q", detect)
+	if arch == "unknown" || arch == "" {
+		return fmt.Errorf("unsupported host CPU arch for Execution Pack")
 	}
-	arch, libc := fields[0], fields[1]
-	suffix := ""
-	if libc == "musl" {
-		suffix = "-musl"
-	}
-	tarball := fmt.Sprintf("%s/%s-linux-%s%s.tar.gz", r.RuntimeDir, pack, arch, suffix)
+	tarball := fmt.Sprintf("%s/%s-linux-%s.tar.gz", r.RuntimeDir, pack, arch)
 	f, err := os.Open(tarball)
 	if err != nil {
-		return fmt.Errorf("open Execution Pack %q for %s/%s: %w", pack, arch, libc, err)
+		return fmt.Errorf("open Execution Pack %q for %s: %w", pack, arch, err)
 	}
 	defer f.Close()
-	log.Printf("BootstrapRunner: pushing Execution Pack %q (%s/%s)", pack, arch, libc)
+	log.Printf("BootstrapRunner: pushing Execution Pack %q (%s)", pack, arch)
 	return pushStream(client, f, "mkdir -p /opt/praetor/packs && tar -xzf - -C /")
 }
 
