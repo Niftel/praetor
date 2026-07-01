@@ -1,4 +1,4 @@
-.PHONY: build host-runner ansible-runtime test clean run-api run-scheduler run-ingestion migrate-up migrate-down
+.PHONY: build host-runner execpack test clean run-api run-scheduler run-ingestion migrate-up migrate-down
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -31,14 +31,13 @@ host-runner:
 	mkdir -p build/$(HOST_RUNNER_OS)
 	GOOS=$(HOST_RUNNER_OS) GOARCH=$(HOST_RUNNER_ARCH) CGO_ENABLED=0 go build -o $(HOST_RUNNER_BINARY) ./cmd/host-runner
 
-# Build the self-contained Ansible runtime bundle the executor pushes onto target
-# hosts (a standalone Python + Ansible), so hosts need nothing pre-installed.
-# Arch matches the host-runner (the managed hosts' arch). Output: build/runtime/.
-ansible-runtime:
-	@echo "Building self-contained Ansible runtime for linux/$(HOST_RUNNER_ARCH)..."
-	mkdir -p build/runtime
-	docker buildx build --build-arg TARGETARCH=$(HOST_RUNNER_ARCH) \
-		--target export -o type=local,dest=build/runtime build/ansible-runtime
+# Build an Execution Pack (self-contained Python + Ansible pushed to hosts) from a
+# declarative YAML spec — the ExecPack equivalent of ansible-builder. Output goes
+# to build/runtime/. Example: make execpack SPEC=build/execpack/specs/docker.yml
+SPEC ?= build/execpack/specs/default.yml
+execpack:
+	@echo "Building Execution Pack from $(SPEC)..."
+	go run ./cmd/execpack -spec $(SPEC) -out build/runtime
 
 test:
 	@echo "Running tests..."

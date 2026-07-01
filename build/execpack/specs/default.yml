@@ -1,0 +1,9 @@
+# The default Execution Pack: full Ansible (core + community collections).
+# Reproduces the pack the executor pushes by default. Build with:
+#   make execpack SPEC=build/execpack/specs/default.yml
+name: ansible-runtime          # -> build/runtime/ansible-runtime-linux-<arch>.tar.gz
+python: "3.11.9"
+ansible: ansible               # the full 'ansible' package (bundles community collections)
+arches:
+  - arm64
+  # - amd64                    # uncomment to also build for Intel/AMD hosts

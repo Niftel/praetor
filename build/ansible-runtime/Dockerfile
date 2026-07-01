@@ -1,23 +1,28 @@
-# Produces a relocatable, self-contained Ansible runtime tarball that Praetor
-# pushes onto target hosts — so a host needs NO Ansible and NO Python installed.
+# Builds an Execution Pack: a relocatable, self-contained Python + Ansible
+# environment Praetor pushes onto a host, so the host needs NO Ansible or Python.
 #
-# The runtime is a standalone CPython (python-build-standalone) with Ansible
-# pip-installed into it, laid out at a FIXED prefix (/opt/praetor/runtime) so the
-# console-script shebangs (e.g. bin/ansible-playbook -> bin/python3) stay valid
-# when the tarball is extracted to the same prefix on the target.
+# Everything is driven by build-args so the pack can be defined declaratively via
+# a YAML spec (see cmd/execpack + build/execpack/specs). Don't invoke this
+# directly — use `make execpack SPEC=<file>` which fills the args from the spec.
 #
-# Build (per arch) and export the tarball to ./build/runtime/:
-#   docker buildx build --build-arg TARGETARCH=arm64 \
-#     -f build/ansible-runtime/Dockerfile \
-#     --target export -o type=local,dest=build/runtime .
-#
-# glibc build: works on debian/ubuntu/rhel/etc. (musl/alpine needs a musl variant).
+# A standalone CPython (python-build-standalone) laid out at a FIXED prefix
+# (/opt/praetor/runtime) so console-script shebangs stay valid when extracted to
+# the same prefix on the target. glibc build (musl/alpine needs a musl variant).
 FROM debian:12-slim AS build
 
 ARG PY_VERSION=3.11.9
 ARG PBS_TAG=20240814
 ARG TARGETARCH
 ARG PREFIX=/opt/praetor/runtime
+# Spec-driven contents (no inline comments — Docker treats them as part of the value):
+# ANSIBLE_SPEC: pip requirement, e.g. ansible or ansible-core==2.16.*
+ARG ANSIBLE_SPEC=ansible
+# EXTRA_PIP: space-separated extra pip packages (module deps)
+ARG EXTRA_PIP=
+# GALAXY_COLLECTIONS: space-separated ansible-galaxy collections
+ARG GALAXY_COLLECTIONS=
+# PACK_NAME: output tarball base name
+ARG PACK_NAME=execpack
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -37,19 +42,25 @@ RUN set -eux; \
     mv /opt/praetor/python "$PREFIX"; \
     "$PREFIX/bin/python3" --version
 
-# Install the full Ansible into the standalone interpreter. The `ansible` package
-# bundles ansible-core plus the community collections into site-packages, where
-# Ansible auto-discovers them — a complete, self-contained environment.
+# Install Ansible + any extra pip packages defined by the spec.
 RUN set -eux; \
     "$PREFIX/bin/pip" install --no-cache-dir --upgrade pip; \
-    "$PREFIX/bin/pip" install --no-cache-dir ansible; \
+    "$PREFIX/bin/pip" install --no-cache-dir ${ANSIBLE_SPEC} ${EXTRA_PIP}; \
     "$PREFIX/bin/ansible-playbook" --version
+
+# Install any extra Galaxy collections into site-packages/ansible_collections,
+# where Ansible auto-discovers them (no runtime env needed).
+RUN set -eux; \
+    if [ -n "${GALAXY_COLLECTIONS}" ]; then \
+      SITE="$("$PREFIX/bin/python3" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])')"; \
+      "$PREFIX/bin/ansible-galaxy" collection install ${GALAXY_COLLECTIONS} -p "$SITE"; \
+    fi
 
 # Trim caches to keep the tarball smaller.
 RUN find "$PREFIX" -type d -name __pycache__ -prune -exec rm -rf {} + ; \
     rm -rf "$PREFIX/lib/python"*/test || true
 
-RUN mkdir -p /out && tar -czf "/out/ansible-runtime-linux-${TARGETARCH}.tar.gz" -C / opt/praetor/runtime \
+RUN mkdir -p /out && tar -czf "/out/${PACK_NAME}-linux-${TARGETARCH}.tar.gz" -C / opt/praetor/runtime \
  && ls -lh /out
 
 # Export stage: `-o type=local` copies just the tarball out of the build.
