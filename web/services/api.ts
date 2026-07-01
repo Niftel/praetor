@@ -103,6 +103,15 @@ export const api = {
     getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
     // Full playbook stdout, reassembled from the object store (returns plain text).
     getJobLogs: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/logs`).then(r => r.text()),
+    // Incremental tail: returns only chunks newer than `since` plus the new tail
+    // cursor (X-Praetor-Last-Seq). Poll with the returned lastSeq to stream output
+    // as it lands, appending rather than refetching the whole log. since=-1 = all.
+    getJobLogsSince: async (runId: string, since: number) => {
+        const r = await fetchWithAuth(`/jobs/runs/${runId}/logs?since=${since}`);
+        const text = await r.text();
+        const hdr = r.headers.get('X-Praetor-Last-Seq');
+        return { text, lastSeq: hdr !== null && hdr !== '' ? Number(hdr) : since };
+    },
 
 
     // Inventories

@@ -280,6 +280,11 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	// Forward the tail cursor so the client can poll incrementally: it passes the
+	// value back as ?since= to fetch only chunks newer than what it already has.
+	if ls := resp.Header.Get("X-Praetor-Last-Seq"); ls != "" {
+		w.Header().Set("X-Praetor-Last-Seq", ls)
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
