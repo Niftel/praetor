@@ -317,6 +317,19 @@ func (s *Scheduler) processPendingJobs() error {
 			}
 		}
 
+		// No machine credential supplied a key: fall back to Praetor's
+		// database-managed automation identity, so the executor authenticates with
+		// the managed key (whose public half users add to authorized_keys) rather
+		// than relying on a mounted key file.
+		if manifest.CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"] == "" {
+			if key := loadAutomationKey(ctx, tx); key != "" {
+				if manifest.CredentialFiles == nil {
+					manifest.CredentialFiles = map[string]string{}
+				}
+				manifest.CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"] = key
+			}
+		}
+
 		req := &events.ExecutionRequest{
 			ExecutionRunID: runID,
 			UnifiedJobID:   job.ID,

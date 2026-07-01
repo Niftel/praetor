@@ -63,7 +63,7 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 
 		// Praetor's automation SSH public key — add it to a host's authorized_keys
 		// to manage that host with no per-host credential.
-		r.Get("/automation-key", handlers.AutomationKey)
+		r.Get("/automation-key", handlers.AutomationKeyHandler(db))
 
 		// Activity stream (audit log) — superuser/auditor only
 		r.Get("/activity-stream", content.ListActivityStream)

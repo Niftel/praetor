@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"log"
 	"os"
 	"path/filepath"
@@ -8,7 +11,9 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
+	"golang.org/x/crypto/ssh"
 )
 
 func main() {
@@ -57,6 +62,7 @@ func main() {
 			recordApplied(database, name)
 		}
 		seedCredentialTypes(database)
+		seedAutomationIdentity(database)
 		log.Println("Migration complete (baselined).")
 		return
 	}
@@ -79,6 +85,71 @@ func main() {
 
 	// Seed Credential Types (idempotent).
 	seedCredentialTypes(database)
+	seedAutomationIdentity(database)
+}
+
+// seedAutomationIdentity ensures Praetor's automation SSH keypair exists in the
+// database (idempotent). It imports an existing mounted key when present so
+// hosts that already trust it keep working, otherwise it generates a fresh
+// ed25519 identity. The private key is stored encrypted with the app secret.
+func seedAutomationIdentity(database *sqlx.DB) {
+	var count int
+	if err := database.Get(&count, `SELECT count(*) FROM automation_identity`); err != nil {
+		log.Printf("automation identity: table not ready: %v", err)
+		return
+	}
+	if count > 0 {
+		return
+	}
+
+	priv, pub, err := loadOrGenerateIdentity()
+	if err != nil {
+		log.Printf("automation identity: %v", err)
+		return
+	}
+	enc, err := crypto.EncryptSecret(priv)
+	if err != nil {
+		log.Printf("automation identity: encrypt failed: %v", err)
+		return
+	}
+	if _, err := database.Exec(
+		`INSERT INTO automation_identity (id, public_key, private_key) VALUES (1, $1, $2) ON CONFLICT (id) DO NOTHING`,
+		pub, enc,
+	); err != nil {
+		log.Printf("automation identity: insert failed: %v", err)
+		return
+	}
+	log.Println("automation identity: initialised")
+}
+
+// loadOrGenerateIdentity returns (private key PEM, public key authorized_keys
+// line). It imports the legacy mounted key at /tmp/keys/id_rsa when readable —
+// preserving trust on hosts that already have its public key — and otherwise
+// generates a fresh ed25519 keypair.
+func loadOrGenerateIdentity() (privPEM, pubLine string, err error) {
+	const keyPath = "/tmp/keys/id_rsa"
+	if b, e := os.ReadFile(keyPath); e == nil {
+		if pb, e2 := os.ReadFile(keyPath + ".pub"); e2 == nil {
+			log.Println("automation identity: importing existing mounted key")
+			return string(b), strings.TrimSpace(string(pb)), nil
+		}
+	}
+
+	log.Println("automation identity: generating a fresh ed25519 keypair")
+	pubKey, privKey, e := ed25519.GenerateKey(rand.Reader)
+	if e != nil {
+		return "", "", e
+	}
+	block, e := ssh.MarshalPrivateKey(privKey, "praetor-automation")
+	if e != nil {
+		return "", "", e
+	}
+	sshPub, e := ssh.NewPublicKey(pubKey)
+	if e != nil {
+		return "", "", e
+	}
+	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))) + " praetor-automation"
+	return string(pem.EncodeToMemory(block)), line, nil
 }
 
 // loadApplied returns the set of migration versions already recorded.

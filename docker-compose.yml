@@ -56,6 +56,12 @@ services:
     environment:
       # Use service name 'db'
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
+      # Needed to encrypt the automation identity's private key at seed time.
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+    volumes:
+      # One-time import of any existing keypair into the DB-managed automation
+      # identity (read-only; generated fresh if absent).
+      - ./keys:/tmp/keys:ro
     depends_on:
       db:
         condition: service_healthy
@@ -99,9 +105,6 @@ services:
       PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
     volumes:
       - ./deployments/ldap/ldap-config.yaml:/etc/praetor/ldap.yaml:ro
-      # Expose only the automation PUBLIC key to the API (never the private key)
-      # so it can be shown in the UI for host enrollment.
-      - ./keys/id_rsa.pub:/etc/praetor/automation_key.pub:ro
     ports:
       - "${PRAETOR_API_PORT:-8080}:8080"
     depends_on:

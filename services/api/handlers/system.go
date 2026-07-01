@@ -1,27 +1,27 @@
 package handlers
 
 import (
+	"database/sql"
 	"net/http"
-	"os"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/services/api/render"
 )
 
-// AutomationKey returns Praetor's automation SSH public key. A user adds this to
-// a host's authorized_keys (via their own provisioning — cloud-init, an image, a
-// config-management run, or by hand) so Praetor can manage that host with no
-// per-host credential. Only the public half is ever exposed; the private key
-// stays with the executor and never leaves Praetor.
-func AutomationKey(w http.ResponseWriter, r *http.Request) {
-	path := os.Getenv("AUTOMATION_PUBKEY_PATH")
-	if path == "" {
-		path = "/etc/praetor/automation_key.pub"
+// AutomationKeyHandler returns Praetor's automation SSH public key from the
+// database-managed identity. A user adds this to a host's authorized_keys (via
+// their own provisioning) so Praetor can manage that host with no per-host
+// credential. Only the public half is exposed; the private key stays encrypted
+// in the database and is used solely by the scheduler/executor.
+func AutomationKeyHandler(db *sqlx.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var pub string
+		err := db.GetContext(r.Context(), &pub, `SELECT public_key FROM automation_identity WHERE id = 1`)
+		if err == sql.ErrNoRows || err != nil {
+			render.JSON(w, r, map[string]interface{}{"public_key": "", "configured": false})
+			return
+		}
+		render.JSON(w, r, map[string]interface{}{"public_key": strings.TrimSpace(pub), "configured": true})
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		render.JSON(w, r, map[string]interface{}{"public_key": "", "configured": false})
-		return
-	}
-	render.JSON(w, r, map[string]interface{}{"public_key": strings.TrimSpace(string(data)), "configured": true})
 }
