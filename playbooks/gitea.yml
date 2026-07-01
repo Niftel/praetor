@@ -1,0 +1,177 @@
+---
+# Install and fully configure Gitea from its release binary — no web installer.
+#
+# Deploys the binary, writes a complete app.ini (SQLite, generated secrets,
+# install locked), creates an admin user, and starts it. Gitea comes up on port
+# 3000 at a ready login page. Use this on a plain host/container WITHOUT Docker.
+#
+#   ansible-playbook -i <inventory> playbooks/gitea.yml
+#   ansible-playbook -i <inventory> playbooks/gitea.yml -e gitea_admin_password=secret
+
+- name: Install and configure Gitea (native binary)
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    gitea_version: "1.22.6"
+    gitea_work_dir: /var/lib/gitea
+    gitea_http_port: 3000
+    gitea_root_url: "http://localhost:3002/"      # where users reach it (host port -> 3000)
+    gitea_domain: localhost
+    gitea_admin_user: praetor          # 'admin' is a reserved username in Gitea
+    gitea_admin_password: "praetor-admin-123"
+    gitea_admin_email: "admin@example.com"
+    gitea_disable_registration: true
+
+  tasks:
+    - name: Detect the target architecture
+      ansible.builtin.command: uname -m
+      register: uname_m
+      changed_when: false
+
+    - name: Map it to a Gitea release arch
+      ansible.builtin.set_fact:
+        gitea_arch: "{{ 'arm64' if uname_m.stdout == 'aarch64' else 'amd64' }}"
+
+    - name: Install the git client
+      # Gitea shells out to git for every repository operation. Installed via
+      # apt-get in a shell command (not the apt module) so it works with the
+      # Execution Pack's standalone Python, which has no system apt bindings.
+      ansible.builtin.shell: |
+        command -v git >/dev/null 2>&1 || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git; }
+      register: git_install
+      changed_when: git_install.stdout | length > 0
+
+    - name: Create the gitea service user
+      ansible.builtin.user:
+        name: git
+        system: true
+        shell: /bin/bash
+        create_home: true
+
+    - name: Create Gitea's directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: git
+        group: git
+        mode: "0750"
+      loop:
+        - "{{ gitea_work_dir }}/custom/conf"
+        - "{{ gitea_work_dir }}/data"
+        - "{{ gitea_work_dir }}/log"
+
+    - name: Download the Gitea binary
+      ansible.builtin.get_url:
+        url: "https://dl.gitea.com/gitea/{{ gitea_version }}/gitea-{{ gitea_version }}-linux-{{ gitea_arch }}"
+        dest: /usr/local/bin/gitea
+        mode: "0755"
+
+    - name: Check whether Gitea is already configured
+      ansible.builtin.stat:
+        path: "{{ gitea_work_dir }}/custom/conf/app.ini"
+      register: gitea_conf
+
+    - name: Generate the SECRET_KEY
+      ansible.builtin.command: /usr/local/bin/gitea generate secret SECRET_KEY
+      register: secret_key
+      changed_when: false
+      when: not gitea_conf.stat.exists
+
+    - name: Generate the INTERNAL_TOKEN
+      ansible.builtin.command: /usr/local/bin/gitea generate secret INTERNAL_TOKEN
+      register: internal_token
+      changed_when: false
+      when: not gitea_conf.stat.exists
+
+    - name: Write the Gitea configuration (SQLite, install locked)
+      ansible.builtin.copy:
+        dest: "{{ gitea_work_dir }}/custom/conf/app.ini"
+        owner: git
+        group: git
+        mode: "0640"
+        content: |
+          APP_NAME = Gitea (Praetor)
+          RUN_USER = git
+          RUN_MODE = prod
+
+          [server]
+          HTTP_PORT = {{ gitea_http_port }}
+          ROOT_URL  = {{ gitea_root_url }}
+          DOMAIN    = {{ gitea_domain }}
+          DISABLE_SSH = true
+
+          [database]
+          DB_TYPE = sqlite3
+          PATH    = {{ gitea_work_dir }}/data/gitea.db
+
+          [security]
+          INSTALL_LOCK   = true
+          SECRET_KEY     = {{ secret_key.stdout }}
+          INTERNAL_TOKEN = {{ internal_token.stdout }}
+
+          [service]
+          DISABLE_REGISTRATION = {{ gitea_disable_registration | string | lower }}
+
+          [webhook]
+          # Allow webhooks to private hosts (Praetor's API on the docker host).
+          # Gitea otherwise blocks these as SSRF, so push-to-build triggers never fire.
+          ALLOWED_HOST_LIST = *
+
+          [log]
+          ROOT_PATH = {{ gitea_work_dir }}/log
+          MODE  = file
+          LEVEL = info
+      when: not gitea_conf.stat.exists
+
+    - name: Initialise the database schema
+      # A fresh DB has no tables; `admin user create` won't migrate it, so run
+      # migrations first to create the schema.
+      ansible.builtin.shell: >
+        su git -c "GITEA_WORK_DIR={{ gitea_work_dir }} /usr/local/bin/gitea migrate
+        -c {{ gitea_work_dir }}/custom/conf/app.ini"
+      changed_when: true
+      when: not gitea_conf.stat.exists
+
+    - name: Create the admin user
+      ansible.builtin.shell: >
+        su git -c "GITEA_WORK_DIR={{ gitea_work_dir }} /usr/local/bin/gitea admin user create
+        --admin --username {{ gitea_admin_user }} --password {{ gitea_admin_password | quote }}
+        --email {{ gitea_admin_email }} --must-change-password=false
+        -c {{ gitea_work_dir }}/custom/conf/app.ini"
+      register: admin_create
+      changed_when: "'successfully created' in admin_create.stdout"
+      failed_when: admin_create.rc != 0 and 'already exists' not in admin_create.stderr
+      when: not gitea_conf.stat.exists
+
+    - name: Restart Gitea to apply configuration
+      ansible.builtin.shell: "pkill -x gitea || true; sleep 2"
+      changed_when: true
+      when: not gitea_conf.stat.exists
+
+    - name: Start Gitea (listens on :{{ gitea_http_port }})
+      ansible.builtin.shell: |
+        if ! pgrep -x gitea >/dev/null; then
+          setsid su git -c 'env GITEA_WORK_DIR={{ gitea_work_dir }} /usr/local/bin/gitea web' >{{ gitea_work_dir }}/log/run.log 2>&1 </dev/null &
+        fi
+        sleep 3
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Wait for Gitea to answer HTTP
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ gitea_http_port }}/api/v1/version"
+        status_code: 200
+      register: gitea_health
+      retries: 20
+      delay: 2
+      until: gitea_health.status == 200
+      changed_when: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          Gitea {{ gitea_health.json.version }} is configured and up (no installer).
+          Log in at {{ gitea_root_url }} as '{{ gitea_admin_user }}'.
