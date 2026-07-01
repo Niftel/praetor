@@ -82,6 +82,17 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		log.Printf("BootstrapRunner: using machine-credential SSH key for run %s", req.ExecutionRunID)
 	}
 
+	// The host-runner calls back to the control plane from the TARGET host, so the
+	// callback URL must be reachable from there. Internal service DNS
+	// (ingestion:8081) only resolves for hosts on Praetor's own network; managed
+	// hosts elsewhere need the control plane's externally-reachable address.
+	// HOST_RUNNER_CALLBACK_URL provides it, falling back to INGESTION_URL for
+	// on-network hosts.
+	callbackURL := os.Getenv("HOST_RUNNER_CALLBACK_URL")
+	if callbackURL == "" {
+		callbackURL = os.Getenv("INGESTION_URL")
+	}
+
 	bootstrapPlaybook := fmt.Sprintf(`
 - name: Deploy Praetor Host Runner
   hosts: %s
@@ -159,7 +170,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
           >> /var/lib/praetor/jobs/%s/runner.log 2>&1 &
       async: 10
       poll: 0
-`, targetHosts, req.ExecutionRunID, r.RunnerPayloadPath, manifestPath, req.ExecutionRunID, sshKeyPath, req.ExecutionRunID, req.ExecutionRunID, req.ExecutionRunID, os.Getenv("INGESTION_URL"), req.ExecutionRunID, req.ExecutionRunID)
+`, targetHosts, req.ExecutionRunID, r.RunnerPayloadPath, manifestPath, req.ExecutionRunID, sshKeyPath, req.ExecutionRunID, req.ExecutionRunID, req.ExecutionRunID, callbackURL, req.ExecutionRunID, req.ExecutionRunID)
 
 	playbookPath := fmt.Sprintf("/tmp/bootstrap-%s.yml", req.ExecutionRunID)
 	if err := os.WriteFile(playbookPath, []byte(bootstrapPlaybook), 0644); err != nil {

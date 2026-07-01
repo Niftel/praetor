@@ -145,6 +145,12 @@ services:
     environment:
       NATS_URL: nats://nats:4222
       INGESTION_URL: http://ingestion:8081
+      # Address managed hosts use to call back to the control plane. Must be
+      # reachable FROM the target: internal service DNS only works for hosts on
+      # praetor-net, so point it at the ingestion service's published address
+      # (reachable from both on-network and external hosts). In a real deployment
+      # this is the control plane's routable URL.
+      HOST_RUNNER_CALLBACK_URL: "${HOST_RUNNER_CALLBACK_URL:-http://host.docker.internal:8090}"
       EXECUTOR_WORKERS: 2
       ANSIBLE_FORKS: 1
     shm_size: 1gb
