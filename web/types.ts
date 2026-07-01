@@ -269,6 +269,7 @@ export interface WorkflowJobNode {
   node_type: WorkflowNodeType;
   name?: string;
   unified_job_id?: number | null;
+  run_id?: string | null;
   status: string;
 }
 

@@ -19,13 +19,40 @@ type Runner struct {
 	JobDir string
 	APIURL string // ingestion endpoint, for shipping fact-cache results
 	Wal    *WAL
+	seq    *seqCounter
 }
 
 func NewRunner(jobDir, apiURL string) *Runner {
+	walPath := filepath.Join(jobDir, "events.jsonl")
 	return &Runner{
 		JobDir: jobDir,
 		APIURL: apiURL,
-		Wal:    NewWAL(filepath.Join(jobDir, "events.jsonl")),
+		Wal:    NewWAL(walPath),
+		seq:    newSeqCounter(walPath),
+	}
+}
+
+// emit appends a lifecycle event to the WAL with the next durable sequence
+// number. The syncer ships it to the control plane like any other event.
+func (r *Runner) emit(req *events.ExecutionRequest, eventType, host, msg string, data json.RawMessage) {
+	evt := events.JobEvent{
+		ExecutionRunID: req.ExecutionRunID,
+		UnifiedJobID:   req.UnifiedJobID,
+		Seq:            r.seq.next(),
+		EventType:      eventType,
+		Timestamp:      time.Now(),
+	}
+	if host != "" {
+		evt.Host = &host
+	}
+	if msg != "" {
+		evt.StdoutSnippet = &msg
+	}
+	if data != nil {
+		evt.EventData = data
+	}
+	if err := r.Wal.Append(&evt); err != nil {
+		log.Printf("Warning: failed to write %s event: %v", eventType, err)
 	}
 }
 
@@ -46,19 +73,39 @@ func (r *Runner) Execute() error {
 
 	log.Printf("Executing run %s (Job %d)", req.ExecutionRunID, req.UnifiedJobID)
 
-	// Emit JOB_STARTED event immediately so the job transitions to 'running'
-	// This ensures that if we fail later (e.g., git not found), the timeout mechanism
-	// can mark the job as failed instead of leaving it stuck in 'queued'.
-	startEvent := events.JobEvent{
-		ExecutionRunID: req.ExecutionRunID,
-		UnifiedJobID:   req.UnifiedJobID,
-		Seq:            1,
-		EventType:      "JOB_STARTED",
-		Timestamp:      time.Now(),
+	// Identify the host this runner is on for the lifecycle narration below.
+	host := req.JobManifest.RunnerHost
+	if host == "" {
+		if hn, err := os.Hostname(); err == nil {
+			host = hn
+		}
 	}
-	if err := r.Wal.Append(&startEvent); err != nil {
-		log.Printf("Warning: failed to write JOB_STARTED event: %v", err)
+
+	// Detect a resume up front: a usable checkpoint means a previous invocation
+	// was interrupted (commonly a host reboot) and we are continuing it. We reuse
+	// this below instead of re-reading the checkpoint.
+	resume := resumeArgs(r.JobDir)
+
+	// RUNNER_ONLINE — the host-runner is live on the target. Reaching this line is
+	// itself proof the agentless SSH bootstrap worked: the binary was pushed over
+	// SSH and started with no pre-installed agent. This is the first thing a user
+	// watching the run sees, and it has no equivalent in a fleet-based tool.
+	onlineMsg := fmt.Sprintf("Host runner online on %s — deployed over SSH, no agent pre-installed", host)
+	onlineData, _ := json.Marshal(map[string]interface{}{"host": host, "agentless": true, "resumed": resume != nil})
+	r.emit(&req, events.EventRunnerOnline, host, onlineMsg, onlineData)
+
+	// RESUMED_FROM_CHECKPOINT — we picked up an interrupted play. resume[1] is the
+	// task we restart at; every earlier task is skipped because it already ran.
+	if resume != nil {
+		rmsg := fmt.Sprintf("Resumed after interruption — skipping completed tasks, continuing at %q", resume[1])
+		rdata, _ := json.Marshal(map[string]interface{}{"host": host, "resume_at": resume[1]})
+		r.emit(&req, events.EventResumedFromCheckpoint, host, rmsg, rdata)
 	}
+
+	// Emit JOB_STARTED so the job transitions to 'running'. This ensures that if
+	// we fail later (e.g., git not found), the timeout mechanism can mark the job
+	// as failed instead of leaving it stuck in 'queued'.
+	r.emit(&req, events.EventJobStarted, host, "", nil)
 
 	// 2. Prepare Environment (e.g. write playbook file if inline)
 	// 2. Prepare Environment
@@ -136,7 +183,7 @@ func (r *Runner) Execute() error {
 			}
 		}
 	}
-	if resume := resumeArgs(r.JobDir); resume != nil {
+	if resume != nil {
 		log.Printf("Resuming play at task %q (restoring checkpointed vars)", resume[1])
 		playArgs = append(playArgs, resume...)
 	}
@@ -174,9 +221,19 @@ func (r *Runner) Execute() error {
 	cmd.Stdout = io.MultiWriter(stdoutFile, os.Stdout)
 	cmd.Stderr = cmd.Stdout
 
+	// Narrate task-level durability while the play runs: a goroutine watches the
+	// checkpoint file and emits a CHECKPOINT_SAVED event each time the play
+	// advances to a new resumable task.
+	stopWatch := make(chan struct{})
+	watchDone := make(chan struct{})
+	go func() { watchCheckpoints(r.JobDir, &req, r.Wal, r.seq, host, stopWatch); close(watchDone) }()
+
 	start := time.Now()
 	err = cmd.Run()
 	duration := time.Since(start)
+
+	close(stopWatch)
+	<-watchDone
 
 	// Ship any facts Ansible gathered into the cache back to the control plane.
 	if req.JobManifest.UseFactCache {
@@ -184,29 +241,22 @@ func (r *Runner) Execute() error {
 	}
 
 	finalState := "successful"
-	eventType := "JOB_COMPLETED"
+	eventType := events.EventJobCompleted
 	if err != nil {
 		finalState = "failed"
-		eventType = "JOB_FAILED"
+		eventType = events.EventJobFailed
 		log.Printf("Ansible execution failed: %v", err)
 	}
 
 	msgEnd := fmt.Sprintf("Job finished in %v. State: %s", duration, finalState)
-	r.Wal.Append(&events.JobEvent{
-		UnifiedJobID:   req.UnifiedJobID,
-		ExecutionRunID: req.ExecutionRunID,
-		EventType:      eventType,
-		Timestamp:      time.Now(),
-		Seq:            2,
-		StdoutSnippet:  &msgEnd,
-	})
+	r.emit(&req, eventType, host, msgEnd, nil)
 
 	// Write status.json
 	status := map[string]interface{}{
 		"execution_run_id": req.ExecutionRunID,
 		"state":            finalState,
 		"completed_at":     time.Now(),
-		"max_seq":          2,
+		"max_seq":          r.seq.current(),
 	}
 	statusBytes, _ := json.Marshal(status)
 	_ = os.WriteFile(filepath.Join(r.JobDir, "status.json"), statusBytes, 0644)

@@ -262,20 +262,29 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	type node struct {
-		ID           int64  `json:"id" db:"id"`
-		NodeKey      string `json:"node_key" db:"node_key"`
-		NodeType     string `json:"node_type" db:"node_type"`
-		Name         string `json:"name" db:"name"`
-		UnifiedJobID *int64 `json:"unified_job_id" db:"unified_job_id"`
-		Status       string `json:"status" db:"status"`
+		ID           int64   `json:"id" db:"id"`
+		NodeKey      string  `json:"node_key" db:"node_key"`
+		NodeType     string  `json:"node_type" db:"node_type"`
+		Name         string  `json:"name" db:"name"`
+		UnifiedJobID *int64  `json:"unified_job_id" db:"unified_job_id"`
+		RunID        *string `json:"run_id" db:"run_id"`
+		Status       string  `json:"status" db:"status"`
 	}
 	nodes := []node{}
+	// run_id is the node's latest execution run, so the UI can show the engine
+	// lifecycle (agentless bootstrap, checkpoints, resume) per workflow step.
 	_ = rs.DB.SelectContext(r.Context(), &nodes, `
 		SELECT wjn.id, wjn.node_key, wjn.node_type,
-		       COALESCE(wn.name, '') AS name, wjn.unified_job_id, wjn.status
+		       COALESCE(wn.name, '') AS name, wjn.unified_job_id, wjn.status,
+		       er.id AS run_id
 		FROM workflow_job_nodes wjn
 		LEFT JOIN workflow_nodes wn
 		       ON wn.workflow_template_id = $1 AND wn.node_key = wjn.node_key
+		LEFT JOIN LATERAL (
+		       SELECT id FROM execution_runs
+		       WHERE unified_job_id = wjn.unified_job_id
+		       ORDER BY created_at DESC LIMIT 1
+		) er ON true
 		WHERE wjn.workflow_job_id = $2
 		ORDER BY wjn.id`, meta.TemplateID, id)
 	edges := []workflowEdge{}

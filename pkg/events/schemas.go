@@ -12,6 +12,29 @@ const (
 	JobEventSubject   = "job.events"
 )
 
+// Job lifecycle event types. The first three drive the run-state projection in
+// the consumer (db_writer.updateRunState); the rest are engine-narration events
+// that surface Praetor's agentless-bootstrap and checkpoint/resume behaviour on
+// the run timeline. Narration events are deliberately inert for state and
+// notifications (the consumer's switch has a no-op default) — they exist purely
+// to make the execution engine visible where users watch a run.
+const (
+	EventJobStarted   = "JOB_STARTED"
+	EventJobCompleted = "JOB_COMPLETED"
+	EventJobFailed    = "JOB_FAILED"
+
+	// EventRunnerOnline is emitted the moment the host-runner starts on a target.
+	// Its existence is proof the agentless SSH bootstrap succeeded: the binary was
+	// pushed over SSH and is now live with no pre-installed agent.
+	EventRunnerOnline = "RUNNER_ONLINE"
+	// EventCheckpointSaved marks a task boundary durably checkpointed to disk, so
+	// an interruption resumes here instead of re-running from the top.
+	EventCheckpointSaved = "CHECKPOINT_SAVED"
+	// EventResumedFromCheckpoint is emitted when a runner picks up an interrupted
+	// play (e.g. after a host reboot), skipping already-completed tasks.
+	EventResumedFromCheckpoint = "RESUMED_FROM_CHECKPOINT"
+)
+
 // ExecutionRequest is the message published effectively to "job-execution-requests"
 // topic. It contains everything an executor needs to start running a job.
 type ExecutionRequest struct {

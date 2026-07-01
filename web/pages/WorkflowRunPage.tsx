@@ -6,7 +6,8 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import WorkflowDag from '../components/WorkflowDag';
-import { ArrowLeft, Check, X, RefreshCw } from 'lucide-react';
+import RunLifecycle from '../components/RunLifecycle';
+import { ArrowLeft, Check, X, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 
 const TERMINAL = ['successful', 'failed', 'error'];
 
@@ -25,6 +26,7 @@ const WorkflowRunPage = () => {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const refresh = useCallback(() => {
     if (!id) return;
@@ -120,20 +122,40 @@ const WorkflowRunPage = () => {
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
           </tr></thead>
           <tbody className="divide-y divide-gray-100">
-            {(job?.nodes || []).map(n => (
-              <tr key={n.id}>
-                <td className="px-3 py-2 text-sm font-medium text-gray-900">{n.name || n.node_key}</td>
-                <td className="px-3 py-2 text-sm text-gray-500">{n.node_type}</td>
-                <td className="px-3 py-2 text-sm">
-                  <Badge variant={statusVariant(n.status)}>{n.status}</Badge>
-                </td>
-                <td className="px-3 py-2 text-sm text-gray-500">
-                  {n.unified_job_id
-                    ? <button className="text-brand-600 hover:underline" onClick={() => navigate('/jobs')}>job #{n.unified_job_id}</button>
-                    : '—'}
-                </td>
-              </tr>
-            ))}
+            {(job?.nodes || []).map(n => {
+              const open = expanded === n.id;
+              const canExpand = !!n.run_id;
+              return (
+                <React.Fragment key={n.id}>
+                  <tr className={canExpand ? 'cursor-pointer hover:bg-gray-50' : ''} onClick={() => canExpand && setExpanded(open ? null : n.id)}>
+                    <td className="px-3 py-2 text-sm font-medium text-gray-900">
+                      <span className="flex items-center gap-1.5">
+                        {canExpand
+                          ? (open ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />)
+                          : <span className="w-[14px]" />}
+                        {n.name || n.node_key}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-sm text-gray-500">{n.node_type}</td>
+                    <td className="px-3 py-2 text-sm">
+                      <Badge variant={statusVariant(n.status)}>{n.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-sm text-gray-500">
+                      {n.unified_job_id
+                        ? <button className="text-brand-600 hover:underline" onClick={e => { e.stopPropagation(); navigate('/jobs'); }}>job #{n.unified_job_id}</button>
+                        : '—'}
+                    </td>
+                  </tr>
+                  {open && n.run_id && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-3 bg-gray-50 border-l-2 border-brand-200">
+                        <RunLifecycle runId={n.run_id} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </Card>

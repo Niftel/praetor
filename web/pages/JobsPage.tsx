@@ -5,8 +5,9 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Play, FileText, Copy, Check, Terminal, Download, Maximize2 } from 'lucide-react';
+import { Play, FileText, Copy, Check, Terminal, Download, Maximize2, Activity, ChevronDown, ChevronRight } from 'lucide-react';
 import Anser from 'anser';
+import RunLifecycle from '../components/RunLifecycle';
 
 const JobsPage = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -15,9 +16,11 @@ const JobsPage = () => {
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [selectedJobName, setSelectedJobName] = useState<string>("");
+  const [selectedRunId, setSelectedRunId] = useState<string>("");
   const [logs, setLogs] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showLifecycle, setShowLifecycle] = useState(true);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   const loadData = () => {
@@ -57,6 +60,7 @@ const JobsPage = () => {
   const viewLogs = async (runId: string, jobName: string, jobId: number) => {
     setSelectedJobId(jobId);
     setSelectedJobName(jobName);
+    setSelectedRunId(runId || "");
     setLogs("Loading logs...");
     setCopied(false);
     setIsLogModalOpen(true);
@@ -237,6 +241,26 @@ const JobsPage = () => {
                   </button>
                 </div>
               </div>
+
+              {/* Execution lifecycle — the engine narration (agentless bootstrap,
+                  checkpoints, resume) surfaced above the raw playbook output. */}
+              {selectedRunId && (
+                <div className="border-b border-[#1e1e1e] bg-[#252526]">
+                  <button
+                    onClick={() => setShowLifecycle(v => !v)}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs font-medium text-gray-300 hover:bg-[#2d2d2d] transition-colors"
+                  >
+                    {showLifecycle ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <Activity size={14} className="text-emerald-400" />
+                    Execution lifecycle
+                  </button>
+                  {showLifecycle && (
+                    <div className="px-5 pb-4 pt-1 max-h-56 overflow-y-auto">
+                      <RunLifecycle runId={selectedRunId} dark />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Terminal Content */}
               <div
