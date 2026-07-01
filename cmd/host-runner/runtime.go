@@ -33,11 +33,33 @@ func resolveAnsible() (playbook, interpreter string) {
 		}
 	}
 	if fileExists(bundled) {
-		log.Printf("runtime: using self-contained Ansible under %s", runtimePrefix)
+		// The ExecPack always provides the Ansible engine (controller). For module
+		// execution on the host, prefer the host's own Python when it has one — so
+		// modules needing system bindings (e.g. apt/python3-apt) work — and only
+		// fall back to the ExecPack's Python on a host that has none.
+		if hasSystemPython() {
+			log.Printf("runtime: ExecPack Ansible engine + host system python for modules")
+			return bundled, ""
+		}
+		log.Printf("runtime: ExecPack Ansible engine + bundled python (host has none)")
 		return bundled, python
 	}
-	log.Printf("runtime: no bundled runtime present; using system ansible-playbook")
+	log.Printf("runtime: no ExecPack present; using system ansible-playbook")
 	return "ansible-playbook", ""
+}
+
+// hasSystemPython reports whether the host has its own Python interpreter
+// (distinct from the ExecPack's, which lives under /opt/praetor/runtime).
+func hasSystemPython() bool {
+	for _, p := range []string{"/usr/bin/python3", "/usr/bin/python", "/usr/local/bin/python3"} {
+		if fileExists(p) {
+			return true
+		}
+	}
+	if _, err := exec.LookPath("python3"); err == nil {
+		return true
+	}
+	return false
 }
 
 // extractRuntime unpacks the pushed runtime tarball at its fixed prefix. The
