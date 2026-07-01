@@ -142,7 +142,7 @@ const WorkflowRunPage = () => {
                     </td>
                     <td className="px-3 py-2 text-sm text-gray-500">
                       {n.unified_job_id
-                        ? <button className="text-brand-600 hover:underline" onClick={e => { e.stopPropagation(); navigate('/jobs'); }}>job #{n.unified_job_id}</button>
+                        ? <button className="text-brand-600 hover:underline" onClick={e => { e.stopPropagation(); navigate(`/jobs/${n.unified_job_id}`); }}>job #{n.unified_job_id}</button>
                         : '—'}
                     </td>
                   </tr>

@@ -1,33 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import { Job, JobStatus, Template } from '../types';
+import { Job, Template } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
-import Modal from '../components/ui/Modal';
-import { Play, FileText, Copy, Check, Terminal, Download, Maximize2, Activity, ChevronDown, ChevronRight } from 'lucide-react';
-import Anser from 'anser';
-import RunLifecycle from '../components/RunLifecycle';
+import { Play, Terminal, ChevronRight } from 'lucide-react';
 
 const JobsPage = () => {
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
-  const [isLogModalOpen, setIsLogModalOpen] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
-  const [selectedJobName, setSelectedJobName] = useState<string>("");
-  const [selectedRunId, setSelectedRunId] = useState<string>("");
-  const [logs, setLogs] = useState<string>("");
-  const [copied, setCopied] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showLifecycle, setShowLifecycle] = useState(true);
-  const logContainerRef = useRef<HTMLDivElement>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
 
   const loadData = () => {
     Promise.all([api.getJobs(), api.getTemplates()])
       .then(([jobsData, templatesData]) => {
         setJobs(jobsData || []);
-        // Check if templatesData structure matches or if it's paginated
         setTemplates(templatesData.items || templatesData || []);
       })
       .catch(err => console.error(err));
@@ -35,7 +24,6 @@ const JobsPage = () => {
 
   useEffect(() => {
     loadData();
-    // Poll for updates every 5 seconds
     const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -44,83 +32,26 @@ const JobsPage = () => {
     if (!selectedTemplate) return;
     const template = templates.find(t => t.id.toString() === selectedTemplate);
     if (!template) return;
-
     try {
       await api.launchJob({
-        unified_job_template_id: template.unified_job_template_id || template.id, // Fallback if not populated 
-        name: template.name
+        unified_job_template_id: template.unified_job_template_id || template.id,
+        name: template.name,
       });
       loadData();
     } catch (error) {
-      console.error("Launch failed", error);
-      alert("Failed to launch job");
+      console.error('Launch failed', error);
+      alert('Failed to launch job');
     }
   };
 
-  const viewLogs = async (runId: string, jobName: string, jobId: number) => {
-    setSelectedJobId(jobId);
-    setSelectedJobName(jobName);
-    setSelectedRunId(runId || "");
-    setLogs("Loading logs...");
-    setCopied(false);
-    setIsLogModalOpen(true);
-    try {
-      // Full playbook output lives in the object store; fetch the reassembled
-      // log. Fall back to event stdout snippets for older runs (or lifecycle-only
-      // output) that predate object-store logging.
-      let fullLog = "";
-      try {
-        fullLog = await api.getJobLogs(runId);
-      } catch {
-        fullLog = "";
-      }
-      if (!fullLog || !fullLog.trim()) {
-        const events = await api.getJobEvents(runId);
-        fullLog = events.map((e: any) => e.stdout_snippet).filter(Boolean).join("\n");
-      }
-      setLogs(fullLog || "No logs available.");
-      // Auto-scroll to bottom after logs load
-      setTimeout(() => {
-        if (logContainerRef.current) {
-          logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-        }
-      }, 100);
-    } catch (error) {
-      setLogs("Failed to load logs.");
-      console.error(error);
-    }
-  };
-
-  const copyLogs = async () => {
-    // Strip HTML/ANSI codes for plain text copy
-    const plainText = logs.replace(/\x1b\[[0-9;]*m/g, '');
-    await navigator.clipboard.writeText(plainText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const downloadLogs = () => {
-    const plainText = logs.replace(/\x1b\[[0-9;]*m/g, '');
-    const blob = new Blob([plainText], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `job-${selectedJobId}-logs.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const formattedLogs = Anser.ansiToHtml(logs, { use_classes: false });
+  const openJob = (job: Job) => navigate(`/jobs/${job.id}`, { state: { job } });
 
   const getStatusBadge = (status: string) => {
-    // Map backend status strings to badges
     switch (status) {
       case 'successful': return <Badge variant="success">Successful</Badge>;
       case 'failed': return <Badge variant="error">Failed</Badge>;
       case 'running': return <Badge variant="info">Running</Badge>;
-      case 'pending': return <Badge variant="neutral">Pending</Badge>;
+      case 'pending': return <Badge variant="warning">Pending</Badge>;
       default: return <Badge variant="neutral">{status}</Badge>;
     }
   };
@@ -161,7 +92,7 @@ const JobsPage = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {jobs.map((job) => (
-                <tr key={job.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={job.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => openJob(job)}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">#{job.id}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{job.name}</td>
                   <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(job.status)}</td>
@@ -170,12 +101,9 @@ const JobsPage = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">admin</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => viewLogs(job.current_run_id, job.name, job.id)}
-                      className="text-brand-600 hover:text-brand-900 flex items-center justify-end w-full gap-1"
-                    >
-                      <Terminal size={16} /> Logs
-                    </button>
+                    <span className="text-brand-600 hover:text-brand-900 inline-flex items-center justify-end w-full gap-1">
+                      <Terminal size={16} /> View <ChevronRight size={14} />
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -188,100 +116,6 @@ const JobsPage = () => {
           </table>
         </div>
       </Card>
-
-      {/* Custom Terminal Modal */}
-      {isLogModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 transition-opacity bg-black/80 backdrop-blur-sm"
-              onClick={() => { setIsLogModalOpen(false); setIsFullscreen(false); }}
-              aria-hidden="true"
-            ></div>
-
-            {/* Window Container */}
-            <div className={`inline-block w-full align-bottom bg-[#1e1e1e] rounded-lg text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle ${isFullscreen ? 'w-full h-screen m-0 rounded-none' : 'max-w-5xl'}`}>
-
-              {/* Window Header / Title Bar */}
-              <div className="flex items-center justify-between bg-[#2d2d2d] px-4 py-3 border-b border-[#1e1e1e]">
-                <div className="flex items-center gap-4">
-                  <div className="flex gap-2">
-                    <button onClick={() => { setIsLogModalOpen(false); setIsFullscreen(false); }} className="w-3 h-3 rounded-full bg-[#ff5f56] hover:bg-[#ff5f56]/80 transition-colors" />
-                    <button onClick={() => setIsFullscreen(!isFullscreen)} className="w-3 h-3 rounded-full bg-[#ffbd2e] hover:bg-[#ffbd2e]/80 transition-colors" />
-                    <button onClick={() => { }} className="w-3 h-3 rounded-full bg-[#27c93f] hover:bg-[#27c93f]/80 transition-colors" />
-                  </div>
-                  <div className="flex items-center gap-2 text-gray-400 text-sm font-medium font-sans border-l border-gray-700 pl-4 ml-2">
-                    <Terminal size={14} />
-                    <span>{selectedJobName} — #{selectedJobId}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={copyLogs}
-                    className="p-1.5 rounded hover:bg-[#3d3d3d] text-gray-400 hover:text-white transition-colors"
-                    title="Copy logs"
-                  >
-                    {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
-                  </button>
-                  <button
-                    onClick={downloadLogs}
-                    className="p-1.5 rounded hover:bg-[#3d3d3d] text-gray-400 hover:text-white transition-colors"
-                    title="Download logs"
-                  >
-                    <Download size={16} />
-                  </button>
-                  <button
-                    onClick={() => setIsFullscreen(!isFullscreen)}
-                    className="p-1.5 rounded hover:bg-[#3d3d3d] text-gray-400 hover:text-white transition-colors"
-                    title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-                  >
-                    <Maximize2 size={16} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Execution lifecycle — the engine narration (agentless bootstrap,
-                  checkpoints, resume) surfaced above the raw playbook output. */}
-              {selectedRunId && (
-                <div className="border-b border-[#1e1e1e] bg-[#252526]">
-                  <button
-                    onClick={() => setShowLifecycle(v => !v)}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-xs font-medium text-gray-300 hover:bg-[#2d2d2d] transition-colors"
-                  >
-                    {showLifecycle ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    <Activity size={14} className="text-emerald-400" />
-                    Execution lifecycle
-                  </button>
-                  {showLifecycle && (
-                    <div className="px-5 pb-4 pt-1 max-h-56 overflow-y-auto">
-                      <RunLifecycle runId={selectedRunId} dark />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Terminal Content */}
-              <div
-                ref={logContainerRef}
-                className={`font-mono text-sm ${isFullscreen ? 'h-[calc(100vh-50px)]' : 'h-[600px]'} overflow-y-auto whitespace-pre-wrap text-[#d4d4d4] p-6 leading-relaxed selection:bg-brand-900 selection:text-white scroll-smooth`}
-                style={{
-                  fontFamily: 'Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace',
-                  backgroundColor: '#1e1e1e'
-                }}
-                dangerouslySetInnerHTML={{ __html: formattedLogs }}
-              />
-
-              {/* Status Bar */}
-              <div className="bg-[#007acc] text-white px-3 py-1 text-xs flex justify-between items-center font-sans">
-                <span>{logs ? logs.split('\n').length : 0} lines</span>
-                <span>UTF-8</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

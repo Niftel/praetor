@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import JobsPage from './pages/JobsPage';
+import JobDetailPage from './pages/JobDetailPage';
 import TemplatesPage from './pages/TemplatesPage';
 import WorkflowsPage from './pages/WorkflowsPage';
 import WorkflowRunPage from './pages/WorkflowRunPage';
@@ -42,6 +43,7 @@ const App = () => {
         >
           <Route index element={<DashboardPage />} />
           <Route path="jobs" element={<JobsPage />} />
+          <Route path="jobs/:jobId" element={<JobDetailPage />} />
           <Route path="templates" element={<TemplatesPage />} />
           <Route path="workflows" element={<WorkflowsPage />} />
           <Route path="workflows/runs/:jobId" element={<WorkflowRunPage />} />
