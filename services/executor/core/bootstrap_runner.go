@@ -23,20 +23,18 @@ import (
 // bundle, the checkpoint plugin, the manifest and the key over SSH sessions, then
 // launches the host-runner. The target only needs sshd, a POSIX shell and tar.
 type BootstrapRunner struct {
-	RunnerPayloadPath  string
-	RuntimePayloadPath string
+	RunnerPayloadPath string
+	RuntimeDir        string // dir holding <pack>-linux-<arch>.tar.gz Execution Packs
 }
 
 func NewBootstrapRunner() *BootstrapRunner {
-	runtimePayload := os.Getenv("RUNTIME_PAYLOAD_PATH")
-	if runtimePayload == "" {
-		// The self-contained Ansible runtime bundle the executor pushes onto
-		// glibc target hosts. Arch-matched to the host-runner binary.
-		runtimePayload = "/tmp/build/runtime/ansible-runtime-linux-arm64.tar.gz"
+	runtimeDir := os.Getenv("RUNTIME_DIR")
+	if runtimeDir == "" {
+		runtimeDir = "/tmp/build/runtime"
 	}
 	return &BootstrapRunner{
-		RunnerPayloadPath:  "/tmp/build/linux/praetor-host-runner",
-		RuntimePayloadPath: runtimePayload,
+		RunnerPayloadPath: "/tmp/build/linux/praetor-host-runner",
+		RuntimeDir:        runtimeDir,
 	}
 }
 
@@ -111,9 +109,11 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		log.Printf("BootstrapRunner: checkpoint plugin push failed (non-fatal): %v", err)
 	}
 
-	// 4. The self-contained Ansible runtime — so the host needs no Ansible/Python.
-	if err := r.pushRuntime(client); err != nil {
-		log.Printf("BootstrapRunner: runtime push failed (non-fatal; will fall back to system ansible): %v", err)
+	// 4. The Execution Pack — the self-contained Ansible runtime — so the host
+	// needs no Ansible/Python. Pushes the pack the job selected (or the default).
+	pack := firstNonEmpty(req.JobManifest.ExecutionPack, "ansible-runtime")
+	if err := r.pushRuntime(client, pack); err != nil {
+		log.Printf("BootstrapRunner: pack push failed (non-fatal; will fall back to system ansible): %v", err)
 	}
 
 	// 5. The manifest.
@@ -144,10 +144,11 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	return nil
 }
 
-// pushRuntime streams the self-contained Ansible runtime onto the target and
-// extracts it, unless it's already present or the host is musl (no glibc bundle).
-func (r *BootstrapRunner) pushRuntime(client *ssh.Client) error {
-	detect, err := runSSH(client, `if [ -x /opt/praetor/runtime/bin/ansible-playbook ]; then echo present; elif ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then echo musl; else echo glibc; fi`)
+// pushRuntime streams the named Execution Pack onto the target and extracts it
+// under /opt/praetor/packs/<pack>, unless it's already present or the host is
+// musl (no glibc pack). Packs are name-scoped so several can coexist on a host.
+func (r *BootstrapRunner) pushRuntime(client *ssh.Client, pack string) error {
+	detect, err := runSSH(client, fmt.Sprintf(`if [ -x /opt/praetor/packs/%s/bin/ansible-playbook ]; then echo present; elif ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then echo musl; else echo glibc; fi`, pack))
 	if err != nil {
 		return err
 	}
@@ -155,16 +156,17 @@ func (r *BootstrapRunner) pushRuntime(client *ssh.Client) error {
 	case "present":
 		return nil
 	case "musl":
-		log.Printf("BootstrapRunner: musl host; skipping glibc runtime bundle")
+		log.Printf("BootstrapRunner: musl host; skipping glibc Execution Pack %q", pack)
 		return nil
 	}
-	f, err := os.Open(r.RuntimePayloadPath)
+	tarball := fmt.Sprintf("%s/%s-linux-arm64.tar.gz", r.RuntimeDir, pack)
+	f, err := os.Open(tarball)
 	if err != nil {
-		return fmt.Errorf("open runtime bundle: %w", err)
+		return fmt.Errorf("open Execution Pack %q: %w", pack, err)
 	}
 	defer f.Close()
-	log.Printf("BootstrapRunner: pushing self-contained Ansible runtime")
-	return pushStream(client, f, "mkdir -p /opt/praetor && tar -xzf - -C /")
+	log.Printf("BootstrapRunner: pushing Execution Pack %q", pack)
+	return pushStream(client, f, "mkdir -p /opt/praetor/packs && tar -xzf - -C /")
 }
 
 // localBootstrap runs the host-runner on the executor itself for jobs with no

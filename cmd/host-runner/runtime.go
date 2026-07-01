@@ -7,49 +7,59 @@ import (
 	"path/filepath"
 )
 
-const (
-	// Fixed prefix the self-contained runtime is laid out at (its console-script
-	// shebangs are baked to this path, so it must extract here).
-	runtimePrefix = "/opt/praetor/runtime"
-	// Where the executor's bootstrap pushed the runtime tarball.
-	runtimeTarball = "/opt/praetor/ansible-runtime.tar.gz"
-)
+// defaultPack is used when a job doesn't name an Execution Pack.
+const defaultPack = "ansible-runtime"
 
 // resolveAnsible returns the ansible-playbook command and Python interpreter the
-// host-runner should use. Praetor's self-contained execution environment
-// (Python + Ansible) is *pushed* onto the host by the executor at
-// runtimeTarball; this extracts it once under runtimePrefix and returns the
-// bundled binaries, so the host needs no pre-installed Ansible or Python and
-// everything stays under /opt/praetor. If no runtime was pushed (e.g. a musl
-// host, for which there is no glibc bundle), it falls back to a system
-// ansible-playbook on PATH.
-func resolveAnsible() (playbook, interpreter string) {
-	bundled := filepath.Join(runtimePrefix, "bin", "ansible-playbook")
-	python := filepath.Join(runtimePrefix, "bin", "python3")
+// host-runner should use for the given Execution Pack. Praetor's self-contained
+// pack (Python + Ansible) is pushed onto the host by the executor at
+// /opt/praetor/<pack>.tar.gz; this extracts it once under /opt/praetor/packs/<pack>
+// and returns the bundled binaries, so the host needs no pre-installed Ansible or
+// Python and everything stays under /opt/praetor. Packs are name-scoped so
+// several can coexist on a host. If no pack was pushed (e.g. a musl host, for
+// which there is no glibc pack), it falls back to a system ansible-playbook.
+func resolveAnsible(pack string) (playbook, interpreter string) {
+	if pack == "" {
+		pack = defaultPack
+	}
+	prefix := "/opt/praetor/packs/" + pack
+	tarball := "/opt/praetor/" + pack + ".tar.gz"
+	bundled := filepath.Join(prefix, "bin", "ansible-playbook")
+	python := filepath.Join(prefix, "bin", "python3")
 
-	if !fileExists(bundled) && fileExists(runtimeTarball) {
-		if err := extractRuntime(); err != nil {
-			log.Printf("runtime: extract failed (%v); falling back to system ansible-playbook", err)
+	if !fileExists(bundled) && fileExists(tarball) {
+		if err := extractPack(tarball); err != nil {
+			log.Printf("runtime: extract of pack %q failed (%v); falling back to system ansible-playbook", pack, err)
 		}
 	}
 	if fileExists(bundled) {
-		// The ExecPack always provides the Ansible engine (controller). For module
-		// execution on the host, prefer the host's own Python when it has one — so
-		// modules needing system bindings (e.g. apt/python3-apt) work — and only
-		// fall back to the ExecPack's Python on a host that has none.
+		// The pack always provides the Ansible engine. For module execution prefer
+		// the host's own Python when it has one (so modules needing system bindings
+		// like apt work), and fall back to the pack's Python on a bare host.
 		if hasSystemPython() {
-			log.Printf("runtime: ExecPack Ansible engine + host system python for modules")
+			log.Printf("runtime: Execution Pack %q (engine) + host system python for modules", pack)
 			return bundled, ""
 		}
-		log.Printf("runtime: ExecPack Ansible engine + bundled python (host has none)")
+		log.Printf("runtime: Execution Pack %q (engine + bundled python)", pack)
 		return bundled, python
 	}
-	log.Printf("runtime: no ExecPack present; using system ansible-playbook")
+	log.Printf("runtime: no Execution Pack %q present; using system ansible-playbook", pack)
 	return "ansible-playbook", ""
 }
 
+// extractPack unpacks a pushed Execution Pack tarball at its fixed prefix. The
+// tarball contains opt/praetor/packs/<pack>/..., so it extracts to /.
+func extractPack(tarball string) error {
+	log.Printf("runtime: extracting Execution Pack from %s", tarball)
+	cmd := exec.Command("tar", "-xzf", tarball, "-C", "/")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tar: %v: %s", err, out)
+	}
+	return nil
+}
+
 // hasSystemPython reports whether the host has its own Python interpreter
-// (distinct from the ExecPack's, which lives under /opt/praetor/runtime).
+// (distinct from a pack's, which lives under /opt/praetor/packs).
 func hasSystemPython() bool {
 	for _, p := range []string{"/usr/bin/python3", "/usr/bin/python", "/usr/local/bin/python3"} {
 		if fileExists(p) {
@@ -60,15 +70,4 @@ func hasSystemPython() bool {
 		return true
 	}
 	return false
-}
-
-// extractRuntime unpacks the pushed runtime tarball at its fixed prefix. The
-// tarball contains opt/praetor/runtime/..., so it extracts to /.
-func extractRuntime() error {
-	log.Printf("runtime: extracting self-contained Ansible from %s", runtimeTarball)
-	cmd := exec.Command("tar", "-xzf", runtimeTarball, "-C", "/")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tar: %v: %s", err, out)
-	}
-	return nil
 }

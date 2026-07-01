@@ -141,6 +141,7 @@ export interface JobTemplate {
   playbook_content?: string;
   unified_job_template_id?: number;
   credential_id?: number;
+  execution_pack_id?: number;
   forks: number;
   job_type: string;
   verbosity: number;

@@ -330,6 +330,15 @@ func (s *Scheduler) processPendingJobs() error {
 			}
 		}
 
+		// Execution Pack: which self-contained Python+Ansible runtime the executor
+		// pushes and the host-runner runs in. Empty leaves the default.
+		if template.ExecutionPackID != nil {
+			var packName string
+			if err := tx.GetContext(ctx, &packName, `SELECT name FROM execution_packs WHERE id = $1`, *template.ExecutionPackID); err == nil {
+				manifest.ExecutionPack = packName
+			}
+		}
+
 		req := &events.ExecutionRequest{
 			ExecutionRunID: runID,
 			UnifiedJobID:   job.ID,

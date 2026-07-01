@@ -8,6 +8,7 @@ import {
   Workflow,
   Server,
   Key,
+  Package,
   Calendar,
   Users,
   LogOut,
@@ -47,6 +48,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { name: 'Projects', path: '/projects', icon: <GitBranch size={20} /> },
         { name: 'Inventories', path: '/inventories', icon: <Server size={20} /> },
         { name: 'Credentials', path: '/credentials', icon: <Key size={20} /> },
+        { name: 'Execution Packs', path: '/execution-packs', icon: <Package size={20} /> },
         { name: 'Schedules', path: '/schedules', icon: <Calendar size={20} /> },
       ]
     },

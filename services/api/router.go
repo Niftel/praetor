@@ -65,6 +65,9 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		// to manage that host with no per-host credential.
 		r.Get("/automation-key", handlers.AutomationKeyHandler(db))
 
+		// Execution Packs registry (the self-contained runtimes pushed to hosts).
+		r.Mount("/execution-packs", handlers.NewExecutionPacksResource(db).Routes())
+
 		// Activity stream (audit log) — superuser/auditor only
 		r.Get("/activity-stream", content.ListActivityStream)
 

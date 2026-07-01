@@ -69,6 +69,11 @@ type JobManifest struct {
 	RunnerHostID    int64                  `json:"runner_host_id,omitempty"` // Host ID for heartbeat calls
 	APIURL          string                 `json:"api_url,omitempty"`        // API URL for heartbeat calls
 
+	// ExecutionPack names the self-contained Python+Ansible runtime to push and
+	// run in (the executor pushes /tmp/build/runtime/<pack>-linux-<arch>.tar.gz,
+	// the host-runner uses /opt/praetor/packs/<pack>). Empty = the default pack.
+	ExecutionPack string `json:"execution_pack,omitempty"`
+
 	// Credentials
 	SSHUser       string `json:"ssh_user,omitempty"`
 	SSHPrivateKey string `json:"ssh_private_key,omitempty"`

@@ -13,7 +13,10 @@ FROM debian:12-slim AS build
 ARG PY_VERSION=3.11.9
 ARG PBS_TAG=20240814
 ARG TARGETARCH
-ARG PREFIX=/opt/praetor/runtime
+# PACK_NAME: output tarball base name; also name-scopes the on-host prefix so
+# multiple packs coexist (each host-runner uses /opt/praetor/packs/<name>).
+ARG PACK_NAME=execpack
+ARG PREFIX=/opt/praetor/packs/${PACK_NAME}
 # Spec-driven contents (no inline comments — Docker treats them as part of the value):
 # ANSIBLE_SPEC: pip requirement, e.g. ansible or ansible-core==2.16.*
 ARG ANSIBLE_SPEC=ansible
@@ -21,8 +24,6 @@ ARG ANSIBLE_SPEC=ansible
 ARG EXTRA_PIP=
 # GALAXY_COLLECTIONS: space-separated ansible-galaxy collections
 ARG GALAXY_COLLECTIONS=
-# PACK_NAME: output tarball base name
-ARG PACK_NAME=execpack
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -36,7 +37,7 @@ RUN set -eux; \
     esac; \
     url="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/cpython-${PY_VERSION}+${PBS_TAG}-${PBS_ARCH}-unknown-linux-gnu-install_only.tar.gz"; \
     echo "Downloading $url"; \
-    mkdir -p /opt/praetor; \
+    mkdir -p /opt/praetor "$(dirname "$PREFIX")"; \
     curl -fsSL "$url" -o /tmp/py.tgz; \
     tar -xzf /tmp/py.tgz -C /opt/praetor; \
     mv /opt/praetor/python "$PREFIX"; \
@@ -60,7 +61,7 @@ RUN set -eux; \
 RUN find "$PREFIX" -type d -name __pycache__ -prune -exec rm -rf {} + ; \
     rm -rf "$PREFIX/lib/python"*/test || true
 
-RUN mkdir -p /out && tar -czf "/out/${PACK_NAME}-linux-${TARGETARCH}.tar.gz" -C / opt/praetor/runtime \
+RUN mkdir -p /out && tar -czf "/out/${PACK_NAME}-linux-${TARGETARCH}.tar.gz" -C / "${PREFIX#/}" \
  && ls -lh /out
 
 # Export stage: `-o type=local` copies just the tarball out of the build.

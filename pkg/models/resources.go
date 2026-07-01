@@ -85,6 +85,7 @@ type JobTemplate struct {
 	PlaybookContent        *string         `json:"playbook_content,omitempty" db:"playbook_content"`
 	UnifiedJobTemplateID   *int64          `json:"unified_job_template_id,omitempty" db:"unified_job_template_id"`
 	CredentialID           *int64          `json:"credential_id,omitempty" db:"credential_id"`
+	ExecutionPackID        *int64          `json:"execution_pack_id,omitempty" db:"execution_pack_id"`
 	Forks                  int             `json:"forks" db:"forks"`
 	JobType                string          `json:"job_type" db:"job_type"`
 	Verbosity              int             `json:"verbosity" db:"verbosity"`

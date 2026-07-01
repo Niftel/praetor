@@ -192,7 +192,7 @@ func (r *Runner) Execute() error {
 	// Use Praetor's self-contained runtime (pushed onto the host by the executor)
 	// so the target needs no pre-installed Ansible/Python. Falls back to a system
 	// ansible-playbook if no runtime is present.
-	ansiblePlaybook, ansibleInterpreter := resolveAnsible()
+	ansiblePlaybook, ansibleInterpreter := resolveAnsible(req.JobManifest.ExecutionPack)
 
 	cmd := exec.Command(ansiblePlaybook, playArgs...)
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")

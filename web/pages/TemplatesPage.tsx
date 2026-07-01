@@ -11,6 +11,7 @@ const TemplatesPage = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
+  const [executionPacks, setExecutionPacks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
@@ -39,17 +40,19 @@ const TemplatesPage = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [templatesData, projectsData, inventoriesData, credentialsData] = await Promise.all([
+        const [templatesData, projectsData, inventoriesData, credentialsData, packsData] = await Promise.all([
           api.getTemplates(),
           api.getProjects(),
           api.getInventories(),
-          api.getCredentials()
+          api.getCredentials(),
+          api.getExecutionPacks()
         ]);
         // Handle paginated responses
         setTemplates(templatesData.items || templatesData || []);
         setProjects(projectsData.items || projectsData || []);
         setInventories(inventoriesData.items || inventoriesData || []);
         setCredentials(credentialsData || []);
+        setExecutionPacks(packsData || []);
       } catch (err) {
         console.error('Failed to load data', err);
       } finally {
@@ -319,6 +322,18 @@ const TemplatesPage = () => {
                 {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Execution Pack</label>
+            <p className="text-xs text-gray-500 mb-1">The self-contained Python+Ansible runtime this job runs in (pushed to the host). Default = the standard pack.</p>
+            <select
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
+              value={formData.execution_pack_id || ''}
+              onChange={e => setFormData({ ...formData, execution_pack_id: e.target.value ? Number(e.target.value) : undefined })}
+            >
+              <option value="">Default</option>
+              {executionPacks.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Inline Playbook (YAML)</label>

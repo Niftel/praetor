@@ -152,6 +152,11 @@ export const api = {
     updateCredential: (id: number, data: any) => fetchWithAuth(`/credentials/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteCredential: (id: number) => fetchWithAuth(`/credentials/${id}`, { method: 'DELETE' }),
     getCredentialTypes: () => fetchWithAuth('/credential-types').then(r => r.json()),
+
+    // Execution Packs — the self-contained runtimes pushed to hosts.
+    getExecutionPacks: () => fetchWithAuth('/execution-packs').then(r => r.json()),
+    createExecutionPack: (data: any) => fetchWithAuth('/execution-packs', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteExecutionPack: (id: number) => fetchWithAuth(`/execution-packs/${id}`, { method: 'DELETE' }),
     // Praetor's automation SSH public key — add to a host's authorized_keys to
     // manage it with no per-host credential.
     getAutomationKey: () => fetchWithAuth('/automation-key').then(r => r.json()),
