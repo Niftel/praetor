@@ -61,6 +61,10 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		r.Use(modelAuth.AuthMiddleware)
 		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
 
+		// Praetor's automation SSH public key — add it to a host's authorized_keys
+		// to manage that host with no per-host credential.
+		r.Get("/automation-key", handlers.AutomationKey)
+
 		// Activity stream (audit log) — superuser/auditor only
 		r.Get("/activity-stream", content.ListActivityStream)
 

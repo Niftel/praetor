@@ -152,6 +152,9 @@ export const api = {
     updateCredential: (id: number, data: any) => fetchWithAuth(`/credentials/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteCredential: (id: number) => fetchWithAuth(`/credentials/${id}`, { method: 'DELETE' }),
     getCredentialTypes: () => fetchWithAuth('/credential-types').then(r => r.json()),
+    // Praetor's automation SSH public key — add to a host's authorized_keys to
+    // manage it with no per-host credential.
+    getAutomationKey: () => fetchWithAuth('/automation-key').then(r => r.json()),
 
     // Schedules
     getSchedules: () => fetchWithAuth('/schedules').then(r => r.json()),
