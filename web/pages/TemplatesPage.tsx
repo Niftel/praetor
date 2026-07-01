@@ -321,6 +321,17 @@ const TemplatesPage = () => {
             </div>
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700">Inline Playbook (YAML)</label>
+            <p className="text-xs text-gray-500 mb-1">Paste a playbook to run directly — use this when you have no project / source control. If set, it overrides the Project and Playbook path above.</p>
+            <textarea
+              rows={8}
+              placeholder={'- hosts: all\n  gather_facts: false\n  tasks:\n    - name: Ping\n      ansible.builtin.ping:'}
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2 font-mono text-sm"
+              value={formData.playbook_content || ''}
+              onChange={e => setFormData({ ...formData, playbook_content: e.target.value || undefined })}
+            />
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700">Default Variables (JSON)</label>
             <textarea
               rows={4}
