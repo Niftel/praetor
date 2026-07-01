@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +27,8 @@ type executionPack struct {
 	Name        string    `json:"name" db:"name"`
 	Description *string   `json:"description,omitempty" db:"description"`
 	Spec        *string   `json:"spec,omitempty" db:"spec"`
+	Status      string    `json:"status" db:"status"`
+	BuildLog    *string   `json:"build_log,omitempty" db:"build_log"`
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 }
 
@@ -40,7 +43,7 @@ func (rs *ExecutionPacksResource) Routes() chi.Router {
 func (rs *ExecutionPacksResource) List(w http.ResponseWriter, r *http.Request) {
 	packs := []executionPack{}
 	if err := rs.DB.SelectContext(r.Context(), &packs,
-		`SELECT id, name, description, spec, created_at FROM execution_packs ORDER BY name`); err != nil {
+		`SELECT id, name, description, spec, status, build_log, created_at FROM execution_packs ORDER BY name`); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -53,11 +56,17 @@ func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request)
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
+	// A pack with a spec is queued for the packbuilder to build; one registered
+	// without a spec (a pre-built artifact) is immediately usable.
+	status := "ready"
+	if in.Spec != nil && strings.TrimSpace(*in.Spec) != "" {
+		status = "pending"
+	}
 	var created executionPack
 	if err := rs.DB.QueryRowxContext(r.Context(),
-		`INSERT INTO execution_packs (name, description, spec) VALUES ($1, $2, $3)
-		 RETURNING id, name, description, spec, created_at`,
-		in.Name, in.Description, in.Spec).StructScan(&created); err != nil {
+		`INSERT INTO execution_packs (name, description, spec, status) VALUES ($1, $2, $3, $4)
+		 RETURNING id, name, description, spec, status, build_log, created_at`,
+		in.Name, in.Description, in.Spec, status).StructScan(&created); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

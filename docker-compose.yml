@@ -234,6 +234,24 @@ services:
     networks:
       - praetor-net
 
+  # Builds Execution Packs from their YAML spec (docker build via the mounted
+  # socket) and writes the tarball into ./build/runtime, shared with the executor.
+  packbuilder:
+    build:
+      context: .
+      dockerfile: build/package/Dockerfile.packbuilder
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./build:/build:rw
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - praetor-net
+    restart: unless-stopped
+
   ui:
     build:
       context: web

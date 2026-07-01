@@ -1,0 +1,1 @@
+ALTER TABLE execution_packs DROP COLUMN IF EXISTS status, DROP COLUMN IF EXISTS build_log;
