@@ -13,12 +13,20 @@ import (
 
 // BootstrapRunner uses Ansible to deploy the Host Runner to targets
 type BootstrapRunner struct {
-	RunnerPayloadPath string
+	RunnerPayloadPath  string
+	RuntimePayloadPath string
 }
 
 func NewBootstrapRunner() *BootstrapRunner {
+	runtimePayload := os.Getenv("RUNTIME_PAYLOAD_PATH")
+	if runtimePayload == "" {
+		// The self-contained Ansible runtime bundle the executor pushes onto
+		// glibc target hosts. Arch-matched to the host-runner binary.
+		runtimePayload = "/tmp/build/runtime/ansible-runtime-linux-arm64.tar.gz"
+	}
 	return &BootstrapRunner{
-		RunnerPayloadPath: "/tmp/build/linux/praetor-host-runner",
+		RunnerPayloadPath:  "/tmp/build/linux/praetor-host-runner",
+		RuntimePayloadPath: runtimePayload,
 	}
 }
 
@@ -111,6 +119,31 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
         dest: /usr/local/bin/praetor-host-runner
         mode: '0755'
 
+    - name: Detect existing runtime and libc
+      # "present" if the self-contained runtime is already extracted, else the
+      # host's libc. The glibc runtime bundle can't run on musl (Alpine).
+      shell: |
+        if [ -x /opt/praetor/runtime/bin/ansible-playbook ]; then echo present; exit 0; fi
+        if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then echo musl; else echo glibc; fi
+      register: praetor_rt
+      changed_when: false
+
+    - name: Ensure /opt/praetor exists
+      file:
+        path: /opt/praetor
+        state: directory
+        mode: '0755'
+      when: praetor_rt.stdout == "glibc"
+
+    - name: Push the self-contained Ansible runtime
+      # The execution environment (Python + Ansible) is pushed onto the host so it
+      # needs nothing pre-installed. The host-runner extracts and runs it. Skipped
+      # when already present or on musl (no glibc bundle for it yet).
+      copy:
+        src: %s
+        dest: /opt/praetor/ansible-runtime.tar.gz
+      when: praetor_rt.stdout == "glibc"
+
     - name: Ensure Ansible plugin directory exists
       file:
         path: /usr/local/share/praetor/plugins/callback
@@ -170,7 +203,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
           >> /var/lib/praetor/jobs/%s/runner.log 2>&1 &
       async: 10
       poll: 0
-`, targetHosts, req.ExecutionRunID, r.RunnerPayloadPath, manifestPath, req.ExecutionRunID, sshKeyPath, req.ExecutionRunID, req.ExecutionRunID, req.ExecutionRunID, callbackURL, req.ExecutionRunID, req.ExecutionRunID)
+`, targetHosts, req.ExecutionRunID, r.RunnerPayloadPath, r.RuntimePayloadPath, manifestPath, req.ExecutionRunID, sshKeyPath, req.ExecutionRunID, req.ExecutionRunID, req.ExecutionRunID, callbackURL, req.ExecutionRunID, req.ExecutionRunID)
 
 	playbookPath := fmt.Sprintf("/tmp/bootstrap-%s.yml", req.ExecutionRunID)
 	if err := os.WriteFile(playbookPath, []byte(bootstrapPlaybook), 0644); err != nil {

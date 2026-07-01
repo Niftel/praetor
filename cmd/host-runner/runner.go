@@ -189,8 +189,19 @@ func (r *Runner) Execute() error {
 	}
 	playArgs = append(playArgs, playbookPath)
 
-	cmd := exec.Command("ansible-playbook", playArgs...)
+	// Use Praetor's self-contained runtime (pushed onto the host by the executor)
+	// so the target needs no pre-installed Ansible/Python. Falls back to a system
+	// ansible-playbook if no runtime is present.
+	ansiblePlaybook, ansibleInterpreter := resolveAnsible()
+
+	cmd := exec.Command(ansiblePlaybook, playArgs...)
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
+	// Point Ansible at the bundled interpreter explicitly (no system symlinks —
+	// the runtime stays entirely under /opt/praetor). This makes module execution
+	// on the runner host use the bundled Python.
+	if ansibleInterpreter != "" {
+		cmd.Env = append(cmd.Env, "ANSIBLE_PYTHON_INTERPRETER="+ansibleInterpreter)
+	}
 	cmd.Env = append(cmd.Env, checkpointEnv(r.JobDir)...)
 	cmd.Env = append(cmd.Env, galaxyPathEnv...) // point the play at the cached collections/roles
 	// A fresh run is launched by the bootstrap, whose nohup shell exports the

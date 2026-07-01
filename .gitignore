@@ -18,6 +18,9 @@ web/.env.local
 /praetor-host-runner-linux
 /build/praetor-host-runner
 /build/linux/
+# Self-contained Ansible runtime bundle — a large build artifact produced by
+# `make ansible-runtime`, not tracked in git.
+/build/runtime/
 /bin/
 
 # Logs
