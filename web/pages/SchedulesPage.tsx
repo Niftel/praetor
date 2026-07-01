@@ -1,177 +1,287 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Schedule, Template } from '../types';
+import { Schedule, Template, Workflow, EventTrigger, WebhookTrigger } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Calendar, Plus, Power, Loader, Trash2 } from 'lucide-react';
+import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy } from 'lucide-react';
+
+type TargetType = 'job' | 'workflow';
+
+const EVENT_LABEL: Record<string, string> = {
+  job_succeeded: 'a job succeeds',
+  job_failed: 'a job fails',
+  job_finished: 'a job finishes (success or fail)',
+};
 
 const SchedulesPage = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [eventTriggers, setEventTriggers] = useState<EventTrigger[]>([]);
+  const [webhookTriggers, setWebhookTriggers] = useState<WebhookTrigger[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ name: '', unified_job_template_id: 0, rrule: 'FREQ=DAILY;INTERVAL=1' });
+
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [sched, setSched] = useState({ name: '', targetType: 'job' as TargetType, target: 0, rrule: 'FREQ=DAILY;INTERVAL=1' });
+
+  const [showEvent, setShowEvent] = useState(false);
+  const [evt, setEvt] = useState({ name: '', event_type: 'job_finished', source: 0, targetType: 'workflow' as TargetType, target: 0 });
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [schedulesData, templatesData] = await Promise.all([
-        api.getSchedules(),
-        api.getTemplates()
+      const [s, t, wf, et, wh] = await Promise.all([
+        api.getSchedules().catch(() => []),
+        api.getTemplates().catch(() => ({})),
+        api.getWorkflows().catch(() => []),
+        api.getEventTriggers().catch(() => []),
+        api.getWebhookTriggers().catch(() => []),
       ]);
-      setSchedules(schedulesData || []);
-      setTemplates(templatesData?.items || templatesData || []);
+      setSchedules(s || []);
+      setTemplates(t?.items || t || []);
+      setWorkflows(wf || []);
+      setEventTriggers(et || []);
+      setWebhookTriggers(wh || []);
     } catch (err) {
-      console.error('Failed to load schedules', err);
+      console.error('Failed to load triggers', err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
+  const templateUjt = (t: Template) => (t as any).unified_job_template_id || t.id;
+  const templateNameByUjt = (ujt?: number | null) => templates.find(t => templateUjt(t) === ujt)?.name || (ujt ? `template ${ujt}` : '—');
+  const workflowName = (id?: number | null) => workflows.find(w => w.id === id)?.name || (id ? `workflow ${id}` : '—');
+
+  const scheduleTarget = (s: Schedule) =>
+    s.workflow_template_id ? `Workflow: ${workflowName(s.workflow_template_id)}` : `Template: ${templateNameByUjt(s.unified_job_template_id)}`;
+
+  // --- Schedules ---
   const toggleSchedule = async (id: number) => {
-    const schedule = schedules.find(s => s.id === id);
-    if (!schedule) return;
+    const s = schedules.find(x => x.id === id);
+    if (!s) return;
     try {
-      await api.updateSchedule(id, { ...schedule, enabled: !schedule.enabled });
-      setSchedules(schedules.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s));
-    } catch (err) {
-      console.error('Failed to toggle schedule', err);
-    }
+      await api.updateSchedule(id, { ...s, enabled: !s.enabled });
+      setSchedules(schedules.map(x => x.id === id ? { ...x, enabled: !x.enabled } : x));
+    } catch (err) { console.error(err); }
   };
-
-  const handleCreate = async () => {
-    if (!formData.name || !formData.unified_job_template_id) return;
+  const createSchedule = async () => {
+    if (!sched.name || !sched.target) return;
+    const body: any = { name: sched.name, rrule: sched.rrule };
+    if (sched.targetType === 'workflow') body.workflow_template_id = sched.target;
+    else body.unified_job_template_id = sched.target;
     try {
-      await api.createSchedule(formData);
-      setShowModal(false);
-      setFormData({ name: '', unified_job_template_id: 0, rrule: 'FREQ=DAILY;INTERVAL=1' });
+      await api.createSchedule(body);
+      setShowSchedule(false);
+      setSched({ name: '', targetType: 'job', target: 0, rrule: 'FREQ=DAILY;INTERVAL=1' });
       fetchData();
-    } catch (err) {
-      console.error('Failed to create schedule', err);
-      alert('Failed to create schedule');
-    }
+    } catch (err) { console.error(err); alert('Failed to create schedule'); }
   };
-
-  const handleDelete = async (id: number) => {
+  const deleteSchedule = async (id: number) => {
     if (!confirm('Delete this schedule?')) return;
-    try {
-      await api.deleteSchedule(id);
-      fetchData();
-    } catch (err) {
-      console.error('Failed to delete schedule', err);
-    }
+    try { await api.deleteSchedule(id); fetchData(); } catch (err) { console.error(err); }
   };
 
-  const getTemplateName = (templateId: number) => {
-    const template = templates.find(t => t.id === templateId || t.unified_job_template_id === templateId);
-    return template?.name || 'Unknown Template';
+  // --- Event triggers ---
+  const createEventTrigger = async () => {
+    if (!evt.name || !evt.target) return;
+    // Org is derived from the target so there's no separate org picker.
+    const org = evt.targetType === 'workflow'
+      ? workflows.find(w => w.id === evt.target)?.organization_id
+      : (templates.find(t => templateUjt(t) === evt.target) as any)?.organization_id;
+    const body: any = { name: evt.name, event_type: evt.event_type, organization_id: org || 1 };
+    if (evt.source) body.source_ujt_id = evt.source;
+    if (evt.targetType === 'workflow') body.workflow_template_id = evt.target;
+    else body.unified_job_template_id = evt.target;
+    try {
+      await api.createEventTrigger(body);
+      setShowEvent(false);
+      setEvt({ name: '', event_type: 'job_finished', source: 0, targetType: 'workflow', target: 0 });
+      fetchData();
+    } catch (err) { console.error(err); alert('Failed to create event trigger'); }
   };
+  const deleteEventTrigger = async (id: number) => {
+    if (!confirm('Delete this event trigger?')) return;
+    try { await api.deleteEventTrigger(id); fetchData(); } catch (err) { console.error(err); }
+  };
+  const eventTriggerTarget = (t: EventTrigger) =>
+    t.workflow_template_id ? `Workflow: ${workflowName(t.workflow_template_id)}` : `Template: ${templateNameByUjt(t.unified_job_template_id)}`;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader className="animate-spin text-brand-600" size={32} />
-      </div>
-    );
+    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-brand-600" size={32} /></div>;
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Schedules</h1>
-        <Button icon={<Plus size={16} />} onClick={() => setShowModal(true)}>Create Schedule</Button>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Schedules &amp; Triggers</h1>
+        <p className="text-sm text-gray-500 mt-1">Launch a workflow or job template on a time schedule, when a job finishes, or from an inbound webhook.</p>
       </div>
 
-      <Card>
-        <div className="divide-y divide-gray-100">
-          {schedules.map(schedule => (
-            <div key={schedule.id} className="p-6 flex items-center justify-between hover:bg-gray-50 transition-colors">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
-                  <Calendar size={24} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900">{schedule.name}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-sm text-gray-500">Template: <span className="font-medium text-gray-700">{getTemplateName(schedule.unified_job_template_id)}</span></span>
-                    <span className="text-gray-300">•</span>
-                    <span className="text-sm text-gray-500">Next Run: {schedule.next_run ? new Date(schedule.next_run).toLocaleString() : 'Not scheduled'}</span>
-                  </div>
-                  <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-2 inline-block text-gray-600">{schedule.rrule}</code>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <Badge variant={schedule.enabled ? 'success' : 'neutral'}>
-                  {schedule.enabled ? 'Active' : 'Disabled'}
-                </Badge>
-                <button
-                  onClick={() => toggleSchedule(schedule.id)}
-                  className={`p-2 rounded-full transition-colors ${schedule.enabled ? 'text-brand-600 hover:bg-brand-50' : 'text-gray-400 hover:bg-gray-100'}`}
-                  title="Toggle Schedule"
-                >
-                  <Power size={20} />
-                </button>
-                <button
-                  onClick={() => handleDelete(schedule.id)}
-                  className="p-2 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50"
-                  title="Delete"
-                >
-                  <Trash2 size={20} />
-                </button>
-              </div>
-            </div>
-          ))}
-          {schedules.length === 0 && (
-            <p className="p-6 text-gray-500 text-center">No schedules found. Click "Create Schedule" to add one.</p>
-          )}
+      {/* Time schedules */}
+      <section>
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2"><Calendar size={18} className="text-purple-600" /> Schedules <span className="text-sm font-normal text-gray-400">(time)</span></h2>
+          <Button icon={<Plus size={16} />} onClick={() => setShowSchedule(true)}>New Schedule</Button>
         </div>
-      </Card>
+        <Card>
+          <div className="divide-y divide-gray-100">
+            {schedules.map(s => (
+              <div key={s.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
+                <div>
+                  <h3 className="text-base font-medium text-gray-900">{s.name}</h3>
+                  <div className="flex items-center gap-2 mt-1 text-sm text-gray-500">
+                    <span>{scheduleTarget(s)}</span>
+                    <span className="text-gray-300">•</span>
+                    <span>Next: {s.next_run ? new Date(s.next_run).toLocaleString() : '—'}</span>
+                  </div>
+                  <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-2 inline-block text-gray-600">{s.rrule}</code>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant={s.enabled ? 'success' : 'neutral'}>{s.enabled ? 'Active' : 'Disabled'}</Badge>
+                  <button onClick={() => toggleSchedule(s.id)} className={`p-2 rounded-full ${s.enabled ? 'text-brand-600 hover:bg-brand-50' : 'text-gray-400 hover:bg-gray-100'}`} title="Toggle"><Power size={18} /></button>
+                  <button onClick={() => deleteSchedule(s.id)} className="p-2 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50" title="Delete"><Trash2 size={18} /></button>
+                </div>
+              </div>
+            ))}
+            {schedules.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No schedules yet.</p>}
+          </div>
+        </Card>
+      </section>
 
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Create Schedule">
+      {/* Event triggers */}
+      <section>
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2"><Zap size={18} className="text-amber-500" /> Event triggers <span className="text-sm font-normal text-gray-400">(on job outcome)</span></h2>
+          <Button icon={<Plus size={16} />} onClick={() => setShowEvent(true)}>New Event Trigger</Button>
+        </div>
+        <Card>
+          <div className="divide-y divide-gray-100">
+            {eventTriggers.map(t => (
+              <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
+                <div>
+                  <h3 className="text-base font-medium text-gray-900">{t.name}</h3>
+                  <div className="text-sm text-gray-500 mt-1">
+                    When <span className="font-medium text-gray-700">{EVENT_LABEL[t.event_type] || t.event_type}</span>
+                    {t.source_ujt_id ? <> for <span className="font-medium text-gray-700">{templateNameByUjt(t.source_ujt_id)}</span></> : <> (any template)</>}
+                    {' '}→ launch <span className="font-medium text-gray-700">{eventTriggerTarget(t)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant={t.enabled ? 'success' : 'neutral'}>{t.enabled ? 'Active' : 'Disabled'}</Badge>
+                  <button onClick={() => deleteEventTrigger(t.id)} className="p-2 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50" title="Delete"><Trash2 size={18} /></button>
+                </div>
+              </div>
+            ))}
+            {eventTriggers.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No event triggers yet. Chain automation on job outcomes.</p>}
+          </div>
+        </Card>
+      </section>
+
+      {/* Webhook triggers (read-only surface) */}
+      <section>
+        <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-3"><Webhook size={18} className="text-cyan-600" /> Webhook triggers <span className="text-sm font-normal text-gray-400">(inbound)</span></h2>
+        <Card>
+          <div className="divide-y divide-gray-100">
+            {webhookTriggers.map((t, i) => (
+              <div key={i} className="p-4 flex items-center justify-between hover:bg-gray-50">
+                <div className="min-w-0">
+                  <h3 className="text-base font-medium text-gray-900">{t.name} <span className="text-xs text-gray-400">({t.kind === 'workflow' ? 'workflow' : 'template'} · {t.service})</span></h3>
+                  <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-1 inline-block text-gray-600 truncate max-w-full">POST {t.url}</code>
+                </div>
+                <button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}${t.url}`)} className="p-2 rounded-full text-gray-400 hover:text-brand-600 hover:bg-brand-50 shrink-0" title="Copy URL"><Copy size={18} /></button>
+              </div>
+            ))}
+            {webhookTriggers.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No webhook triggers. Enable one on a workflow or job template to have a remote event launch it.</p>}
+          </div>
+        </Card>
+      </section>
+
+      {/* Create schedule modal */}
+      <Modal isOpen={showSchedule} onClose={() => setShowSchedule(false)} title="New Schedule">
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md p-2"
-              value={formData.name}
-              onChange={e => setFormData({ ...formData, name: e.target.value })}
-              placeholder="Daily Backup"
-            />
+            <input className="w-full border border-gray-300 rounded-md p-2" value={sched.name} onChange={e => setSched({ ...sched, name: e.target.value })} placeholder="Nightly deploy" />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Template</label>
-            <select
-              className="w-full border border-gray-300 rounded-md p-2"
-              value={formData.unified_job_template_id}
-              onChange={e => setFormData({ ...formData, unified_job_template_id: Number(e.target.value) })}
-            >
-              <option value={0}>Select Template</option>
-              {templates.map(t => (
-                <option key={t.id} value={t.unified_job_template_id || t.id}>{t.name}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Launch</label>
+              <select className="w-full border border-gray-300 rounded-md p-2" value={sched.targetType} onChange={e => setSched({ ...sched, targetType: e.target.value as TargetType, target: 0 })}>
+                <option value="job">Job template</option>
+                <option value="workflow">Workflow</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{sched.targetType === 'workflow' ? 'Workflow' : 'Template'}</label>
+              <select className="w-full border border-gray-300 rounded-md p-2" value={sched.target} onChange={e => setSched({ ...sched, target: Number(e.target.value) })}>
+                <option value={0}>Select…</option>
+                {sched.targetType === 'workflow'
+                  ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
+                  : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+              </select>
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">RRule</label>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md p-2 font-mono text-sm"
-              value={formData.rrule}
-              onChange={e => setFormData({ ...formData, rrule: e.target.value })}
-              placeholder="FREQ=DAILY;INTERVAL=1"
-            />
+            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-sm" value={sched.rrule} onChange={e => setSched({ ...sched, rrule: e.target.value })} placeholder="FREQ=DAILY;INTERVAL=1" />
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleCreate}>Create</Button>
+            <Button variant="secondary" onClick={() => setShowSchedule(false)}>Cancel</Button>
+            <Button onClick={createSchedule}>Create</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Create event trigger modal */}
+      <Modal isOpen={showEvent} onClose={() => setShowEvent(false)} title="New Event Trigger">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input className="w-full border border-gray-300 rounded-md p-2" value={evt.name} onChange={e => setEvt({ ...evt, name: e.target.value })} placeholder="On deploy failure, run rollback" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">When</label>
+              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.event_type} onChange={e => setEvt({ ...evt, event_type: e.target.value })}>
+                <option value="job_finished">A job finishes</option>
+                <option value="job_succeeded">A job succeeds</option>
+                <option value="job_failed">A job fails</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">For template (optional)</label>
+              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.source} onChange={e => setEvt({ ...evt, source: Number(e.target.value) })}>
+                <option value={0}>Any template</option>
+                {templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Then launch</label>
+              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.targetType} onChange={e => setEvt({ ...evt, targetType: e.target.value as TargetType, target: 0 })}>
+                <option value="workflow">Workflow</option>
+                <option value="job">Job template</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{evt.targetType === 'workflow' ? 'Workflow' : 'Template'}</label>
+              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.target} onChange={e => setEvt({ ...evt, target: Number(e.target.value) })}>
+                <option value={0}>Select…</option>
+                {evt.targetType === 'workflow'
+                  ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
+                  : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowEvent(false)}>Cancel</Button>
+            <Button onClick={createEventTrigger}>Create</Button>
           </div>
         </div>
       </Modal>

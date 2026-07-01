@@ -175,13 +175,34 @@ export interface Schedule {
   id: number;
   name: string;
   description?: string;
-  unified_job_template_id: number;
+  unified_job_template_id?: number | null;
+  workflow_template_id?: number | null;
   rrule: string;
   next_run: string;
   enabled: boolean;
   extra_vars?: any;
   created_at: string;
   modified_at: string;
+}
+
+export interface EventTrigger {
+  id: number;
+  organization_id: number;
+  name: string;
+  enabled: boolean;
+  event_type: 'job_succeeded' | 'job_failed' | 'job_finished';
+  source_ujt_id?: number | null;
+  workflow_template_id?: number | null;
+  unified_job_template_id?: number | null;
+  created_at: string;
+}
+
+export interface WebhookTrigger {
+  kind: 'workflow' | 'job_template';
+  id: number;
+  name: string;
+  service: string;
+  url: string;
 }
 
 // RBAC models

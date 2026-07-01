@@ -98,6 +98,11 @@ export const api = {
     getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
     approveWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/approve`, { method: 'POST' }),
     denyWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/deny`, { method: 'POST' }),
+    // Triggers: event triggers (job outcome -> launch) + inbound webhook surface.
+    getEventTriggers: () => fetchWithAuth('/triggers/event').then(r => r.json()),
+    createEventTrigger: (data: any) => fetchWithAuth('/triggers/event', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteEventTrigger: (id: number) => fetchWithAuth(`/triggers/event/${id}`, { method: 'DELETE' }),
+    getWebhookTriggers: () => fetchWithAuth('/triggers/webhook').then(r => r.json()),
     // Release a waiting webhook_in node via its (public, token-bearing) callback URL.
     releaseWorkflowNode: (callbackUrl: string, fail?: boolean) =>
       fetch(`${callbackUrl}${fail ? '&result=failed' : ''}`, {
