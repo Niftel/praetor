@@ -301,6 +301,22 @@ func (s *Scheduler) processPendingJobs() error {
 			GalaxyServers:   s.resolveGalaxyServers(ctx, template.OrganizationID),
 		}
 
+		// Machine credential: resolve the template's SSH credential (if set) into
+		// the injector env/files the executor applies to the bootstrap connection.
+		// The Machine credential type's injectors render ANSIBLE_REMOTE_USER /
+		// ANSIBLE_PASSWORD (env) and ANSIBLE_PRIVATE_KEY_FILE (file). This is what
+		// lets Praetor authenticate to real hosts that don't already trust the
+		// platform's shared key.
+		if template.CredentialID != nil {
+			env, files, cerr := resolveCredentialInjectors(ctx, tx, *template.CredentialID)
+			if cerr != nil {
+				log.Printf("job %d: machine credential %d resolve failed: %v", job.ID, *template.CredentialID, cerr)
+			} else {
+				manifest.CredentialEnv = env
+				manifest.CredentialFiles = files
+			}
+		}
+
 		req := &events.ExecutionRequest{
 			ExecutionRunID: runID,
 			UnifiedJobID:   job.ID,

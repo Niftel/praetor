@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/praetordev/praetor/pkg/events"
 )
@@ -56,6 +57,29 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		targetHosts = req.JobManifest.RunnerHost
 	} else if req.JobManifest.Inventory == "" {
 		targetHosts = "localhost"
+	}
+
+	// SSH key used to reach the target: default to the platform's shared key, but
+	// if the job carries a machine credential (its injector renders the private
+	// key into CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"]), write that out and
+	// use it instead — both for this bootstrap connection and, copied to the
+	// target, for the host-runner's downstream plays. This is what lets a job
+	// authenticate to real hosts that don't trust the shared platform key.
+	sshKeyPath := "/tmp/keys/id_rsa"
+	if content := req.JobManifest.CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"]; content != "" {
+		// SSH rejects a private key file that does not end in a newline with the
+		// cryptic "error in libcrypto" — an easy mistake when a key is pasted into
+		// the UI without a trailing newline. Normalise it so pasted keys just work.
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		credKeyPath := fmt.Sprintf("/tmp/cred-key-%s", req.ExecutionRunID)
+		if err := os.WriteFile(credKeyPath, []byte(content), 0o600); err != nil {
+			return fmt.Errorf("failed to write credential key: %w", err)
+		}
+		defer os.Remove(credKeyPath)
+		sshKeyPath = credKeyPath
+		log.Printf("BootstrapRunner: using machine-credential SSH key for run %s", req.ExecutionRunID)
 	}
 
 	bootstrapPlaybook := fmt.Sprintf(`
@@ -119,7 +143,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 
     - name: Copy SSH Key
       copy:
-        src: /tmp/keys/id_rsa
+        src: %s
         dest: /var/lib/praetor/jobs/%s/id_rsa
         mode: '0600'
 
@@ -135,7 +159,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
           >> /var/lib/praetor/jobs/%s/runner.log 2>&1 &
       async: 10
       poll: 0
-`, targetHosts, req.ExecutionRunID, r.RunnerPayloadPath, manifestPath, req.ExecutionRunID, req.ExecutionRunID, req.ExecutionRunID, req.ExecutionRunID, os.Getenv("INGESTION_URL"), req.ExecutionRunID, req.ExecutionRunID)
+`, targetHosts, req.ExecutionRunID, r.RunnerPayloadPath, manifestPath, req.ExecutionRunID, sshKeyPath, req.ExecutionRunID, req.ExecutionRunID, req.ExecutionRunID, os.Getenv("INGESTION_URL"), req.ExecutionRunID, req.ExecutionRunID)
 
 	playbookPath := fmt.Sprintf("/tmp/bootstrap-%s.yml", req.ExecutionRunID)
 	if err := os.WriteFile(playbookPath, []byte(bootstrapPlaybook), 0644); err != nil {
@@ -152,7 +176,17 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 
 	cmd := exec.Command("ansible-playbook", "-i", inventoryPath, playbookPath)
 	cmd.Env = os.Environ()
-	// cmd.Env = append(cmd.Env, "ANSIBLE_HOST_KEY_CHECKING=False") // Handled in inventory usually
+	// Authenticate this bootstrap connection with the chosen SSH key (shared or
+	// machine-credential) and any machine-credential env the injector produced
+	// (ANSIBLE_REMOTE_USER / ANSIBLE_PASSWORD). ANSIBLE_REMOTE_USER is only a
+	// default — a per-host ansible_user in the inventory still takes precedence.
+	cmd.Env = append(cmd.Env, "ANSIBLE_PRIVATE_KEY_FILE="+sshKeyPath)
+	cmd.Env = append(cmd.Env, "ANSIBLE_HOST_KEY_CHECKING=False")
+	for k, v := range req.JobManifest.CredentialEnv {
+		if v != "" {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
 
 	output, err := cmd.CombinedOutput()
 	log.Printf("Bootstrap Output:\n%s", string(output))
