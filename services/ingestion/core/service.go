@@ -139,7 +139,9 @@ func (s *IngestionService) UpsertInventory(ctx context.Context, inventoryID int6
 				continue
 			}
 		} else {
-			_, _ = s.DB.ExecContext(ctx, `UPDATE hosts SET variables=$2::jsonb, modified_at=now() WHERE id=$1`, id, []byte(vars))
+			if _, err := s.DB.ExecContext(ctx, `UPDATE hosts SET variables=$2::jsonb, modified_at=now() WHERE id=$1`, id, []byte(vars)); err != nil {
+				log.Printf("sync: update host %q vars failed: %v", h, err)
+			}
 		}
 		hostID[h] = id
 	}
@@ -156,13 +158,17 @@ func (s *IngestionService) UpsertInventory(ctx context.Context, inventoryID int6
 		}
 		for _, h := range hosts {
 			if hid, ok := hostID[h]; ok {
-				_, _ = s.DB.ExecContext(ctx,
-					`INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hid, gid)
+				if _, err := s.DB.ExecContext(ctx,
+					`INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hid, gid); err != nil {
+					log.Printf("sync: link host %q to group %q failed: %v", h, gname, err)
+				}
 			}
 		}
 	}
 
-	_, _ = s.DB.ExecContext(ctx, `UPDATE inventory_sources SET last_synced_at=now() WHERE inventory_id=$1`, inventoryID)
+	if _, err := s.DB.ExecContext(ctx, `UPDATE inventory_sources SET last_synced_at=now() WHERE inventory_id=$1`, inventoryID); err != nil {
+		log.Printf("sync: mark inventory %d synced failed: %v", inventoryID, err)
+	}
 	log.Printf("sync: inventory %d upserted %d host(s), %d group(s)", inventoryID, len(hostID), len(groups))
 	return nil
 }

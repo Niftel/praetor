@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,12 +11,83 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// SSH host-key verification uses trust-on-first-use: the first time we connect to a
+// host we record its key in the known_hosts file and trust it; on later connects a
+// changed key is refused (possible MITM). Persist SSH_KNOWN_HOSTS on a volume to
+// keep trust across executor restarts.
+var (
+	hostKeyOnce sync.Once
+	hostKeyCB   ssh.HostKeyCallback
+	hostKeyMu   sync.Mutex
+	knownHosts  ssh.HostKeyCallback
+	knownPath   string
+)
+
+func getHostKeyCallback() ssh.HostKeyCallback {
+	hostKeyOnce.Do(func() {
+		knownPath = os.Getenv("SSH_KNOWN_HOSTS")
+		if knownPath == "" {
+			// Default under $HOME/.ssh, which the runtime user owns (the executor
+			// drops to a non-root user via gosu); /var/lib/praetor is root-owned.
+			home := os.Getenv("HOME")
+			if home == "" {
+				home = "/var/lib/praetor"
+			}
+			knownPath = filepath.Join(home, ".ssh", "known_hosts")
+		}
+		_ = os.MkdirAll(filepath.Dir(knownPath), 0o700)
+		if f, err := os.OpenFile(knownPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			_ = f.Close()
+		} else {
+			log.Printf("BootstrapRunner: cannot open known_hosts %s: %v", knownPath, err)
+		}
+		knownHosts, _ = knownhosts.New(knownPath)
+		hostKeyCB = tofuHostKey
+	})
+	return hostKeyCB
+}
+
+// tofuHostKey verifies against known_hosts, trusts an unknown host on first use,
+// and refuses a host whose key changed.
+func tofuHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
+	hostKeyMu.Lock()
+	defer hostKeyMu.Unlock()
+	if knownHosts != nil {
+		err := knownHosts(hostname, remote, key)
+		if err == nil {
+			return nil
+		}
+		var keyErr *knownhosts.KeyError
+		if errors.As(err, &keyErr) {
+			if len(keyErr.Want) > 0 {
+				return fmt.Errorf("ssh host key changed for %s — refusing (possible MITM); remove the stale entry from %s to re-trust", hostname, knownPath)
+			}
+			// empty Want == host not yet known: fall through to trust-on-first-use.
+		} else {
+			return err
+		}
+	}
+	line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
+	if f, err := os.OpenFile(knownPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+		_, _ = fmt.Fprintln(f, line)
+		_ = f.Close()
+	} else {
+		log.Printf("BootstrapRunner: failed to record host key for %s in %s: %v", hostname, knownPath, err)
+	}
+	knownHosts, _ = knownhosts.New(knownPath) // reload so a later key change is detected
+	log.Printf("BootstrapRunner: trusted new host key for %s (trust-on-first-use)", hostname)
+	return nil
+}
 
 // BootstrapRunner deploys the host-runner (and the self-contained execution
 // environment) to a target host directly over SSH — no Ansible and no Python are
@@ -207,7 +279,7 @@ func dialSSH(addr, port, user, keyPath string) (*ssh.Client, error) {
 	cfg := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: getHostKeyCallback(),
 		Timeout:         30 * time.Second,
 	}
 	return ssh.Dial("tcp", net.JoinHostPort(addr, port), cfg)

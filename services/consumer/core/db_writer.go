@@ -97,8 +97,9 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 		newState = "running"
 		newStatus = "running"
 	case "JOB_COMPLETED":
-		// Check successful/failed based on event data or convention?
-		// For MVP assuming success if completed, but ideally we check rc.
+		// JOB_COMPLETED means success: the host-runner inspects ansible-playbook's
+		// exit code and emits JOB_FAILED on any non-zero rc, JOB_COMPLETED only on
+		// rc 0 (cmd/host-runner/runner.go). So no rc re-check is needed here.
 		newState = "successful"
 		newStatus = "successful"
 		finished = true

@@ -165,6 +165,9 @@ services:
       # deployments/, so jobs bootstrap with task-level resume out of the box
       # (no manual staging into build/). The bootstrap copies it from here.
       - ./deployments/host-runner/plugins:/tmp/plugins:ro
+      # Persist SSH known_hosts (trust-on-first-use) across executor restarts.
+      # Mounted at the runtime user's ~/.ssh so the non-root process can write it.
+      - praetor-ssh:/home/praetor/.ssh
     depends_on:
       nats:
         condition: service_started
@@ -269,3 +272,4 @@ networks:
 
 volumes:
   nats-data:
+  praetor-ssh:

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -38,9 +39,10 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	// Handlers
 	content := handlers.NewContentHandler(db)
 
-	// Auth Routes (Public)
+	// Auth Routes (Public). Login is rate-limited per IP to blunt password
+	// brute-forcing (20 attempts/minute).
 	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.Post("/login", content.Login)
+		r.With(modelAuth.RateLimit(20, time.Minute)).Post("/login", content.Login)
 	})
 
 	r.Get("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
