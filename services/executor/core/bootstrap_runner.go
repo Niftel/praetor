@@ -138,23 +138,36 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	vars := parseHostVars(req.JobManifest.Inventory, req.JobManifest.RunnerHost)
 	addr := firstNonEmpty(vars["ansible_host"], req.JobManifest.RunnerHost)
 	port := firstNonEmpty(vars["ansible_port"], "22")
-	user := firstNonEmpty(vars["ansible_user"], req.JobManifest.CredentialEnv["ANSIBLE_REMOTE_USER"], "root")
-
-	// SSH key: the machine-credential key if the job carries one, else the shared
-	// platform/automation key.
-	sshKeyPath := "/tmp/keys/id_rsa"
-	if content := req.JobManifest.CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"]; content != "" {
-		if !strings.HasSuffix(content, "\n") {
-			content += "\n" // SSH rejects a key file without a trailing newline
-		}
-		credKeyPath := fmt.Sprintf("/tmp/cred-key-%s", req.ExecutionRunID)
-		if err := os.WriteFile(credKeyPath, []byte(content), 0o600); err != nil {
-			return fmt.Errorf("failed to write credential key: %w", err)
-		}
-		defer os.Remove(credKeyPath)
-		sshKeyPath = credKeyPath
-		log.Printf("BootstrapRunner: using machine-credential SSH key for run %s", req.ExecutionRunID)
+	// Connection identity comes from the job's Machine credential (AAP-style): the
+	// SSH user is the credential's username (ANSIBLE_REMOTE_USER) unless the host
+	// pins its own ansible_user. Praetor ships no shared automation key or default
+	// user — the operator owns the login account and its authorized_keys on the
+	// host, and references the matching private key through a Machine credential.
+	user := firstNonEmpty(vars["ansible_user"], req.JobManifest.CredentialEnv["ANSIBLE_REMOTE_USER"])
+	if user == "" {
+		return fmt.Errorf("no SSH user for runner host %s: assign a Machine credential (with a username) to the job template, or set ansible_user on the host", req.JobManifest.RunnerHost)
 	}
+	// When we log in as a non-root user, privileged bootstrap steps run via sudo.
+	// This assumes the login user can escalate without a password; privilege
+	// escalation for the play itself is configured on the credential (become).
+	sudo := ""
+	if user != "root" {
+		sudo = "sudo "
+	}
+
+	// SSH key: strictly the Machine credential's key — no shared/platform fallback.
+	keyContent := req.JobManifest.CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"]
+	if keyContent == "" {
+		return fmt.Errorf("no SSH key for runner host %s: assign a Machine credential with an SSH private key to the job template", req.JobManifest.RunnerHost)
+	}
+	if !strings.HasSuffix(keyContent, "\n") {
+		keyContent += "\n" // SSH rejects a key file without a trailing newline
+	}
+	sshKeyPath := fmt.Sprintf("/tmp/cred-key-%s", req.ExecutionRunID)
+	if err := os.WriteFile(sshKeyPath, []byte(keyContent), 0o600); err != nil {
+		return fmt.Errorf("failed to write credential key: %w", err)
+	}
+	defer os.Remove(sshKeyPath)
 
 	client, err := dialSSH(addr, port, user, sshKeyPath)
 	if err != nil {
@@ -167,48 +180,49 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	jobDir := "/var/lib/praetor/jobs/" + runID
 
 	// 1. Directories.
-	if out, err := runSSH(client, fmt.Sprintf("mkdir -p %s /opt/praetor /usr/local/share/praetor/plugins/callback", sshQuote(jobDir))); err != nil {
+	if out, err := runSSH(client, fmt.Sprintf("%smkdir -p %s /opt/praetor /usr/local/share/praetor/plugins/callback", sudo, sshQuote(jobDir))); err != nil {
 		return fmt.Errorf("mkdir on target: %w: %s", err, out)
 	}
 
 	// 2. The host-runner binary.
-	if err := pushFile(client, r.RunnerPayloadPath, "/usr/local/bin/praetor-host-runner", "0755"); err != nil {
+	if err := pushFile(client, r.RunnerPayloadPath, "/usr/local/bin/praetor-host-runner", "0755", sudo); err != nil {
 		return fmt.Errorf("push host-runner: %w", err)
 	}
 
 	// 3. The checkpoint callback plugin (task-level resume).
-	if err := pushFile(client, "/tmp/plugins/callback/praetor_checkpoint.py", "/usr/local/share/praetor/plugins/callback/praetor_checkpoint.py", "0644"); err != nil {
+	if err := pushFile(client, "/tmp/plugins/callback/praetor_checkpoint.py", "/usr/local/share/praetor/plugins/callback/praetor_checkpoint.py", "0644", sudo); err != nil {
 		log.Printf("BootstrapRunner: checkpoint plugin push failed (non-fatal): %v", err)
 	}
 
 	// 4. The Execution Pack — the self-contained Ansible runtime — so the host
 	// needs no Ansible/Python. Pushes the pack the job selected (or the default).
 	pack := firstNonEmpty(req.JobManifest.ExecutionPack, "ansible-runtime")
-	if err := r.pushRuntime(client, pack); err != nil {
+	if err := r.pushRuntime(client, pack, sudo); err != nil {
 		log.Printf("BootstrapRunner: pack push failed (non-fatal; will fall back to system ansible): %v", err)
 	}
 
 	// 5. The manifest.
-	if err := pushBytes(client, manifestBytes, jobDir+"/manifest.json", "0644"); err != nil {
+	if err := pushBytes(client, manifestBytes, jobDir+"/manifest.json", "0644", sudo); err != nil {
 		return fmt.Errorf("push manifest: %w", err)
 	}
 
 	// 6. The SSH key the host-runner uses for its downstream plays.
-	if err := pushFile(client, sshKeyPath, jobDir+"/id_rsa", "0600"); err != nil {
+	if err := pushFile(client, sshKeyPath, jobDir+"/id_rsa", "0600", sudo); err != nil {
 		return fmt.Errorf("push job key: %w", err)
 	}
 
 	// 7. The resume systemd unit (best-effort; skipped where systemd is absent).
-	if out, err := runSSH(client, resumeUnitScript); err != nil {
+	if out, err := runShellScript(client, sudo, resumeUnitScript); err != nil {
 		log.Printf("BootstrapRunner: resume unit install skipped: %v: %s", err, out)
 	}
 
-	// 8. Launch the host-runner, detached so it outlives this SSH session.
+	// 8. Launch the host-runner as root, detached so it outlives this SSH session.
+	// Running the whole line under `sudo sh` keeps the log redirection root-owned.
 	start := fmt.Sprintf(
 		"setsid /usr/local/bin/praetor-host-runner --job-dir=%s --api-url=%s --run-id=%s >> %s/runner.log 2>&1 </dev/null &",
 		jobDir, callbackURL, runID, jobDir,
 	)
-	if out, err := runSSH(client, start); err != nil {
+	if out, err := runShellScript(client, sudo, start); err != nil {
 		return fmt.Errorf("start host-runner: %w: %s", err, out)
 	}
 
@@ -220,7 +234,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 // under /opt/praetor/packs/<pack>. It probes the host's CPU arch so it pushes the
 // matching pack (<pack>-linux-<arch>.tar.gz); if it's already present it does
 // nothing. Packs are name-scoped so several coexist on one host.
-func (r *BootstrapRunner) pushRuntime(client *ssh.Client, pack string) error {
+func (r *BootstrapRunner) pushRuntime(client *ssh.Client, pack, sudo string) error {
 	detect, err := runSSH(client, fmt.Sprintf(`if [ -x /opt/praetor/packs/%s/bin/ansible-playbook ]; then echo present; else
   case "$(uname -m)" in aarch64|arm64) echo arm64 ;; x86_64|amd64) echo amd64 ;; *) echo unknown ;; esac
 fi`, pack))
@@ -241,7 +255,7 @@ fi`, pack))
 	}
 	defer f.Close()
 	log.Printf("BootstrapRunner: pushing Execution Pack %q (%s)", pack, arch)
-	return pushStream(client, f, "mkdir -p /opt/praetor/packs && tar -xzf - -C /")
+	return pushStream(client, f, fmt.Sprintf("%smkdir -p /opt/praetor/packs && %star -xzf - -C /", sudo, sudo))
 }
 
 // localBootstrap runs the host-runner on the executor itself for jobs with no
@@ -313,22 +327,46 @@ func pushStream(client *ssh.Client, r io.Reader, remoteCmd string) error {
 	return nil
 }
 
-func pushFile(client *ssh.Client, local, remote, mode string) error {
+func pushFile(client *ssh.Client, local, remote, mode, sudo string) error {
 	f, err := os.Open(local)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	return pushStream(client, f, writeCmd(remote, mode))
+	return pushStream(client, f, writeCmd(remote, mode, sudo))
 }
 
-func pushBytes(client *ssh.Client, data []byte, remote, mode string) error {
-	return pushStream(client, bytes.NewReader(data), writeCmd(remote, mode))
+func pushBytes(client *ssh.Client, data []byte, remote, mode, sudo string) error {
+	return pushStream(client, bytes.NewReader(data), writeCmd(remote, mode, sudo))
 }
 
-func writeCmd(remote, mode string) string {
+// writeCmd builds the remote command that receives a streamed file on stdin. As
+// root it's `cat > file`; as a non-root user it uses `sudo tee` per step so the
+// file is written with root privileges (no nested-quote gymnastics).
+func writeCmd(remote, mode, sudo string) string {
+	if sudo != "" {
+		return fmt.Sprintf("%smkdir -p %s && %stee %s > /dev/null && %schmod %s %s",
+			sudo, sshQuote(path.Dir(remote)), sudo, sshQuote(remote), sudo, mode, sshQuote(remote))
+	}
 	return fmt.Sprintf("mkdir -p %s && cat > %s && chmod %s %s",
 		sshQuote(path.Dir(remote)), sshQuote(remote), mode, sshQuote(remote))
+}
+
+// runShellScript pipes a script to `sh` (or `sudo sh`) on stdin, avoiding quoting
+// problems for multi-line scripts (systemd unit) and the detached launch line.
+func runShellScript(client *ssh.Client, sudo, script string) (string, error) {
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	sess.Stdin = strings.NewReader(script)
+	shell := "sh"
+	if sudo != "" {
+		shell = "sudo sh"
+	}
+	out, err := sess.CombinedOutput(shell)
+	return string(out), err
 }
 
 func sshQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

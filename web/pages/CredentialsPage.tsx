@@ -5,7 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Key, Lock, Plus, Loader, ShieldCheck, Copy, Check } from 'lucide-react';
+import { Key, Lock, Plus, Loader } from 'lucide-react';
 
 const CredentialsPage = () => {
   const [credentials, setCredentials] = useState<Credential[]>([]);
@@ -16,8 +16,6 @@ const CredentialsPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newCred, setNewCred] = useState<Partial<Credential>>({});
   const [selectedTypeId, setSelectedTypeId] = useState<number | null>(null);
-  const [automationKey, setAutomationKey] = useState<string>('');
-  const [keyCopied, setKeyCopied] = useState(false);
 
   // Local state for dynamic form fields
   const [formFields, setFormFields] = useState<Record<string, string>>({});
@@ -42,7 +40,6 @@ const CredentialsPage = () => {
         if (types.length > 0) {
           setSelectedTypeId(types[0].id);
         }
-        api.getAutomationKey().then(r => setAutomationKey(r?.public_key || '')).catch(() => { });
       } catch (err) {
         console.error('Failed to load credentials', err);
       } finally {
@@ -153,29 +150,6 @@ const CredentialsPage = () => {
         <h1 className="text-2xl font-bold text-gray-900">Credentials</h1>
         <Button onClick={() => setIsModalOpen(true)} icon={<Plus size={16} />}>Add Credential</Button>
       </div>
-
-      {/* Praetor's automation identity: add this public key to a host's
-          authorized_keys and Praetor manages it with no per-host credential. */}
-      {automationKey && (
-        <Card className="border-brand-100 bg-brand-50/40">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-brand-100 rounded-lg shrink-0"><ShieldCheck className="text-brand-600" size={20} /></div>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-sm font-bold text-gray-900">Praetor automation key</h3>
-              <p className="text-xs text-gray-500 mt-0.5 mb-2">
-                Add this <b>public</b> key to a host's <code className="text-[11px] bg-gray-100 px-1 rounded">~/.ssh/authorized_keys</code> — via cloud-init, your image, config management, or by hand — and Praetor can run against it with no per-host credential. The matching private key never leaves Praetor.
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 min-w-0 block overflow-x-auto whitespace-nowrap bg-white border border-gray-200 rounded-md px-2 py-1.5 text-[11px] font-mono text-gray-700">{automationKey}</code>
-                <Button size="sm" variant="secondary" className="shrink-0" icon={keyCopied ? <Check size={14} /> : <Copy size={14} />}
-                  onClick={() => { navigator.clipboard.writeText(automationKey); setKeyCopied(true); setTimeout(() => setKeyCopied(false), 2000); }}>
-                  {keyCopied ? 'Copied' : 'Copy'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {credentials.map(cred => (

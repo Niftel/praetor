@@ -187,6 +187,17 @@ func (r *Runner) Execute() error {
 		log.Printf("Resuming play at task %q (restoring checkpointed vars)", resume[1])
 		playArgs = append(playArgs, resume...)
 	}
+	// Privilege-escalation password (if the Machine credential carries one): the
+	// scheduler renders it into CredentialFiles; write it to a 0600 file and let
+	// ansible-playbook read it via --become-password-file (never on the cmdline).
+	if pw := req.JobManifest.CredentialFiles["ANSIBLE_BECOME_PASSWORD_FILE"]; pw != "" {
+		pwPath := filepath.Join(r.JobDir, "become_pass")
+		if err := os.WriteFile(pwPath, []byte(pw), 0o600); err == nil {
+			playArgs = append(playArgs, "--become-password-file", pwPath)
+		} else {
+			log.Printf("Warning: could not write become password file: %v", err)
+		}
+	}
 	playArgs = append(playArgs, playbookPath)
 
 	// Use Praetor's self-contained runtime (pushed onto the host by the executor)
@@ -213,6 +224,22 @@ func (r *Runner) Execute() error {
 	cmd.Env = append(cmd.Env, "ANSIBLE_HOST_KEY_CHECKING=False")
 	if key := filepath.Join(r.JobDir, "id_rsa"); fileExists(key) {
 		cmd.Env = append(cmd.Env, "ANSIBLE_PRIVATE_KEY_FILE="+key)
+	}
+	// Apply the Machine credential's rendered env to the play, so the credential's
+	// identity (remote user, privilege escalation) governs the connections to the
+	// managed hosts — not just the executor's bootstrap hop. ANSIBLE_REMOTE_USER
+	// and ANSIBLE_BECOME_METHOD / ANSIBLE_BECOME_USER come from the credential's
+	// injectors; a per-host ansible_user in the inventory still wins.
+	for k, v := range req.JobManifest.CredentialEnv {
+		if k == "" || v == "" {
+			continue
+		}
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	// Turn on become whenever the credential specifies an escalation method (the
+	// injectors carry the method/user but not the on/off switch itself).
+	if req.JobManifest.CredentialEnv["ANSIBLE_BECOME_METHOD"] != "" {
+		cmd.Env = append(cmd.Env, "ANSIBLE_BECOME=True")
 	}
 	// Fact caching: preload stored facts into a jsonfile cache the play can read,
 	// and point Ansible at it so freshly-gathered facts are written back there.

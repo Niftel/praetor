@@ -3,27 +3,10 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"regexp"
 
 	"github.com/praetordev/praetor/pkg/crypto"
 )
-
-// loadAutomationKey returns Praetor's automation SSH private key (decrypted) from
-// the database-managed identity, or "" if none is configured. Used as the
-// default connection key for jobs that carry no machine credential.
-func loadAutomationKey(ctx context.Context, q ctxGetter) string {
-	var enc string
-	if err := q.GetContext(ctx, &enc, `SELECT private_key FROM automation_identity WHERE id = 1`); err != nil {
-		return ""
-	}
-	dec, err := crypto.DecryptSecret(enc)
-	if err != nil {
-		log.Printf("automation identity: decrypt failed: %v", err)
-		return ""
-	}
-	return dec
-}
 
 // ctxGetter is satisfied by both *sqlx.DB and *sqlx.Tx, so the injector resolver
 // can run inside the scheduler's tick transaction or standalone.

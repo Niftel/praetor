@@ -173,9 +173,6 @@ export const api = {
     updateExecutionPack: (id: number, data: any) => fetchWithAuth(`/execution-packs/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     rebuildExecutionPack: (id: number) => fetchWithAuth(`/execution-packs/${id}/rebuild`, { method: 'POST' }),
     deleteExecutionPack: (id: number) => fetchWithAuth(`/execution-packs/${id}`, { method: 'DELETE' }),
-    // Praetor's automation SSH public key — add to a host's authorized_keys to
-    // manage it with no per-host credential.
-    getAutomationKey: () => fetchWithAuth('/automation-key').then(r => r.json()),
 
     // Schedules
     getSchedules: () => fetchWithAuth('/schedules').then(r => r.json()),

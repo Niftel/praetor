@@ -302,12 +302,14 @@ func (s *Scheduler) processPendingJobs() error {
 			GalaxyServers:   s.resolveGalaxyServers(ctx, template.OrganizationID),
 		}
 
-		// Machine credential: resolve the template's SSH credential (if set) into
-		// the injector env/files the executor applies to the bootstrap connection.
-		// The Machine credential type's injectors render ANSIBLE_REMOTE_USER /
-		// ANSIBLE_PASSWORD (env) and ANSIBLE_PRIVATE_KEY_FILE (file). This is what
-		// lets Praetor authenticate to real hosts that don't already trust the
-		// platform's shared key.
+		// Machine credential: resolve the template's SSH credential into the
+		// injector env/files the executor and host-runner apply. The Machine
+		// credential type's injectors render ANSIBLE_REMOTE_USER / ANSIBLE_PASSWORD
+		// and the become settings (ANSIBLE_BECOME_METHOD / ANSIBLE_BECOME_USER) as
+		// env, and ANSIBLE_PRIVATE_KEY_FILE / ANSIBLE_BECOME_PASSWORD_FILE as files.
+		// This credential is how Praetor authenticates to managed hosts — there is
+		// no shared platform key. A remote job with no Machine credential (and no
+		// per-host ansible_user/key) fails at bootstrap with a clear error.
 		if template.CredentialID != nil {
 			env, files, cerr := resolveCredentialInjectors(ctx, tx, *template.CredentialID)
 			if cerr != nil {
@@ -315,19 +317,6 @@ func (s *Scheduler) processPendingJobs() error {
 			} else {
 				manifest.CredentialEnv = env
 				manifest.CredentialFiles = files
-			}
-		}
-
-		// No machine credential supplied a key: fall back to Praetor's
-		// database-managed automation identity, so the executor authenticates with
-		// the managed key (whose public half users add to authorized_keys) rather
-		// than relying on a mounted key file.
-		if manifest.CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"] == "" {
-			if key := loadAutomationKey(ctx, tx); key != "" {
-				if manifest.CredentialFiles == nil {
-					manifest.CredentialFiles = map[string]string{}
-				}
-				manifest.CredentialFiles["ANSIBLE_PRIVATE_KEY_FILE"] = key
 			}
 		}
 
