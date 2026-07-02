@@ -168,6 +168,8 @@ export const api = {
     // Execution Packs — the self-contained runtimes pushed to hosts.
     getExecutionPacks: () => fetchWithAuth('/execution-packs').then(r => r.json()),
     createExecutionPack: (data: any) => fetchWithAuth('/execution-packs', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateExecutionPack: (id: number, data: any) => fetchWithAuth(`/execution-packs/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    rebuildExecutionPack: (id: number) => fetchWithAuth(`/execution-packs/${id}/rebuild`, { method: 'POST' }),
     deleteExecutionPack: (id: number) => fetchWithAuth(`/execution-packs/${id}`, { method: 'DELETE' }),
     // Praetor's automation SSH public key — add to a host's authorized_keys to
     // manage it with no per-host credential.

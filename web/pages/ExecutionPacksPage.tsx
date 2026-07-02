@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
-import { Package, Plus, Trash2, Loader, GitBranch, Copy } from 'lucide-react';
+import { Package, Plus, Trash2, Loader, GitBranch, Copy, Pencil, RefreshCw } from 'lucide-react';
 
 interface Pack {
   id: number;
@@ -34,7 +34,9 @@ const ExecutionPacksPage = () => {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', spec: '', scm_url: '', scm_branch: 'main', spec_path: '', webhook_key: '' });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const blank = { name: '', description: '', spec: '', scm_url: '', scm_branch: 'main', spec_path: '', webhook_key: '' };
+  const [form, setForm] = useState(blank);
 
   const load = () => {
     api.getExecutionPacks().then(d => setPacks(d || [])).catch(() => setPacks([])).finally(() => setLoading(false));
@@ -51,23 +53,37 @@ const ExecutionPacksPage = () => {
     return () => clearInterval(h);
   }, []);
 
-  const create = async () => {
+  const openCreate = () => { setEditingId(null); setForm(blank); setShowModal(true); };
+  const openEdit = (p: Pack) => {
+    setEditingId(p.id);
+    setForm({
+      name: p.name, description: p.description || '', spec: p.spec || '',
+      scm_url: p.scm_url || '', scm_branch: p.scm_branch || 'main', spec_path: p.spec_path || '',
+      webhook_key: '', // never returned; blank keeps the existing secret
+    });
+    setShowModal(true);
+  };
+
+  const save = async () => {
     if (!form.name.trim()) return;
     const gitBacked = !!form.scm_url.trim();
+    const body = {
+      name: form.name.trim(),
+      description: form.description || null,
+      spec: form.spec || null,
+      scm_url: gitBacked ? form.scm_url.trim() : null,
+      scm_branch: gitBacked ? (form.scm_branch.trim() || 'main') : null,
+      spec_path: gitBacked ? form.spec_path.trim() : null,
+      webhook_key: gitBacked ? (form.webhook_key.trim() || null) : null,
+    };
     try {
-      await api.createExecutionPack({
-        name: form.name.trim(),
-        description: form.description || null,
-        spec: form.spec || null,
-        scm_url: gitBacked ? form.scm_url.trim() : null,
-        scm_branch: gitBacked ? (form.scm_branch.trim() || 'main') : null,
-        spec_path: gitBacked ? form.spec_path.trim() : null,
-        webhook_key: gitBacked ? (form.webhook_key.trim() || null) : null,
-      });
-      setShowModal(false);
-      setForm({ name: '', description: '', spec: '', scm_url: '', scm_branch: 'main', spec_path: '', webhook_key: '' });
-      load();
-    } catch (e) { alert('Failed to create pack (name may already exist).'); }
+      if (editingId) await api.updateExecutionPack(editingId, body);
+      else await api.createExecutionPack(body);
+      setShowModal(false); setForm(blank); setEditingId(null); load();
+    } catch (e) { alert(`Failed to ${editingId ? 'update' : 'create'} pack (name may already exist).`); }
+  };
+  const rebuild = async (id: number) => {
+    try { await api.rebuildExecutionPack(id); load(); } catch { alert('Nothing to rebuild (pack has no spec or git source).'); }
   };
   const remove = async (id: number) => {
     if (!confirm('Delete this Execution Pack registration? (does not delete the built artifact)')) return;
@@ -81,7 +97,7 @@ const ExecutionPacksPage = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900">Execution Packs</h1>
-        <Button icon={<Plus size={16} />} onClick={() => setShowModal(true)}>Register Pack</Button>
+        <Button icon={<Plus size={16} />} onClick={openCreate}>Register Pack</Button>
       </div>
 
       <Card className="bg-brand-50/40 border-brand-100">
@@ -130,7 +146,12 @@ const ExecutionPacksPage = () => {
                 <td className="px-6 py-4 whitespace-nowrap" title={p.status === 'failed' ? (p.build_log || '') : ''}><StatusBadge s={p.status} /></td>
                 <td className="px-6 py-4 text-sm text-gray-500">{p.description || '—'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right">
-                  <button onClick={() => remove(p.id)} className="text-gray-400 hover:text-red-600" title="Delete"><Trash2 size={18} /></button>
+                  <div className="inline-flex items-center gap-1">
+                    <button onClick={() => rebuild(p.id)} disabled={p.status === 'building' || p.status === 'pending'}
+                      className="text-gray-400 hover:text-brand-600 disabled:opacity-30 p-1" title="Rebuild now"><RefreshCw size={16} /></button>
+                    <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-brand-600 p-1" title="Edit"><Pencil size={16} /></button>
+                    <button onClick={() => remove(p.id)} className="text-gray-400 hover:text-red-600 p-1" title="Delete"><Trash2 size={16} /></button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -139,7 +160,7 @@ const ExecutionPacksPage = () => {
         </table>
       </Card>
 
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Register Execution Pack">
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Execution Pack' : 'Register Execution Pack'}>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
@@ -174,13 +195,14 @@ const ExecutionPacksPage = () => {
             </div>
             <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="path/in/repo/docker.yml"
               value={form.spec_path} onChange={e => setForm({ ...form, spec_path: e.target.value })} />
-            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="webhook secret (token) for the push trigger"
+            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs"
+              placeholder={editingId ? 'webhook secret (leave blank to keep current)' : 'webhook secret (token) for the push trigger'}
               value={form.webhook_key} onChange={e => setForm({ ...form, webhook_key: e.target.value })} />
           </div>
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={create}>Register</Button>
+            <Button onClick={save}>{editingId ? 'Save changes' : 'Register'}</Button>
           </div>
         </div>
       </Modal>

@@ -42,6 +42,8 @@ func (rs *ExecutionPacksResource) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/", rs.List)
 	r.Post("/", rs.Create)
+	r.Put("/{id}", rs.Update)
+	r.Post("/{id}/rebuild", rs.Rebuild)
 	r.Delete("/{id}", rs.Delete)
 	return r
 }
@@ -79,6 +81,65 @@ func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	render.Created(w, r, created)
+}
+
+// Update PUT /execution-packs/{id} — edit a pack's config. Editable fields are
+// replaced; webhook_key is preserved unless a new non-empty value is supplied
+// (it's never returned, so a client can't round-trip it). A pack with a spec or a
+// git source is re-queued so the change rebuilds.
+func (rs *ExecutionPacksResource) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	var in executionPack
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Name == "" {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	hasGit := in.SCMURL != nil && strings.TrimSpace(*in.SCMURL) != ""
+	status := "ready"
+	if hasGit || (in.Spec != nil && strings.TrimSpace(*in.Spec) != "") {
+		status = "pending"
+	}
+	var updated executionPack
+	if err := rs.DB.QueryRowxContext(r.Context(),
+		`UPDATE execution_packs SET
+		   name=$2, description=$3, spec=$4, scm_url=$5, scm_branch=$6, spec_path=$7,
+		   webhook_key=COALESCE(NULLIF($8,''), webhook_key),
+		   status=$9, build_log=NULL
+		 WHERE id=$1
+		 RETURNING id, name, description, spec, status, build_log, scm_url, scm_branch, spec_path, created_at`,
+		id, in.Name, in.Description, in.Spec, in.SCMURL, in.SCMBranch, in.SpecPath, in.WebhookKey, status,
+	).StructScan(&updated); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, updated)
+}
+
+// Rebuild POST /execution-packs/{id}/rebuild — manually re-queue a pack for the
+// packbuilder (pulls from git if git-backed, else rebuilds the stored spec).
+func (rs *ExecutionPacksResource) Rebuild(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	res, err := rs.DB.ExecContext(r.Context(),
+		`UPDATE execution_packs SET status='pending', build_log=NULL
+		 WHERE id=$1 AND (spec IS NOT NULL OR scm_url IS NOT NULL)`, id)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		render.ErrInvalidRequest(nil).Render(w, r) // nothing buildable (no spec/git source)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
 }
 
 func (rs *ExecutionPacksResource) Delete(w http.ResponseWriter, r *http.Request) {
