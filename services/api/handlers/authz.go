@@ -73,6 +73,17 @@ func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentTy
 	return true
 }
 
+// requireSuperuser stops the request with 403 unless the caller is a superuser.
+// For shared/system resources that have no per-org owner (e.g. execution packs,
+// which are runtime infrastructure selected by templates across every org).
+func requireSuperuser(w http.ResponseWriter, r *http.Request) bool {
+	if currentUser(r).IsSuperuser {
+		return true
+	}
+	render.ErrForbidden(nil).Render(w, r)
+	return false
+}
+
 // readableIDs returns the object IDs of contentType the current user may read.
 // FilterAccessibleIDs already returns everything for superusers and system
 // auditors, so list handlers can use this uniformly.

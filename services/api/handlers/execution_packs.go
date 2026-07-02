@@ -59,6 +59,9 @@ func (rs *ExecutionPacksResource) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request) {
+	if !requireSuperuser(w, r) {
+		return
+	}
 	var in executionPack
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
@@ -88,6 +91,9 @@ func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request)
 // (it's never returned, so a client can't round-trip it). A pack with a spec or a
 // git source is re-queued so the change rebuilds.
 func (rs *ExecutionPacksResource) Update(w http.ResponseWriter, r *http.Request) {
+	if !requireSuperuser(w, r) {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -122,6 +128,9 @@ func (rs *ExecutionPacksResource) Update(w http.ResponseWriter, r *http.Request)
 // Rebuild POST /execution-packs/{id}/rebuild — manually re-queue a pack for the
 // packbuilder (pulls from git if git-backed, else rebuilds the stored spec).
 func (rs *ExecutionPacksResource) Rebuild(w http.ResponseWriter, r *http.Request) {
+	if !requireSuperuser(w, r) {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -143,6 +152,9 @@ func (rs *ExecutionPacksResource) Rebuild(w http.ResponseWriter, r *http.Request
 }
 
 func (rs *ExecutionPacksResource) Delete(w http.ResponseWriter, r *http.Request) {
+	if !requireSuperuser(w, r) {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
