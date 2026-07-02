@@ -80,18 +80,17 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 		 WHERE wj.id=$1`, wjID); err != nil {
 		return err
 	}
-	templateID := wf.TemplateID
-
+	// Read the run's snapshotted graph — not the template — so editing the template
+	// never changes a run in flight.
 	var nodes []wfNode
 	if err := s.DB.SelectContext(ctx, &nodes,
-		`SELECT wjn.id, wjn.node_key, wjn.node_type, COALESCE(wn.name, '') AS name,
+		`SELECT wjn.id, wjn.node_key, wjn.node_type, COALESCE(wjn.name, '') AS name,
 		        wjn.status, wjn.job_template_id, wjn.unified_job_id,
-		        COALESCE(wn.webhook_url, '')  AS webhook_url,
-		        COALESCE(wn.webhook_body, '') AS webhook_body,
+		        COALESCE(wjn.webhook_url, '')  AS webhook_url,
+		        COALESCE(wjn.webhook_body, '') AS webhook_body,
 		        COALESCE(wjn.event_token, '') AS event_token
 		 FROM workflow_job_nodes wjn
-		 LEFT JOIN workflow_nodes wn ON wn.workflow_template_id = $1 AND wn.node_key = wjn.node_key
-		 WHERE wjn.workflow_job_id = $2`, templateID, wjID); err != nil {
+		 WHERE wjn.workflow_job_id = $1`, wjID); err != nil {
 		return err
 	}
 	byKey := map[string]*wfNode{}
@@ -101,7 +100,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 
 	var edges []wfEdge
 	_ = s.DB.SelectContext(ctx, &edges,
-		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, templateID)
+		`SELECT parent_key, child_key, edge_type FROM workflow_job_edges WHERE workflow_job_id=$1`, wjID)
 	parentsOf := map[string][]wfEdge{}
 	for _, e := range edges {
 		parentsOf[e.ChildKey] = append(parentsOf[e.ChildKey], e)

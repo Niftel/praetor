@@ -291,9 +291,17 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
+	// Snapshot nodes and edges into the run so later template edits don't affect it.
 	if _, err := tx.ExecContext(r.Context(),
-		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, status)
-		 SELECT $1, node_key, node_type, job_template_id, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
+		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+		wjID, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(),
+		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
+		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
 		wjID, id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -381,19 +389,17 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 	// lifecycle (agentless bootstrap, checkpoints, resume) per workflow step.
 	_ = rs.DB.SelectContext(r.Context(), &nodes, `
 		SELECT wjn.id, wjn.node_key, wjn.node_type,
-		       COALESCE(wn.name, '') AS name, wjn.unified_job_id, wjn.status,
+		       COALESCE(wjn.name, '') AS name, wjn.unified_job_id, wjn.status,
 		       COALESCE(wjn.event_token, '') AS event_token,
 		       er.id AS run_id
 		FROM workflow_job_nodes wjn
-		LEFT JOIN workflow_nodes wn
-		       ON wn.workflow_template_id = $1 AND wn.node_key = wjn.node_key
 		LEFT JOIN LATERAL (
 		       SELECT id FROM execution_runs
 		       WHERE unified_job_id = wjn.unified_job_id
 		       ORDER BY created_at DESC LIMIT 1
 		) er ON true
-		WHERE wjn.workflow_job_id = $2
-		ORDER BY wjn.id`, meta.TemplateID, id)
+		WHERE wjn.workflow_job_id = $1
+		ORDER BY wjn.id`, id)
 	for i := range nodes {
 		if nodes[i].Status == "awaiting_event" && nodes[i].EventToken != "" {
 			nodes[i].CallbackURL = fmt.Sprintf(
@@ -402,7 +408,7 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 	}
 	edges := []workflowEdge{}
 	_ = rs.DB.SelectContext(r.Context(), &edges,
-		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, meta.TemplateID)
+		`SELECT parent_key, child_key, edge_type FROM workflow_job_edges WHERE workflow_job_id=$1`, id)
 	render.JSON(w, r, map[string]interface{}{
 		"id": id, "workflow_template_id": meta.TemplateID, "name": meta.Name,
 		"status": meta.Status, "created_at": meta.CreatedAt, "finished_at": meta.FinishedAt,

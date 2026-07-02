@@ -25,9 +25,16 @@ func launchTarget(ctx context.Context, ex sqlExec, name string, wfID, ujtID *int
 			`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1,'running') RETURNING id`, *wfID).Scan(&wjID); err != nil {
 			return err
 		}
+		// Snapshot the graph into the run so later template edits don't affect it.
+		if _, err := ex.ExecContext(ctx,
+			`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
+			 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+			wjID, *wfID); err != nil {
+			return err
+		}
 		_, err := ex.ExecContext(ctx,
-			`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, status)
-			 SELECT $1, node_key, node_type, job_template_id, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+			`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
+			 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
 			wjID, *wfID)
 		return err
 	case ujtID != nil:

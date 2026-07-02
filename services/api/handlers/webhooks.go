@@ -126,9 +126,17 @@ func (rs *WebhooksResource) HandleWorkflow(w http.ResponseWriter, r *http.Reques
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
+	// Snapshot nodes and edges into the run so later template edits don't affect it.
 	if _, err := tx.Exec(
-		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, status)
-		 SELECT $1, node_key, node_type, job_template_id, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
+		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
+		wjID, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
+		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
 		wjID, id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
