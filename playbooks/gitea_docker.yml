@@ -1,0 +1,87 @@
+---
+# Set up Gitea as its own Docker container.
+#
+# Requirements on the target host:
+#   - Docker Engine running
+#   - Python Docker SDK  (pip install docker)
+#   - Ansible collection: community.docker  (ansible-galaxy collection install community.docker)
+#
+# Run:
+#   ansible-playbook -i <inventory> playbooks/gitea_docker.yml
+#   ansible-playbook -i <inventory> playbooks/gitea_docker.yml -e gitea_http_port=8080
+#
+# Uses SQLite in a persistent volume (fine for small/single-user instances).
+# To use PostgreSQL instead, point the GITEA__database__* env vars at your DB.
+
+- name: Deploy Gitea container
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    gitea_image: "gitea/gitea:1.22"
+    gitea_container_name: gitea
+    gitea_data_dir: /srv/gitea            # persisted on the host
+    # Ports chosen to avoid collisions with what's already published on this
+    # Docker host (3000=landlord-app, 3001=praetor-ui, 808x=praetor, 2225=labnode1).
+    gitea_http_port: 3002                 # host port -> container 3000 (HTTP)
+    gitea_ssh_port: 2222                  # host port -> container 22 (git over SSH)
+    gitea_uid: 1000
+    gitea_gid: 1000
+    # Set gitea_root_url to the address users will reach it on, e.g.
+    #   http://gitea.example.com:3000/
+    gitea_root_url: "http://{{ ansible_host | default(inventory_hostname) }}:{{ gitea_http_port }}/"
+    gitea_disable_registration: true
+
+  tasks:
+    - name: Ensure Gitea data directory exists
+      ansible.builtin.file:
+        path: "{{ gitea_data_dir }}"
+        state: directory
+        owner: "{{ gitea_uid }}"
+        group: "{{ gitea_gid }}"
+        mode: "0750"
+
+    - name: Pull Gitea image
+      community.docker.docker_image:
+        name: "{{ gitea_image }}"
+        source: pull
+
+    - name: Run Gitea container
+      community.docker.docker_container:
+        name: "{{ gitea_container_name }}"
+        image: "{{ gitea_image }}"
+        state: started
+        restart_policy: unless-stopped
+        env:
+          USER_UID: "{{ gitea_uid | string }}"
+          USER_GID: "{{ gitea_gid | string }}"
+          GITEA__server__ROOT_URL: "{{ gitea_root_url }}"
+          GITEA__server__SSH_PORT: "{{ gitea_ssh_port | string }}"
+          GITEA__server__DISABLE_SSH: "false"
+          GITEA__database__DB_TYPE: "sqlite3"
+          GITEA__service__DISABLE_REGISTRATION: "{{ gitea_disable_registration | string | lower }}"
+        ports:
+          - "{{ gitea_http_port }}:3000"
+          - "{{ gitea_ssh_port }}:22"
+        volumes:
+          - "{{ gitea_data_dir }}:/data"
+          - "/etc/timezone:/etc/timezone:ro"
+          - "/etc/localtime:/etc/localtime:ro"
+
+    - name: Wait for Gitea to answer HTTP
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ gitea_http_port }}/api/v1/version"
+        status_code: 200
+      register: gitea_health
+      retries: 30
+      delay: 2
+      until: gitea_health.status == 200
+      changed_when: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          Gitea {{ gitea_health.json.version }} is up on {{ inventory_hostname }}.
+          Web: {{ gitea_root_url }}  |  Git over SSH: port {{ gitea_ssh_port }}.
+          First user to complete the web sign-up becomes the admin.

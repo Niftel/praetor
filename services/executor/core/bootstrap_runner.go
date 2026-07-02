@@ -184,39 +184,41 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		return fmt.Errorf("mkdir on target: %w: %s", err, out)
 	}
 
-	// 2. The host-runner binary.
-	if err := pushFile(client, r.RunnerPayloadPath, "/usr/local/bin/praetor-host-runner", "0755", sudo); err != nil {
-		return fmt.Errorf("push host-runner: %w", err)
-	}
-
-	// 3. The checkpoint callback plugin (task-level resume).
+	// 2. The checkpoint callback plugin (task-level resume).
 	if err := pushFile(client, "/tmp/plugins/callback/praetor_checkpoint.py", "/usr/local/share/praetor/plugins/callback/praetor_checkpoint.py", "0644", sudo); err != nil {
 		log.Printf("BootstrapRunner: checkpoint plugin push failed (non-fatal): %v", err)
 	}
 
-	// 4. The Execution Pack — the self-contained Ansible runtime — so the host
-	// needs no Ansible/Python. Pushes the pack the job selected (or the default).
+	// 3. The Execution Pack — the single self-contained bootstrapping unit
+	// (host-runner daemon + Python + Ansible). Required now: the daemon ships
+	// inside the pack, so a failed pack push is fatal rather than a soft fallback.
 	pack := firstNonEmpty(req.JobManifest.ExecutionPack, "ansible-runtime")
 	if err := r.pushRuntime(client, pack, sudo); err != nil {
-		log.Printf("BootstrapRunner: pack push failed (non-fatal; will fall back to system ansible): %v", err)
+		return fmt.Errorf("push Execution Pack %q (carries the host-runner daemon): %w", pack, err)
+	}
+	// Install the daemon from the pack to the stable path the launch command and
+	// resume unit use — the pack is the source of the binary, not a separate push.
+	hrSrc := fmt.Sprintf("/opt/praetor/packs/%s/bin/praetor-host-runner", pack)
+	if out, err := runSSH(client, fmt.Sprintf("%scp %s /usr/local/bin/praetor-host-runner && %schmod 0755 /usr/local/bin/praetor-host-runner", sudo, hrSrc, sudo)); err != nil {
+		return fmt.Errorf("install host-runner from pack %q: %w: %s", pack, err, out)
 	}
 
-	// 5. The manifest.
+	// 4. The manifest.
 	if err := pushBytes(client, manifestBytes, jobDir+"/manifest.json", "0644", sudo); err != nil {
 		return fmt.Errorf("push manifest: %w", err)
 	}
 
-	// 6. The SSH key the host-runner uses for its downstream plays.
+	// 5. The SSH key the host-runner uses for its downstream plays.
 	if err := pushFile(client, sshKeyPath, jobDir+"/id_rsa", "0600", sudo); err != nil {
 		return fmt.Errorf("push job key: %w", err)
 	}
 
-	// 7. The resume systemd unit (best-effort; skipped where systemd is absent).
+	// 6. The resume systemd unit (best-effort; skipped where systemd is absent).
 	if out, err := runShellScript(client, sudo, resumeUnitScript); err != nil {
 		log.Printf("BootstrapRunner: resume unit install skipped: %v: %s", err, out)
 	}
 
-	// 8. Launch the host-runner as root, detached so it outlives this SSH session.
+	// 7. Launch the host-runner as root, detached so it outlives this SSH session.
 	// Running the whole line under `sudo sh` keeps the log redirection root-owned.
 	start := fmt.Sprintf(
 		"setsid /usr/local/bin/praetor-host-runner --job-dir=%s --api-url=%s --run-id=%s >> %s/runner.log 2>&1 </dev/null &",
