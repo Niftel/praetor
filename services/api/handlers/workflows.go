@@ -142,6 +142,81 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 	render.Created(w, r, map[string]interface{}{"id": id})
 }
 
+// UpdateWorkflow PUT /api/v1/workflow-templates/{id} — edit a template's name,
+// webhook trigger and its whole node/edge graph (replaced wholesale). webhook_key
+// is preserved unless a new non-empty value is supplied (it's never returned). In
+// -flight runs snapshot their nodes at launch but read edges live, so prefer
+// editing when the workflow has no active run.
+func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	org, ok := rs.orgOfWorkflow(r, id)
+	if !ok {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+		return
+	}
+	var body struct {
+		Name           string         `json:"name"`
+		WebhookEnabled bool           `json:"webhook_enabled"`
+		WebhookService string         `json:"webhook_service"`
+		WebhookKey     string         `json:"webhook_key"`
+		Nodes          []workflowNode `json:"nodes"`
+		Edges          []workflowEdge `json:"edges"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	tx, err := rs.DB.Beginx()
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(r.Context(),
+		`UPDATE workflow_templates SET name=$2, webhook_enabled=$3, webhook_service=$4,
+		        webhook_key=COALESCE(NULLIF($5,''), webhook_key), modified_at=now()
+		 WHERE id=$1`,
+		id, body.Name, body.WebhookEnabled, nullIfEmpty(body.WebhookService), nullIfEmpty(body.WebhookKey)); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	// Replace the graph wholesale.
+	tx.ExecContext(r.Context(), `DELETE FROM workflow_node_edges WHERE workflow_template_id=$1`, id)
+	tx.ExecContext(r.Context(), `DELETE FROM workflow_nodes WHERE workflow_template_id=$1`, id)
+	for _, n := range body.Nodes {
+		if n.NodeType == "" {
+			n.NodeType = "job"
+		}
+		if _, err := tx.ExecContext(r.Context(),
+			`INSERT INTO workflow_nodes (workflow_template_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			id, n.NodeKey, n.NodeType, n.JobTemplateID, n.Name, nullIfEmpty(n.WebhookURL), nullIfEmpty(n.WebhookBody)); err != nil {
+			render.ErrInvalidRequest(err).Render(w, r)
+			return
+		}
+	}
+	for _, e := range body.Edges {
+		if e.EdgeType == "" {
+			e.EdgeType = "success"
+		}
+		if _, err := tx.ExecContext(r.Context(),
+			`INSERT INTO workflow_node_edges (workflow_template_id, parent_key, child_key, edge_type)
+			 VALUES ($1, $2, $3, $4)`, id, e.ParentKey, e.ChildKey, e.EdgeType); err != nil {
+			render.ErrInvalidRequest(err).Render(w, r)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, map[string]interface{}{"id": id})
+}
+
 // GetWorkflow GET /api/v1/workflow-templates/{id}
 func (rs *WorkflowsResource) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

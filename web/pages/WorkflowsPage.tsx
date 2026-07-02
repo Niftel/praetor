@@ -7,7 +7,7 @@ import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import WorkflowDag from '../components/WorkflowDag';
-import { Plus, Trash2, Rocket, Workflow as WorkflowIcon, RefreshCw, Eye, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, Rocket, Workflow as WorkflowIcon, RefreshCw, Eye, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
 
 const EDGE_TYPES: WorkflowEdgeType[] = ['success', 'failure', 'always'];
 
@@ -28,6 +28,7 @@ const WorkflowsPage = () => {
 
   // Builder state
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [orgId, setOrgId] = useState<number | ''>('');
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
@@ -80,9 +81,32 @@ const WorkflowsPage = () => {
 
   // Builder helpers
   const openBuilder = () => {
+    setEditingId(null);
     setName(''); setOrgId(orgs[0]?.id ?? ''); setNodes([]); setEdges([]); setNodeSeq(1); setError('');
     setWhEnabled(false); setWhService('generic'); setWhKey('');
     setBuilderOpen(true);
+  };
+  const openEdit = async (wf: Workflow) => {
+    setError('');
+    try {
+      const full = await api.getWorkflow(wf.id);
+      setEditingId(wf.id);
+      setName(full.name ?? wf.name);
+      setOrgId(full.organization_id ?? wf.organization_id);
+      const ns: WorkflowNode[] = (full.nodes || []).map((n: any) => ({
+        node_key: n.node_key, node_type: n.node_type, name: n.name || '',
+        job_template_id: n.job_template_id ?? null, webhook_url: n.webhook_url || '', webhook_body: n.webhook_body || '',
+      }));
+      setNodes(ns);
+      setEdges(full.edges || []);
+      // Continue node keys past the highest existing nN so new nodes don't collide.
+      const maxN = ns.reduce((m, n) => { const x = /^n(\d+)$/.exec(n.node_key); return x ? Math.max(m, +x[1]) : m; }, 0);
+      setNodeSeq(maxN + 1);
+      setWhEnabled(!!full.webhook_enabled);
+      setWhService(full.webhook_service || 'generic');
+      setWhKey(''); // never returned; blank keeps the existing secret
+      setBuilderOpen(true);
+    } catch (e: any) { alert(e.message || 'Failed to load workflow for editing.'); }
   };
   const addNode = () => {
     const key = `n${nodeSeq}`;
@@ -111,27 +135,29 @@ const WorkflowsPage = () => {
       if (n.node_type === 'job' && !n.job_template_id) return setError(`Node "${n.name}" needs a job template.`);
       if (n.node_type === 'webhook_out' && !n.webhook_url?.trim()) return setError(`Node "${n.name}" needs a URL to call.`);
     }
-    if (whEnabled && !whKey.trim()) return setError('A webhook trigger needs a secret key.');
+    if (whEnabled && !whKey.trim() && !editingId) return setError('A webhook trigger needs a secret key.');
     for (const e of edges) if (e.parent_key === e.child_key) return setError('An edge cannot connect a node to itself.');
     setSaving(true);
+    const payload = {
+      organization_id: orgId, name: name.trim(),
+      webhook_enabled: whEnabled,
+      webhook_service: whEnabled ? whService : '',
+      webhook_key: whEnabled ? whKey.trim() : '',
+      nodes: nodes.map(n => ({
+        node_key: n.node_key, node_type: n.node_type, name: n.name.trim(),
+        job_template_id: n.node_type === 'job' ? n.job_template_id : null,
+        webhook_url: n.node_type === 'webhook_out' ? (n.webhook_url || '').trim() : '',
+        webhook_body: n.node_type === 'webhook_out' ? (n.webhook_body || '') : '',
+      })),
+      edges,
+    };
     try {
-      await api.createWorkflow({
-        organization_id: orgId, name: name.trim(),
-        webhook_enabled: whEnabled,
-        webhook_service: whEnabled ? whService : '',
-        webhook_key: whEnabled ? whKey.trim() : '',
-        nodes: nodes.map(n => ({
-          node_key: n.node_key, node_type: n.node_type, name: n.name.trim(),
-          job_template_id: n.node_type === 'job' ? n.job_template_id : null,
-          webhook_url: n.node_type === 'webhook_out' ? (n.webhook_url || '').trim() : '',
-          webhook_body: n.node_type === 'webhook_out' ? (n.webhook_body || '') : '',
-        })),
-        edges,
-      });
+      if (editingId) await api.updateWorkflow(editingId, payload);
+      else await api.createWorkflow(payload);
       setBuilderOpen(false);
       load();
     } catch (e: any) {
-      setError(e.message || 'Failed to create workflow.');
+      setError(e.message || `Failed to ${editingId ? 'update' : 'create'} workflow.`);
     } finally { setSaving(false); }
   };
 
@@ -181,6 +207,7 @@ const WorkflowsPage = () => {
                 <td className="px-4 py-2 text-sm text-gray-500">{orgName(wf.organization_id)}</td>
                 <td className="px-4 py-2 text-right space-x-1 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                   <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => onView(wf)}>View</Button>
+                  <Button variant="ghost" size="sm" icon={<Pencil size={14} />} onClick={() => openEdit(wf)}>Edit</Button>
                   <Button variant="primary" size="sm" icon={<Rocket size={14} />} onClick={() => onLaunch(wf)}>Launch</Button>
                   <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => onDelete(wf)} />
                 </td>
@@ -234,7 +261,7 @@ const WorkflowsPage = () => {
       </Card>
 
       {/* Builder */}
-      <Modal isOpen={builderOpen} onClose={() => setBuilderOpen(false)} title="New Workflow" size="full">
+      <Modal isOpen={builderOpen} onClose={() => setBuilderOpen(false)} title={editingId ? 'Edit Workflow' : 'New Workflow'} size="full">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -268,7 +295,7 @@ const WorkflowsPage = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Secret key</label>
-                  <input value={whKey} onChange={e => setWhKey(e.target.value)} placeholder="shared secret" className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" />
+                  <input value={whKey} onChange={e => setWhKey(e.target.value)} placeholder={editingId ? 'leave blank to keep current' : 'shared secret'} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" />
                 </div>
                 <p className="col-span-2 text-[11px] text-gray-500">
                   After saving, POST to <span className="font-mono">/api/v1/webhooks/workflow-templates/&lt;id&gt;/{whService}</span> with this secret to launch a run.
@@ -350,7 +377,7 @@ const WorkflowsPage = () => {
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
             <Button variant="secondary" onClick={() => setBuilderOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Create workflow'}</Button>
+            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : (editingId ? 'Save changes' : 'Create workflow')}</Button>
           </div>
         </div>
       </Modal>

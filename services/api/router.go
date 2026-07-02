@@ -202,6 +202,7 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		r.Get("/workflow-templates", wf.ListWorkflows)
 		r.Post("/workflow-templates", wf.CreateWorkflow)
 		r.Get("/workflow-templates/{id}", wf.GetWorkflow)
+		r.Put("/workflow-templates/{id}", wf.UpdateWorkflow)
 		r.Delete("/workflow-templates/{id}", wf.DeleteWorkflow)
 		r.Post("/workflow-templates/{id}/launch", wf.LaunchWorkflow)
 		r.Get("/workflow-jobs", wf.ListWorkflowJobs)
