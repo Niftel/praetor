@@ -1,6 +1,7 @@
 # Secrets / keys
 keys
 *.pem
+inventory/gitea_ed25519
 .env
 web/.env.local
 
