@@ -39,6 +39,8 @@ const InventoriesPage = () => {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [newInventoryName, setNewInventoryName] = useState('');
+  const [orgs, setOrgs] = useState<any[]>([]);
+  const [newInventoryOrg, setNewInventoryOrg] = useState<number | ''>('');
   const [newHostName, setNewHostName] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [importContent, setImportContent] = useState('');
@@ -66,6 +68,7 @@ const InventoriesPage = () => {
   useEffect(() => {
     fetchInventories();
     api.getCredentials().then(res => setCredentials(res?.items || res || [])).catch(() => { });
+    api.getOrganizations().then(o => { const l = o?.items || o || []; setOrgs(l); if (l.length) setNewInventoryOrg(l[0].id); }).catch(() => { });
   }, []);
 
   // Load hosts and groups when selected inventory changes
@@ -164,11 +167,11 @@ const InventoriesPage = () => {
 
   // Create Inventory
   const handleCreateInventory = async () => {
-    if (!newInventoryName.trim()) return;
+    if (!newInventoryName.trim() || newInventoryOrg === '') return;
     try {
       await api.createInventory({
         name: newInventoryName,
-        organization_id: 1,
+        organization_id: newInventoryOrg,
         kind: 'standard'
       });
       setNewInventoryName('');
@@ -579,6 +582,17 @@ const InventoriesPage = () => {
       {/* New Inventory Modal */}
       <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title="New Inventory">
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Organization</label>
+            <select
+              className="w-full border border-gray-300 rounded-md p-2 focus:ring-brand-500 focus:border-brand-500"
+              value={newInventoryOrg}
+              onChange={(e) => setNewInventoryOrg(Number(e.target.value))}
+            >
+              <option value="">Select organization…</option>
+              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
             <input

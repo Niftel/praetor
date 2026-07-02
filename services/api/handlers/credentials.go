@@ -109,7 +109,8 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 	if input.OrganizationID == 0 {
-		input.OrganizationID = 1
+		render.ErrInvalidRequest(nil).Render(w, r) // organization_id is required
+		return
 	}
 
 	// Creating a credential requires admin on its parent organization.

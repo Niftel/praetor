@@ -104,9 +104,10 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Default organization to 1 if not set
+	// A job template must belong to an explicit organization (no silent org-1 default).
 	if input.OrganizationID == 0 {
-		input.OrganizationID = 1
+		render.ErrInvalidRequest(nil).Render(w, r) // organization_id is required
+		return
 	}
 
 	// Validation: Playbook is required if no content provided

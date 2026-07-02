@@ -12,13 +12,15 @@ interface TeamWithMembers extends Team {
 
 const TeamsPage = () => {
   const [teams, setTeams] = useState<TeamWithMembers[]>([]);
+  const [orgs, setOrgs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ name: '', description: '' });
+  const [formData, setFormData] = useState<{ name: string; description: string; organization_id: number | '' }>({ name: '', description: '', organization_id: '' });
 
   const fetchTeams = async () => {
     try {
       setLoading(true);
+      api.getOrganizations().then(o => setOrgs(o?.items || o || [])).catch(() => setOrgs([]));
       const teamsResponse = await api.getTeams();
       const teamItems: Team[] = teamsResponse?.items || teamsResponse || [];
 
@@ -45,12 +47,14 @@ const TeamsPage = () => {
     fetchTeams();
   }, []);
 
+  const openModal = () => { setFormData({ name: '', description: '', organization_id: orgs[0]?.id ?? '' }); setShowModal(true); };
+
   const handleCreate = async () => {
-    if (!formData.name) return;
+    if (!formData.name || formData.organization_id === '') return;
     try {
-      await api.createTeam({ ...formData, organization_id: 1 });
+      await api.createTeam(formData);
       setShowModal(false);
-      setFormData({ name: '', description: '' });
+      setFormData({ name: '', description: '', organization_id: '' });
       fetchTeams();
     } catch (err) {
       console.error('Failed to create team', err);
@@ -80,7 +84,7 @@ const TeamsPage = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900">Teams</h1>
-        <Button icon={<Plus size={16} />} onClick={() => setShowModal(true)}>Create Team</Button>
+        <Button icon={<Plus size={16} />} onClick={openModal}>Create Team</Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -131,6 +135,17 @@ const TeamsPage = () => {
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Create Team">
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Organization</label>
+            <select
+              className="w-full border border-gray-300 rounded-md p-2"
+              value={formData.organization_id}
+              onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
+            >
+              <option value="">Select organization…</option>
+              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
             <input

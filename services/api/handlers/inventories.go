@@ -91,9 +91,10 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Default organization to 1 if not set
+	// An inventory must belong to an explicit organization (no silent org-1 default).
 	if input.OrganizationID == 0 {
-		input.OrganizationID = 1
+		render.ErrInvalidRequest(nil).Render(w, r) // organization_id is required
+		return
 	}
 
 	// Creating an inventory requires admin on its parent organization.

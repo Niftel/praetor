@@ -64,9 +64,11 @@ func (h *ContentHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default Org ID if not provided (simplified for now)
+	// A team must belong to an explicit organization — never silently default to
+	// org 1, which would place resources in the wrong tenant.
 	if input.OrganizationID == 0 {
-		input.OrganizationID = 1
+		render.ErrInvalidRequest(nil).Render(w, r) // organization_id is required
+		return
 	}
 
 	// Creating a team requires admin on its parent organization.

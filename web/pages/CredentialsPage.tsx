@@ -10,6 +10,8 @@ import { Key, Lock, Plus, Loader, ShieldCheck, Copy, Check } from 'lucide-react'
 const CredentialsPage = () => {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([]);
+  const [orgs, setOrgs] = useState<any[]>([]);
+  const [orgId, setOrgId] = useState<number | ''>('');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newCred, setNewCred] = useState<Partial<Credential>>({});
@@ -25,14 +27,18 @@ const CredentialsPage = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [credsData, typesData] = await Promise.all([
+        const [credsData, typesData, orgsData] = await Promise.all([
           api.getCredentials(),
-          api.getCredentialTypes()
+          api.getCredentialTypes(),
+          api.getOrganizations().catch(() => [])
         ]);
         const creds = credsData || [];
         const types = typesData || [];
+        const orgList = orgsData?.items || orgsData || [];
         setCredentials(creds);
         setCredentialTypes(types);
+        setOrgs(orgList);
+        if (orgList.length > 0) setOrgId(orgList[0].id);
         if (types.length > 0) {
           setSelectedTypeId(types[0].id);
         }
@@ -50,14 +56,14 @@ const CredentialsPage = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCred.name || !selectedTypeId) return;
+    if (!newCred.name || !selectedTypeId || orgId === '') return;
 
     try {
       const credData = {
         name: newCred.name,
         description: newCred.description || '',
         credential_type_id: selectedTypeId,
-        organization_id: 1, // Default org
+        organization_id: orgId,
         inputs: formFields
       };
 
@@ -201,6 +207,17 @@ const CredentialsPage = () => {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="New Credential">
         <form onSubmit={handleCreate} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Organization</label>
+            <select
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
+              value={orgId}
+              onChange={e => setOrgId(Number(e.target.value))}
+            >
+              <option value="">Select organization…</option>
+              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Name</label>
             <input

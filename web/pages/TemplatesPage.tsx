@@ -12,6 +12,7 @@ const TemplatesPage = () => {
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [executionPacks, setExecutionPacks] = useState<any[]>([]);
+  const [orgs, setOrgs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
@@ -40,12 +41,13 @@ const TemplatesPage = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [templatesData, projectsData, inventoriesData, credentialsData, packsData] = await Promise.all([
+        const [templatesData, projectsData, inventoriesData, credentialsData, packsData, orgsData] = await Promise.all([
           api.getTemplates(),
           api.getProjects(),
           api.getInventories(),
           api.getCredentials(),
-          api.getExecutionPacks()
+          api.getExecutionPacks(),
+          api.getOrganizations().catch(() => [])
         ]);
         // Handle paginated responses
         setTemplates(templatesData.items || templatesData || []);
@@ -53,6 +55,7 @@ const TemplatesPage = () => {
         setInventories(inventoriesData.items || inventoriesData || []);
         setCredentials(credentialsData || []);
         setExecutionPacks(packsData || []);
+        setOrgs(orgsData?.items || orgsData || []);
       } catch (err) {
         console.error('Failed to load data', err);
       } finally {
@@ -111,6 +114,7 @@ const TemplatesPage = () => {
       try { extra_vars = JSON.parse(varsText); }
       catch { alert('Variables must be valid JSON'); return; }
     }
+    if (!editingTemplate && !formData.organization_id) { alert('Select an organization'); return; }
     const payload = {
       ...formData,
       extra_vars,
@@ -257,6 +261,18 @@ const TemplatesPage = () => {
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Organization</label>
+            <select
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2 disabled:bg-gray-100"
+              value={formData.organization_id || ''}
+              disabled={!!editingTemplate}
+              onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
+            >
+              <option value="">Select organization…</option>
+              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Name</label>
             <input
