@@ -101,6 +101,7 @@ export const api = {
     // Triggers: event triggers (job outcome -> launch) + inbound webhook surface.
     getEventTriggers: () => fetchWithAuth('/triggers/event').then(r => r.json()),
     createEventTrigger: (data: any) => fetchWithAuth('/triggers/event', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateEventTrigger: (id: number, data: any) => fetchWithAuth(`/triggers/event/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteEventTrigger: (id: number) => fetchWithAuth(`/triggers/event/${id}`, { method: 'DELETE' }),
     getWebhookTriggers: () => fetchWithAuth('/triggers/webhook').then(r => r.json()),
     // Release a waiting webhook_in node via its (public, token-bearing) callback URL.

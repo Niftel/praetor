@@ -23,6 +23,7 @@ func (rs *TriggersResource) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/event", rs.ListEvent)
 	r.Post("/event", rs.CreateEvent)
+	r.Put("/event/{id}", rs.UpdateEvent)
 	r.Delete("/event/{id}", rs.DeleteEvent)
 	r.Get("/webhook", rs.ListWebhook)
 	return r
@@ -77,6 +78,36 @@ func (rs *TriggersResource) CreateEvent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	render.Created(w, r, created)
+}
+
+// UpdateEvent PUT /triggers/event/{id} — edit a trigger or toggle enabled. Unlike
+// create, enabled is taken verbatim (the client always sends the current value).
+func (rs *TriggersResource) UpdateEvent(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	var in eventTrigger
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Name == "" || !validEventTypes[in.EventType] {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if (in.WorkflowTemplateID == nil) == (in.UnifiedJobTemplateID == nil) {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	var updated eventTrigger
+	if err := rs.DB.QueryRowxContext(r.Context(),
+		`UPDATE event_triggers SET name=$2, enabled=$3, event_type=$4, source_ujt_id=$5, workflow_template_id=$6, unified_job_template_id=$7
+		 WHERE id=$1
+		 RETURNING id, organization_id, name, enabled, event_type, source_ujt_id, workflow_template_id, unified_job_template_id, created_at`,
+		id, in.Name, in.Enabled, in.EventType, in.SourceUJTID, in.WorkflowTemplateID, in.UnifiedJobTemplateID,
+	).StructScan(&updated); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, updated)
 }
 
 func (rs *TriggersResource) DeleteEvent(w http.ResponseWriter, r *http.Request) {

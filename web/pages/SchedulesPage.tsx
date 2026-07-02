@@ -5,7 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy } from 'lucide-react';
+import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy, Pencil } from 'lucide-react';
 
 type TargetType = 'job' | 'workflow';
 
@@ -27,6 +27,7 @@ const SchedulesPage = () => {
   const [sched, setSched] = useState({ name: '', targetType: 'job' as TargetType, target: 0, rrule: 'FREQ=DAILY;INTERVAL=1' });
 
   const [showEvent, setShowEvent] = useState(false);
+  const [editingEvtId, setEditingEvtId] = useState<number | null>(null);
   const [evt, setEvt] = useState({ name: '', event_type: 'job_finished', source: 0, targetType: 'workflow' as TargetType, target: 0 });
 
   const fetchData = async () => {
@@ -87,22 +88,52 @@ const SchedulesPage = () => {
   };
 
   // --- Event triggers ---
-  const createEventTrigger = async () => {
+  const openEventCreate = () => {
+    setEditingEvtId(null);
+    setEvt({ name: '', event_type: 'job_finished', source: 0, targetType: 'workflow', target: 0 });
+    setShowEvent(true);
+  };
+  const openEventEdit = (t: EventTrigger) => {
+    setEditingEvtId(t.id);
+    setEvt({
+      name: t.name, event_type: t.event_type, source: t.source_ujt_id || 0,
+      targetType: t.workflow_template_id ? 'workflow' : 'job',
+      target: t.workflow_template_id || t.unified_job_template_id || 0,
+    });
+    setShowEvent(true);
+  };
+  const saveEventTrigger = async () => {
     if (!evt.name || !evt.target) return;
     // Org is derived from the target so there's no separate org picker.
     const org = evt.targetType === 'workflow'
       ? workflows.find(w => w.id === evt.target)?.organization_id
       : (templates.find(t => templateUjt(t) === evt.target) as any)?.organization_id;
-    const body: any = { name: evt.name, event_type: evt.event_type, organization_id: org || 1 };
+    const body: any = { name: evt.name, event_type: evt.event_type, organization_id: org || 1, enabled: true };
     if (evt.source) body.source_ujt_id = evt.source;
     if (evt.targetType === 'workflow') body.workflow_template_id = evt.target;
     else body.unified_job_template_id = evt.target;
     try {
-      await api.createEventTrigger(body);
-      setShowEvent(false);
+      if (editingEvtId) {
+        // Preserve the current enabled state on edit.
+        body.enabled = eventTriggers.find(e => e.id === editingEvtId)?.enabled ?? true;
+        await api.updateEventTrigger(editingEvtId, body);
+      } else {
+        await api.createEventTrigger(body);
+      }
+      setShowEvent(false); setEditingEvtId(null);
       setEvt({ name: '', event_type: 'job_finished', source: 0, targetType: 'workflow', target: 0 });
       fetchData();
-    } catch (err) { console.error(err); alert('Failed to create event trigger'); }
+    } catch (err) { console.error(err); alert(`Failed to ${editingEvtId ? 'update' : 'create'} event trigger`); }
+  };
+  const toggleEventTrigger = async (t: EventTrigger) => {
+    const body: any = { name: t.name, event_type: t.event_type, organization_id: t.organization_id, enabled: !t.enabled };
+    if (t.source_ujt_id) body.source_ujt_id = t.source_ujt_id;
+    if (t.workflow_template_id) body.workflow_template_id = t.workflow_template_id;
+    else body.unified_job_template_id = t.unified_job_template_id;
+    try {
+      await api.updateEventTrigger(t.id, body);
+      setEventTriggers(list => list.map(x => x.id === t.id ? { ...x, enabled: !x.enabled } : x));
+    } catch (err) { console.error(err); }
   };
   const deleteEventTrigger = async (id: number) => {
     if (!confirm('Delete this event trigger?')) return;
@@ -157,7 +188,7 @@ const SchedulesPage = () => {
       <section>
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2"><Zap size={18} className="text-amber-500" /> Event triggers <span className="text-sm font-normal text-gray-400">(on job outcome)</span></h2>
-          <Button icon={<Plus size={16} />} onClick={() => setShowEvent(true)}>New Event Trigger</Button>
+          <Button icon={<Plus size={16} />} onClick={openEventCreate}>New Event Trigger</Button>
         </div>
         <Card>
           <div className="divide-y divide-gray-100">
@@ -171,8 +202,10 @@ const SchedulesPage = () => {
                     {' '}→ launch <span className="font-medium text-gray-700">{eventTriggerTarget(t)}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <Badge variant={t.enabled ? 'success' : 'neutral'}>{t.enabled ? 'Active' : 'Disabled'}</Badge>
+                  <button onClick={() => toggleEventTrigger(t)} className={`p-2 rounded-full ${t.enabled ? 'text-brand-600 hover:bg-brand-50' : 'text-gray-400 hover:bg-gray-100'}`} title="Enable/disable"><Power size={18} /></button>
+                  <button onClick={() => openEventEdit(t)} className="p-2 rounded-full text-gray-400 hover:text-brand-600 hover:bg-brand-50" title="Edit"><Pencil size={18} /></button>
                   <button onClick={() => deleteEventTrigger(t.id)} className="p-2 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50" title="Delete"><Trash2 size={18} /></button>
                 </div>
               </div>
@@ -238,7 +271,7 @@ const SchedulesPage = () => {
       </Modal>
 
       {/* Create event trigger modal */}
-      <Modal isOpen={showEvent} onClose={() => setShowEvent(false)} title="New Event Trigger">
+      <Modal isOpen={showEvent} onClose={() => setShowEvent(false)} title={editingEvtId ? 'Edit Event Trigger' : 'New Event Trigger'}>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
@@ -281,7 +314,7 @@ const SchedulesPage = () => {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowEvent(false)}>Cancel</Button>
-            <Button onClick={createEventTrigger}>Create</Button>
+            <Button onClick={saveEventTrigger}>{editingEvtId ? 'Save changes' : 'Create'}</Button>
           </div>
         </div>
       </Modal>
