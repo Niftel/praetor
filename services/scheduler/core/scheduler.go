@@ -134,7 +134,7 @@ func (s *Scheduler) processPendingJobs() error {
 			if err := tx.GetContext(ctx, &src,
 				`SELECT inventory_id, source, source_kind, credential_id FROM inventory_sources WHERE id = $1`, srcID); err != nil {
 				log.Printf("sync job %d: source %d not found: %v", job.ID, srcID, err)
-				_, _ = tx.ExecContext(ctx, "UPDATE unified_jobs SET status='failed' WHERE id=$1", job.ID)
+				logExec(ctx, tx, "UPDATE unified_jobs SET status='failed' WHERE id=$1", job.ID)
 				continue
 			}
 			syncManifest := events.JobManifest{
@@ -171,7 +171,7 @@ func (s *Scheduler) processPendingJobs() error {
 		// 5. Resolve Project from Template - REQUIRES a template with a project
 		if job.UnifiedJobTemplateID == nil {
 			log.Printf("Job %d has no template - skipping (template required)", job.ID)
-			_, _ = tx.ExecContext(ctx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
+			logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 			continue
 		}
 
@@ -180,7 +180,7 @@ func (s *Scheduler) processPendingJobs() error {
 		err = tx.GetContext(ctx, &template, "SELECT * FROM job_templates WHERE id = $1", *job.UnifiedJobTemplateID)
 		if err != nil {
 			log.Printf("Failed to find template %d for job %d: %v", *job.UnifiedJobTemplateID, job.ID, err)
-			_, _ = tx.ExecContext(ctx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
+			logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 			continue
 		}
 
@@ -191,7 +191,7 @@ func (s *Scheduler) processPendingJobs() error {
 			err = tx.GetContext(ctx, &project, "SELECT * FROM projects WHERE id = $1", *template.ProjectID)
 			if err != nil {
 				log.Printf("Failed to find project %d for template %s: %v", *template.ProjectID, template.Name, err)
-				_, _ = tx.ExecContext(ctx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
+				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
 			projectURL = project.SCMURL
@@ -207,7 +207,7 @@ func (s *Scheduler) processPendingJobs() error {
 			err = tx.GetContext(ctx, &inventory, "SELECT * FROM inventories WHERE id = $1", *template.InventoryID)
 			if err != nil {
 				log.Printf("Failed to find inventory %d for template %s: %v", *template.InventoryID, template.Name, err)
-				_, _ = tx.ExecContext(ctx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
+				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
 
@@ -216,7 +216,7 @@ func (s *Scheduler) processPendingJobs() error {
 			err = tx.SelectContext(ctx, &hosts, "SELECT * FROM hosts WHERE inventory_id = $1 AND enabled = true", *template.InventoryID)
 			if err != nil {
 				log.Printf("Failed to fetch hosts for inventory %d: %v", *template.InventoryID, err)
-				_, _ = tx.ExecContext(ctx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
+				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
 
@@ -405,13 +405,13 @@ func (s *Scheduler) relayOutbox() error {
 		var req events.ExecutionRequest
 		if err := json.Unmarshal(row.Payload, &req); err != nil {
 			log.Printf("outbox: dropping unparseable row %d: %v", row.ID, err)
-			_, _ = tx.ExecContext(ctx, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
+			logExec(ctx, tx, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
 		if err := s.Publisher.PublishExecutionRequest(&req); err != nil {
 			// Leave the row pending so it is retried on the next tick.
 			log.Printf("outbox: publish failed for row %d (will retry): %v", row.ID, err)
-			_, _ = tx.ExecContext(ctx, `UPDATE execution_outbox SET attempts = attempts + 1 WHERE id = $1`, row.ID)
+			logExec(ctx, tx, `UPDATE execution_outbox SET attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -470,7 +470,7 @@ func (s *Scheduler) processSchedules() error {
 		if err != nil {
 			log.Printf("Invalid RRule for schedule %d: %v", sched.ID, err)
 			// Disable it to stop error loop
-			_, _ = tx.ExecContext(ctx, "UPDATE schedules SET enabled = false WHERE id = $1", sched.ID)
+			logExec(ctx, tx, "UPDATE schedules SET enabled = false WHERE id = $1", sched.ID)
 			continue
 		}
 

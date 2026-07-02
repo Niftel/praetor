@@ -117,7 +117,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 					if st == "successful" {
 						newSt = "successful"
 					}
-					_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
+					logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
 					n.Status = newSt
 				}
 			}
@@ -150,13 +150,13 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			}
 		}
 		if !fired {
-			_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status='skipped' WHERE id=$1`, n.ID)
+			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='skipped' WHERE id=$1`, n.ID)
 			n.Status = "skipped"
 			continue
 		}
 
 		if n.NodeType == "approval" {
-			_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status='awaiting_approval' WHERE id=$1`, n.ID)
+			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='awaiting_approval' WHERE id=$1`, n.ID)
 			n.Status = "awaiting_approval"
 			continue
 		}
@@ -166,7 +166,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 		// the callback URL for whoever needs to release it.
 		if n.NodeType == "webhook_in" {
 			token := newEventToken()
-			_, _ = s.DB.ExecContext(ctx,
+			logExec(ctx, s.DB,
 				`UPDATE workflow_job_nodes SET status='awaiting_event', event_token=$1 WHERE id=$2`, token, n.ID)
 			n.Status = "awaiting_event"
 			n.EventToken = token
@@ -182,14 +182,14 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			if !postWorkflowWebhook(n.WebhookURL, n.WebhookBody, wf.Name, wjID, n.NodeKey) {
 				newSt = "failed"
 			}
-			_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
+			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
 			n.Status = newSt
 			log.Printf("workflow %d: node %q webhook_out -> %s", wjID, n.NodeKey, newSt)
 			continue
 		}
 
 		if n.JobTemplateID == nil {
-			_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status='skipped' WHERE id=$1`, n.ID)
+			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='skipped' WHERE id=$1`, n.ID)
 			n.Status = "skipped"
 			continue
 		}
@@ -197,7 +197,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 		// Launch the node's job template as an ordinary unified_job.
 		var ujtID int64
 		if err := s.DB.GetContext(ctx, &ujtID, `SELECT unified_job_template_id FROM job_templates WHERE id=$1`, *n.JobTemplateID); err != nil {
-			_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status='failed' WHERE id=$1`, n.ID)
+			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='failed' WHERE id=$1`, n.ID)
 			n.Status = "failed"
 			continue
 		}
@@ -212,11 +212,11 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 		if err := s.DB.QueryRowContext(ctx,
 			`INSERT INTO unified_jobs (name, unified_job_template_id, status) VALUES ($1,$2,'pending') RETURNING id`,
 			jobName, ujtID).Scan(&jobID); err != nil {
-			_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status='failed' WHERE id=$1`, n.ID)
+			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='failed' WHERE id=$1`, n.ID)
 			n.Status = "failed"
 			continue
 		}
-		_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_job_nodes SET status='running', unified_job_id=$1 WHERE id=$2`, jobID, n.ID)
+		logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='running', unified_job_id=$1 WHERE id=$2`, jobID, n.ID)
 		n.Status = "running"
 		jid := jobID
 		n.UnifiedJobID = &jid
@@ -242,7 +242,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 		if anyFail {
 			status = "failed"
 		}
-		_, _ = s.DB.ExecContext(ctx, `UPDATE workflow_jobs SET status=$1, finished_at=now() WHERE id=$2`, status, wjID)
+		logExec(ctx, s.DB, `UPDATE workflow_jobs SET status=$1, finished_at=now() WHERE id=$2`, status, wjID)
 		log.Printf("workflow %d finished: %s", wjID, status)
 	}
 	return nil

@@ -14,6 +14,16 @@ type sqlExec interface {
 	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
 }
 
+// logExec runs a state-update statement and logs — never swallows — a failure.
+// The scheduler's per-node and per-job status writes aren't transactional with the
+// rest of a tick, so a silent failure lets the DB and reality diverge (a job or
+// workflow node stuck in the wrong state); at minimum that must be visible.
+func logExec(ctx context.Context, ex sqlExec, query string, args ...interface{}) {
+	if _, err := ex.ExecContext(ctx, query, args...); err != nil {
+		log.Printf("scheduler: state update failed: %v (query: %s)", err, query)
+	}
+}
+
 // launchTarget starts a trigger's target: a workflow run (snapshotting its nodes,
 // as LaunchWorkflow does) or an ordinary job from a unified job template. Exactly
 // one of wfID / ujtID must be set.
