@@ -20,6 +20,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/objectstore"
 	"github.com/teambition/rrule-go"
 )
 
@@ -28,6 +29,14 @@ type Scheduler struct {
 	Ticker    *time.Ticker
 	Done      chan bool
 	Publisher EventPublisher
+
+	// Retention pruning (opt-in): when RetentionDays > 0, terminal jobs finished
+	// longer ago than that are deleted — their log blobs removed from Logs, then
+	// the job rows (runs/events/chunks/outbox cascade). Logs may be nil (skips
+	// blob cleanup). See pruner.go.
+	Logs          objectstore.LogStore
+	RetentionDays int
+	lastPrune     time.Time
 }
 
 func NewScheduler(db *sqlx.DB, interval time.Duration, publisher EventPublisher) *Scheduler {
@@ -61,6 +70,7 @@ func (s *Scheduler) Start() {
 			}
 			s.processWorkflows()
 			s.processEventTriggers()
+			s.maybePrune()
 			TickDuration.Observe(time.Since(tickStart).Seconds())
 		}
 	}
