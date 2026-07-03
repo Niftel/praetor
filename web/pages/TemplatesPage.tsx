@@ -408,6 +408,14 @@ const TemplatesPage = () => {
               />
               Use fact cache (persist &amp; reuse gathered facts across runs)
             </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700 mt-3">
+              <input
+                type="checkbox"
+                checked={!!formData.allow_simultaneous}
+                onChange={e => setFormData({ ...formData, allow_simultaneous: e.target.checked })}
+              />
+              Allow simultaneous runs (off = a launch is refused while a run is still active)
+            </label>
           </div>
           <div className="border-t pt-3">
             <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">

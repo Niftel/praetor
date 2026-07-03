@@ -164,8 +164,8 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 
 	// 2. Insert into job_templates
 	query := `
-		INSERT INTO job_templates (organization_id, name, description, playbook, playbook_content, project_id, inventory_id, job_type, verbosity, unified_job_template_id, credential_id, extra_vars, job_limit, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec, webhook_enabled, webhook_service, webhook_key, use_fact_cache, execution_pack_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+		INSERT INTO job_templates (organization_id, name, description, playbook, playbook_content, project_id, inventory_id, job_type, verbosity, unified_job_template_id, credential_id, extra_vars, job_limit, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec, webhook_enabled, webhook_service, webhook_key, use_fact_cache, execution_pack_id, allow_simultaneous)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 		RETURNING *`
 
 	var created models.JobTemplate
@@ -176,7 +176,7 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		input.ExtraVars, input.JobLimit, input.AskVariablesOnLaunch, input.AskLimitOnLaunch,
 		input.SurveyEnabled, input.SurveySpec,
 		input.WebhookEnabled, input.WebhookService, input.WebhookKey, input.UseFactCache,
-		input.ExecutionPackID,
+		input.ExecutionPackID, input.AllowSimultaneous,
 	).StructScan(&created)
 
 	if err != nil {
@@ -253,7 +253,7 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		    extra_vars = $10, job_limit = $11, ask_variables_on_launch = $12, ask_limit_on_launch = $13,
 		    survey_enabled = $14, survey_spec = $15,
 		    webhook_enabled = $16, webhook_service = $17, webhook_key = $18, use_fact_cache = $19,
-		    execution_pack_id = $20,
+		    execution_pack_id = $20, allow_simultaneous = $21,
 		    modified_at = now()
 		WHERE id = $1
 		RETURNING *`
@@ -265,7 +265,7 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		input.ExtraVars, input.JobLimit, input.AskVariablesOnLaunch, input.AskLimitOnLaunch,
 		input.SurveyEnabled, input.SurveySpec,
 		input.WebhookEnabled, input.WebhookService, input.WebhookKey, input.UseFactCache,
-		input.ExecutionPackID,
+		input.ExecutionPackID, input.AllowSimultaneous,
 	).StructScan(&updated)
 
 	if err != nil {

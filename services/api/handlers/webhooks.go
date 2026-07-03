@@ -37,15 +37,16 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 	service := chi.URLParam(r, "service")
 
 	var t struct {
-		Name           string `db:"name"`
-		UJTID          *int64 `db:"unified_job_template_id"`
-		WebhookEnabled bool   `db:"webhook_enabled"`
-		WebhookKey     string `db:"webhook_key"`
+		Name              string `db:"name"`
+		UJTID             *int64 `db:"unified_job_template_id"`
+		WebhookEnabled    bool   `db:"webhook_enabled"`
+		WebhookKey        string `db:"webhook_key"`
+		AllowSimultaneous bool   `db:"allow_simultaneous"`
 	}
 	// Not-found and verification-failure are deliberately indistinguishable from
 	// the outside (don't reveal which templates have webhooks).
 	if err := rs.DB.Get(&t,
-		`SELECT name, unified_job_template_id, webhook_enabled, webhook_key
+		`SELECT name, unified_job_template_id, webhook_enabled, webhook_key, allow_simultaneous
 		 FROM job_templates WHERE id = $1`, id); err != nil || !t.WebhookEnabled || t.UJTID == nil {
 		http.NotFound(w, r)
 		return
@@ -73,6 +74,21 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	jobArgs, _ := json.Marshal(map[string]interface{}{"extra_vars": vars})
+
+	// Concurrency guard: unless the template allows simultaneous runs, skip this
+	// webhook trigger while a prior run is still active (webhooks can fire in
+	// bursts; skip rather than queue an overlapping run).
+	if !t.AllowSimultaneous {
+		var active int
+		if err := rs.DB.Get(&active,
+			`SELECT count(*) FROM unified_jobs
+			 WHERE unified_job_template_id = $1 AND status NOT IN ('successful','failed','canceled','error')`,
+			*t.UJTID); err == nil && active > 0 {
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "skipped", "reason": "a run of this template is already active"})
+			return
+		}
+	}
 
 	var jobID int64
 	if err := rs.DB.QueryRowx(`

@@ -155,6 +155,7 @@ export interface JobTemplate {
   webhook_service?: string;
   webhook_key?: string;
   use_fact_cache?: boolean;
+  allow_simultaneous?: boolean;
   created_at: string;
   modified_at: string;
 }
