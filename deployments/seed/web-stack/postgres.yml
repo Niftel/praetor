@@ -5,7 +5,9 @@
   tasks:
     - name: Install PostgreSQL
       ansible.builtin.package:
-        name: [postgresql, postgresql-client]
+        # RHEL package names: -server provides initdb/pg_ctl, the base package
+        # provides the psql/createdb/pg_isready client tools.
+        name: [postgresql-server, postgresql]
         state: present
     - name: Ensure data directory
       ansible.builtin.file:
