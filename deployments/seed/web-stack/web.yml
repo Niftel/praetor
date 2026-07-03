@@ -5,16 +5,16 @@
   tasks:
     - name: Install Apache
       ansible.builtin.package:
-        name: apache2
+        name: httpd
         state: present
     - name: Set ServerName
       ansible.builtin.lineinfile:
-        path: /etc/apache2/httpd.conf
+        path: /etc/httpd/conf/httpd.conf
         line: "ServerName localhost"
         state: present
     - name: Deploy landing page
       ansible.builtin.copy:
-        dest: /var/www/localhost/htdocs/index.html
+        dest: /var/www/html/index.html
         mode: '0644'
         content: |
           <!doctype html><html><head><title>Praetor Web Stack</title></head>
