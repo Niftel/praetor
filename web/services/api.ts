@@ -54,6 +54,12 @@ export const api = {
     launchJob: (data: any) => fetchWithAuth('/jobs', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     cancelJob: (id: number) => fetchWithAuth(`/jobs/${id}/cancel`, { method: 'POST' }).then(r => r.json()),
 
+    // API tokens (personal access tokens for headless/CI auth)
+    listTokens: () => fetchWithAuth('/tokens').then(r => r.json()),
+    createToken: (data: { name: string; expires_at?: string | null }) =>
+        fetchWithAuth('/tokens', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    revokeToken: (id: number) => fetchWithAuth(`/tokens/${id}`, { method: 'DELETE' }).then(r => r.json()),
+
     // Dashboard Stats (derived from jobs for now)
     getDashboardStats: async () => {
         const jobs = await fetchWithAuth('/jobs').then(r => r.json());

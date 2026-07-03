@@ -12,6 +12,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import InventoriesPage from './pages/InventoriesPage';
 import CredentialsPage from './pages/CredentialsPage';
 import ExecutionPacksPage from './pages/ExecutionPacksPage';
+import TokensPage from './pages/TokensPage';
 import SchedulesPage from './pages/SchedulesPage';
 import UsersPage from './pages/UsersPage';
 import TeamsPage from './pages/TeamsPage';
@@ -51,6 +52,7 @@ const App = () => {
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="inventories" element={<InventoriesPage />} />
           <Route path="credentials" element={<CredentialsPage />} />
+          <Route path="tokens" element={<TokensPage />} />
           <Route path="execution-packs" element={<ExecutionPacksPage />} />
           <Route path="schedules" element={<SchedulesPage />} />
 
