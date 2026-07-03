@@ -16,6 +16,7 @@ web/.env.local
 /ingestion
 /migrator
 /scheduler
+/packbuilder
 /praetor-host-runner-linux
 /build/praetor-host-runner
 /build/linux/
