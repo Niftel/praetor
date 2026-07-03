@@ -24,6 +24,9 @@ const DefaultBucket = "PRAETOR_LOGS"
 type LogStore interface {
 	Put(key string, data []byte) error
 	Get(key string) ([]byte, error)
+	// Delete removes a stored blob. Deleting a missing key is not an error, so
+	// retention pruning is idempotent.
+	Delete(key string) error
 }
 
 // JetStreamLogStore implements LogStore over the NATS JetStream Object Store.
@@ -66,6 +69,13 @@ func (s *JetStreamLogStore) Get(key string) ([]byte, error) {
 		return nil, fmt.Errorf("object store get %s: %w", key, err)
 	}
 	return data, nil
+}
+
+func (s *JetStreamLogStore) Delete(key string) error {
+	if err := s.os.Delete(key); err != nil && err != nats.ErrObjectNotFound {
+		return fmt.Errorf("object store delete %s: %w", key, err)
+	}
+	return nil
 }
 
 // ChunkKey builds the object-store key for a given run and chunk sequence. It is

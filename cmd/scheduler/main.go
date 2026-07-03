@@ -4,12 +4,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/praetor/pkg/metrics"
+	"github.com/praetordev/praetor/pkg/objectstore"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	core "github.com/praetordev/praetor/services/scheduler/core"
 )
@@ -47,6 +49,21 @@ func main() {
 	// 3. Init Scheduler
 	// Poll every 5 seconds
 	sched := core.NewScheduler(database, 5*time.Second, bus)
+
+	// Retention pruning (opt-in). JOB_RETENTION_DAYS=0 (default) keeps everything;
+	// a positive value deletes terminal jobs finished longer ago than that, along
+	// with their events and log blobs.
+	if v := os.Getenv("JOB_RETENTION_DAYS"); v != "" {
+		if days, err := strconv.Atoi(v); err == nil && days > 0 {
+			sched.RetentionDays = days
+			if ls, err := objectstore.NewJetStreamLogStore(bus.JS, ""); err == nil {
+				sched.Logs = ls
+			} else {
+				log.Printf("retention: object store unavailable, blobs won't be pruned: %v", err)
+			}
+			log.Printf("retention: pruning terminal jobs finished > %d day(s) ago", days)
+		}
+	}
 
 	// 3. Start loop in background
 	go sched.Start()

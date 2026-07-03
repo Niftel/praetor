@@ -162,6 +162,9 @@ services:
       PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
       PRAETOR_PROJECT_DIR: /tmp/project
       API_URL: http://api:8080
+      # Retention pruning: 0 (default) keeps job history forever; a positive value
+      # deletes terminal jobs (rows + events + log blobs) finished that many days ago.
+      JOB_RETENTION_DAYS: "${JOB_RETENTION_DAYS:-0}"
     volumes:
       - ./:/tmp/project:ro
     depends_on:
