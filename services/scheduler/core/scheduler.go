@@ -273,6 +273,17 @@ func (s *Scheduler) processPendingJobs() error {
 			}
 		}
 
+		// Snapshot the runner host onto the run so the reconciler can SSH back to
+		// the SAME host to harvest its WAL after an outage, even if the inventory
+		// or runner-host designation changes later. A 0 id means localhost (nothing
+		// to snapshot — those runs aren't reconcilable over SSH).
+		if runnerHostID != 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE execution_runs SET runner_host_id = $1 WHERE id = $2`, runnerHostID, runID); err != nil {
+				log.Printf("job %d: snapshot runner_host_id failed: %v", job.ID, err)
+			}
+		}
+
 		// Effective variables and limit: the template's defaults, overlaid by any
 		// prompt-on-launch overrides the launcher supplied. The launch handler has
 		// already gated those overrides by the template's ask_* flags, so anything
@@ -496,18 +507,37 @@ func (s *Scheduler) processTimedOutJobs() error {
 	startGrace := 5 * time.Minute         // running but never heartbeated
 	queuedTimeout := 10 * time.Minute     // never picked up by an executor
 
-	// 1. Lost runs: a running run whose heartbeat went stale, or that started
-	// but never reported in within the start grace. Mark the run 'lost' and its
-	// job 'error' in one statement.
+	// 1a. Reconcilable runs: a REMOTE run (has a snapshotted runner host) whose
+	// heartbeat went stale is NOT declared failed — the host may have finished the
+	// job and hold the authoritative WAL that never got pushed. Hand it to the
+	// pull-based reconciler by moving it to 'reconciling'; the job stays as-is
+	// (not errored) until the reconciler resolves the true outcome. finished_at
+	// stays NULL. See services/reconciler.
+	staleCond := `(
+		(er.last_heartbeat_at IS NOT NULL AND er.last_heartbeat_at < now() - $1::interval)
+		OR (er.last_heartbeat_at IS NULL AND er.started_at IS NOT NULL AND er.started_at < now() - $2::interval)
+	)`
+	rec, err := s.DB.ExecContext(ctx, `
+		UPDATE execution_runs er
+		SET state = 'reconciling', reconcile_after = now()
+		WHERE er.state = 'running' AND er.runner_host_id IS NOT NULL AND `+staleCond,
+		fmt.Sprintf("%d seconds", int(lostHeartbeatGrace.Seconds())),
+		fmt.Sprintf("%d seconds", int(startGrace.Seconds())),
+	)
+	if err != nil {
+		log.Printf("Error moving stale runs to reconciling: %v", err)
+	} else if rows, _ := rec.RowsAffected(); rows > 0 {
+		log.Printf("Moved %d stale remote runs to reconciling", rows)
+	}
+
+	// 1b. Lost runs: a LOCAL run (no runner host — ran on the executor itself)
+	// whose heartbeat went stale can't be pulled back over SSH, so it is genuinely
+	// lost. Mark the run 'lost' and its job 'error' in one statement.
 	result, err := s.DB.ExecContext(ctx, `
 		WITH lost AS (
 			UPDATE execution_runs er
 			SET state = 'lost', finished_at = now()
-			WHERE er.state = 'running'
-			  AND (
-			    (er.last_heartbeat_at IS NOT NULL AND er.last_heartbeat_at < now() - $1::interval)
-			    OR (er.last_heartbeat_at IS NULL AND er.started_at IS NOT NULL AND er.started_at < now() - $2::interval)
-			  )
+			WHERE er.state = 'running' AND er.runner_host_id IS NULL AND `+staleCond+`
 			RETURNING er.unified_job_id
 		)
 		UPDATE unified_jobs uj
@@ -521,7 +551,7 @@ func (s *Scheduler) processTimedOutJobs() error {
 	if err != nil {
 		log.Printf("Error reconciling lost runs: %v", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
-		log.Printf("Marked %d runs as lost (stale/absent heartbeat)", rows)
+		log.Printf("Marked %d local runs as lost (stale/absent heartbeat)", rows)
 	}
 
 	// 2. Queued too long: never picked up by an executor. With the durable

@@ -3,92 +3,19 @@ package core
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/hostconn"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 )
-
-// SSH host-key verification uses trust-on-first-use: the first time we connect to a
-// host we record its key in the known_hosts file and trust it; on later connects a
-// changed key is refused (possible MITM). Persist SSH_KNOWN_HOSTS on a volume to
-// keep trust across executor restarts.
-var (
-	hostKeyOnce sync.Once
-	hostKeyCB   ssh.HostKeyCallback
-	hostKeyMu   sync.Mutex
-	knownHosts  ssh.HostKeyCallback
-	knownPath   string
-)
-
-func getHostKeyCallback() ssh.HostKeyCallback {
-	hostKeyOnce.Do(func() {
-		knownPath = os.Getenv("SSH_KNOWN_HOSTS")
-		if knownPath == "" {
-			// Default under $HOME/.ssh, which the runtime user owns (the executor
-			// drops to a non-root user via gosu); /var/lib/praetor is root-owned.
-			home := os.Getenv("HOME")
-			if home == "" {
-				home = "/var/lib/praetor"
-			}
-			knownPath = filepath.Join(home, ".ssh", "known_hosts")
-		}
-		_ = os.MkdirAll(filepath.Dir(knownPath), 0o700)
-		if f, err := os.OpenFile(knownPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
-			_ = f.Close()
-		} else {
-			log.Printf("BootstrapRunner: cannot open known_hosts %s: %v", knownPath, err)
-		}
-		knownHosts, _ = knownhosts.New(knownPath)
-		hostKeyCB = tofuHostKey
-	})
-	return hostKeyCB
-}
-
-// tofuHostKey verifies against known_hosts, trusts an unknown host on first use,
-// and refuses a host whose key changed.
-func tofuHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
-	hostKeyMu.Lock()
-	defer hostKeyMu.Unlock()
-	if knownHosts != nil {
-		err := knownHosts(hostname, remote, key)
-		if err == nil {
-			return nil
-		}
-		var keyErr *knownhosts.KeyError
-		if errors.As(err, &keyErr) {
-			if len(keyErr.Want) > 0 {
-				return fmt.Errorf("ssh host key changed for %s — refusing (possible MITM); remove the stale entry from %s to re-trust", hostname, knownPath)
-			}
-			// empty Want == host not yet known: fall through to trust-on-first-use.
-		} else {
-			return err
-		}
-	}
-	line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
-	if f, err := os.OpenFile(knownPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
-		_, _ = fmt.Fprintln(f, line)
-		_ = f.Close()
-	} else {
-		log.Printf("BootstrapRunner: failed to record host key for %s in %s: %v", hostname, knownPath, err)
-	}
-	knownHosts, _ = knownhosts.New(knownPath) // reload so a later key change is detected
-	log.Printf("BootstrapRunner: trusted new host key for %s (trust-on-first-use)", hostname)
-	return nil
-}
 
 // BootstrapRunner deploys the self-contained Execution Pack (host-runner daemon +
 // Python + Ansible) to a target host directly over SSH — no Ansible and no Python
@@ -320,29 +247,11 @@ func dialSSH(addr, port, user, keyPath string) (*ssh.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read ssh key: %w", err)
 	}
-	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("parse ssh key: %w", err)
-	}
-	cfg := &ssh.ClientConfig{
-		User:            user,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: getHostKeyCallback(),
-		Timeout:         30 * time.Second,
-	}
-	return ssh.Dial("tcp", net.JoinHostPort(addr, port), cfg)
+	return hostconn.Dial(addr, port, user, keyBytes)
 }
 
 // runSSH runs a command on the target and returns its combined output.
-func runSSH(client *ssh.Client, cmd string) (string, error) {
-	sess, err := client.NewSession()
-	if err != nil {
-		return "", err
-	}
-	defer sess.Close()
-	out, err := sess.CombinedOutput(cmd)
-	return string(out), err
-}
+func runSSH(client *ssh.Client, cmd string) (string, error) { return hostconn.Run(client, cmd) }
 
 // pushStream feeds r to a remote command's stdin (e.g. `cat > file` or
 // `tar -xzf - -C /`), the primitive for copying files over SSH without Python.
@@ -403,42 +312,11 @@ func runShellScript(client *ssh.Client, sudo, script string) (string, error) {
 	return string(out), err
 }
 
-func sshQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// parseHostVars pulls a host's inventory-line vars (ansible_host/port/user, ...)
-// out of the generated INI, so the executor can reach it over SSH directly.
-func parseHostVars(inventory, host string) map[string]string {
-	vars := map[string]string{}
-	if host == "" {
-		return vars
-	}
-	for _, line := range strings.Split(inventory, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "[") || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) == 0 || fields[0] != host {
-			continue
-		}
-		for _, f := range fields[1:] {
-			if i := strings.Index(f, "="); i > 0 {
-				vars[f[:i]] = strings.Trim(f[i+1:], `"'`)
-			}
-		}
-		return vars
-	}
-	return vars
-}
+// These delegate to pkg/hostconn so the executor and reconciler share one
+// implementation (host-key policy, inventory parsing, quoting).
+func sshQuote(s string) string                                 { return hostconn.Quote(s) }
+func firstNonEmpty(vals ...string) string                      { return hostconn.FirstNonEmpty(vals...) }
+func parseHostVars(inventory, host string) map[string]string   { return hostconn.ParseHostVars(inventory, host) }
 
 const resumeUnitScript = `if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   cat > /etc/systemd/system/praetor-resume.service <<'UNIT'
