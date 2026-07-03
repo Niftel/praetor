@@ -86,12 +86,13 @@ func (h *IngestionHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		praetorRender.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	if err := h.Service.RecordHeartbeat(r.Context(), runID); err != nil {
+	cancel, err := h.Service.RecordHeartbeat(r.Context(), runID)
+	if err != nil {
 		praetorRender.ErrInternal(err).Render(w, r)
 		return
 	}
 	render.Status(r, http.StatusOK)
-	render.JSON(w, r, map[string]string{"status": "ok"})
+	render.JSON(w, r, map[string]interface{}{"status": "ok", "cancel": cancel})
 }
 
 // IngestFacts POST /api/v1/runs/{run_id}/facts — host-runner ships the facts

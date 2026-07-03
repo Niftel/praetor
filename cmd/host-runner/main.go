@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"io"
@@ -71,6 +72,11 @@ func runJob(jobDir, apiURL, runID string) error {
 
 	log.Printf("Running job dir %s (run %s)", jobDir, runID)
 
+	// The play runs under a cancelable context; the heartbeat loop cancels it when
+	// the control plane reports the job was canceled.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	if apiURL != "" && runID != "" {
 		syncer := NewSyncer(jobDir, apiURL, runID)
 		logSyncer := NewLogSyncer(jobDir, apiURL, runID)
@@ -81,7 +87,7 @@ func runJob(jobDir, apiURL, runID string) error {
 		logFinished := make(chan bool, 1)
 		go func() { syncer.Start(done); finished <- true }()
 		go func() { logSyncer.Start(logDone); logFinished <- true }()
-		go runHeartbeat(apiURL, runID, hbDone)
+		go runHeartbeat(apiURL, runID, hbDone, cancel)
 		defer func() {
 			hbDone <- true
 			log.Println("Waiting for syncers to finish...")
@@ -94,7 +100,7 @@ func runJob(jobDir, apiURL, runID string) error {
 		}()
 	}
 
-	return NewRunner(jobDir, apiURL).Execute()
+	return NewRunner(jobDir, apiURL).Execute(ctx)
 }
 
 // resumeAll scans root for job directories that did not reach a terminal state

@@ -40,7 +40,7 @@ func NewIngestionService(db *sqlx.DB, pub EventPublisher, store objectstore.LogS
 // a 'lost' run whose host has rebooted and resumed will start heartbeating
 // again — that revives it to 'running' so the control plane reflects reality
 // during the resumed run (its eventual terminal event then finalizes it).
-func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID) error {
+func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID) (bool, error) {
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE execution_runs
 		SET last_heartbeat_at = now(),
@@ -48,9 +48,17 @@ func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID)
 		    finished_at = CASE WHEN state = 'lost' THEN NULL ELSE finished_at END
 		WHERE id = $1 AND state NOT IN ('successful', 'failed', 'canceled')`, runID)
 	if err != nil {
-		return fmt.Errorf("record heartbeat: %w", err)
+		return false, fmt.Errorf("record heartbeat: %w", err)
 	}
-	return nil
+	// Report back whether the operator asked to cancel this run's job, so the
+	// host-runner can stop the play cooperatively (it has no other channel).
+	var cancel bool
+	if qerr := s.DB.GetContext(ctx, &cancel, `
+		SELECT uj.cancel_requested FROM unified_jobs uj
+		JOIN execution_runs er ON er.unified_job_id = uj.id WHERE er.id = $1`, runID); qerr != nil {
+		return false, nil // best-effort: a lookup failure must not fail the heartbeat
+	}
+	return cancel, nil
 }
 
 // StoreFacts upserts the facts a run gathered, keyed by host. Each entry's host

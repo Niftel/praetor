@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -60,6 +61,7 @@ func (rs *JobsResource) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/", rs.ListUnifiedJobs)
 	r.Post("/", rs.LaunchJob)
+	r.Post("/{id}/cancel", rs.CancelJob)
 	r.Get("/runs/{runID}", rs.GetExecutionRun)
 	r.Get("/runs/{runID}/events", rs.ListJobEvents)
 	r.Post("/runs/{runID}/events", rs.CreateJobEvent)
@@ -377,6 +379,64 @@ func ErrInternal(err error) render.Renderer {
 		HTTPStatusCode: 500,
 		StatusText:     "Internal Server Error",
 		ErrorText:      err.Error(),
+	}
+}
+
+// CancelJob POST /api/v1/jobs/{id}/cancel — request cancellation of a job.
+// A running job is flagged (cancel_requested); its host-runner sees the flag on
+// its next heartbeat and stops the play cooperatively, emitting JOB_CANCELED. A
+// job that hasn't started executing yet (pending/queued) is canceled outright.
+func (rs *JobsResource) CancelJob(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+	var job struct {
+		Status string `db:"status"`
+		UJTID  *int64 `db:"unified_job_template_id"`
+	}
+	if err := rs.DB.GetContext(r.Context(), &job,
+		`SELECT status, unified_job_template_id FROM unified_jobs WHERE id = $1`, id); err != nil {
+		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job")))
+		return
+	}
+	// Cancelling requires execute access on the governing template.
+	if job.UJTID != nil {
+		var jtID int64
+		if err := rs.DB.GetContext(r.Context(), &jtID,
+			`SELECT id FROM job_templates WHERE unified_job_template_id = $1`, *job.UJTID); err == nil {
+			if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actExecute) {
+				return
+			}
+		}
+	}
+	switch job.Status {
+	case "successful", "failed", "canceled", "error":
+		render.Render(w, r, ErrConflict(fmt.Errorf("job already finished (%s)", job.Status)))
+		return
+	case "running":
+		// Executing on a host: flag it; the host-runner stops the play on its next
+		// heartbeat and reports JOB_CANCELED, which finalizes the state.
+		rs.DB.ExecContext(r.Context(), `UPDATE unified_jobs SET cancel_requested = true WHERE id = $1`, id)
+		render.JSON(w, r, map[string]string{"status": "canceling"})
+		return
+	default:
+		// pending / queued / waiting: not executing yet — cancel outright so it's
+		// never dispatched, and terminate any run row already created for it.
+		tx, err := rs.DB.Beginx()
+		if err != nil {
+			render.Render(w, r, ErrInternal(err))
+			return
+		}
+		defer tx.Rollback()
+		tx.ExecContext(r.Context(), `UPDATE unified_jobs SET cancel_requested = true, status = 'canceled', finished_at = now() WHERE id = $1`, id)
+		tx.ExecContext(r.Context(), `UPDATE execution_runs SET state = 'canceled', finished_at = now() WHERE unified_job_id = $1 AND state NOT IN ('successful','failed','canceled')`, id)
+		if err := tx.Commit(); err != nil {
+			render.Render(w, r, ErrInternal(err))
+			return
+		}
+		render.JSON(w, r, map[string]string{"status": "canceled"})
 	}
 }
 

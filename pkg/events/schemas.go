@@ -22,6 +22,7 @@ const (
 	EventJobStarted   = "JOB_STARTED"
 	EventJobCompleted = "JOB_COMPLETED"
 	EventJobFailed    = "JOB_FAILED"
+	EventJobCanceled  = "JOB_CANCELED"
 
 	// EventRunnerOnline is emitted the moment the host-runner starts on a target.
 	// Its existence is proof the agentless SSH bootstrap succeeded: the binary was

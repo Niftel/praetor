@@ -5,7 +5,7 @@ import { Job, Template } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
-import { Play, Terminal, ChevronRight } from 'lucide-react';
+import { Play, Terminal, ChevronRight, X } from 'lucide-react';
 
 const JobsPage = () => {
   const navigate = useNavigate();
@@ -45,6 +45,18 @@ const JobsPage = () => {
   };
 
   const openJob = (job: Job) => navigate(`/jobs/${job.id}`, { state: { job } });
+
+  const isActive = (s: string) => ['pending', 'queued', 'running', 'waiting'].includes(s);
+  const handleCancel = async (e: React.MouseEvent, job: Job) => {
+    e.stopPropagation();
+    if (!confirm(`Cancel job "${job.name}"?`)) return;
+    try {
+      await api.cancelJob(job.id);
+      loadData();
+    } catch {
+      alert('Failed to cancel job');
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -101,9 +113,20 @@ const JobsPage = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">admin</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <span className="text-brand-600 hover:text-brand-900 inline-flex items-center justify-end w-full gap-1">
-                      <Terminal size={16} /> View <ChevronRight size={14} />
-                    </span>
+                    <div className="inline-flex items-center justify-end gap-3">
+                      {isActive(job.status) && (
+                        <button
+                          onClick={(e) => handleCancel(e, job)}
+                          className="text-red-600 hover:text-red-800 inline-flex items-center gap-1"
+                          title="Cancel this job"
+                        >
+                          <X size={15} /> Cancel
+                        </button>
+                      )}
+                      <span className="text-brand-600 hover:text-brand-900 inline-flex items-center gap-1">
+                        <Terminal size={16} /> View <ChevronRight size={14} />
+                      </span>
+                    </div>
                   </td>
                 </tr>
               ))}
