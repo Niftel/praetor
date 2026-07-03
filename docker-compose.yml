@@ -116,6 +116,10 @@ services:
         condition: service_started
     networks:
       - praetor-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.praetor-api.rule=Host(`api.praetor.localhost`)"
+      - "traefik.http.services.praetor-api.loadbalancer.server.port=8080"
 
   scheduler:
     build:
@@ -265,6 +269,54 @@ services:
       - api
     networks:
       - praetor-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.praetor-ui.rule=Host(`praetor.localhost`)"
+      - "traefik.http.services.praetor-ui.loadbalancer.server.port=80"
+
+  # Gitea: Praetor's infra artifact registry — host-runner daemon releases and the
+  # mirrored Python/PyPI packages the Execution Pack build pulls from. State lives
+  # on the gitea-data volume; reachable in-cluster as gitea-host:3000.
+  gitea-host:
+    build:
+      context: deployments/gitea
+    # Pinned so the pack build (docker inspect gitea-host) and in-cluster DNS both
+    # resolve the same stable name.
+    container_name: gitea-host
+    hostname: gitea-host
+    ports:
+      - "${PRAETOR_GITEA_PORT:-3002}:3000"
+    volumes:
+      - gitea-data:/var/lib/gitea
+    networks:
+      - praetor-net
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gitea.rule=Host(`gitea.localhost`)"
+      - "traefik.http.services.gitea.loadbalancer.server.port=3000"
+
+  # Reverse proxy: routes *.localhost hostnames to services (browser-friendly,
+  # *.localhost auto-resolves to 127.0.0.1). Dashboard at http://traefik.localhost.
+  traefik:
+    image: traefik:v3.7.6
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=praetor_praetor-net"
+      - "--entrypoints.web.address=:80"
+      - "--api.dashboard=true"
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - praetor-net
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
 
 networks:
   praetor-net:
@@ -273,3 +325,7 @@ networks:
 volumes:
   nats-data:
   praetor-ssh:
+  # Pre-existing volume holding Gitea's config/DB/repos/packages (created out of
+  # band); referenced as external so compose never wipes it.
+  gitea-data:
+    external: true
