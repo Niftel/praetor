@@ -208,12 +208,16 @@ services:
     networks:
       - praetor-net
 
-  # Demo cluster - target hosts for Ansible playbooks
+  # Demo cluster - target hosts for Ansible playbooks. Debian (glibc) so the
+  # self-contained Execution Pack (glibc CPython + Ansible) actually runs on them;
+  # Alpine (musl) cannot exec the pack's binaries. Targets get ONLY sshd + python3
+  # + sudo — Ansible travels in the pushed pack, it is NOT pre-installed here
+  # (that's the whole point of Praetor).
   web1:
-    image: alpine:3.19
+    image: &target_image debian:12-slim
     hostname: web1
-    command: >
-      /bin/sh -c "apk add --no-cache openssh python3 sudo ansible git && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && (adduser -D praetor || true) && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
+    command: &target_cmd >
+      /bin/sh -c "apt-get update && apt-get install -y --no-install-recommends openssh-server python3 sudo && ssh-keygen -A && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && (id praetor >/dev/null 2>&1 || useradd -m -s /bin/bash praetor) && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
     volumes:
       - ./keys:/tmp/keys:ro
     networks:
@@ -222,10 +226,9 @@ services:
       - "${PRAETOR_WEB1_PORT:-8081}:80"
 
   web2:
-    image: alpine:3.19
+    image: *target_image
     hostname: web2
-    command: >
-      /bin/sh -c "apk add --no-cache openssh python3 sudo ansible git && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && (adduser -D praetor || true) && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
+    command: *target_cmd
     volumes:
       - ./keys:/tmp/keys:ro
     networks:
@@ -234,10 +237,9 @@ services:
       - "8082:80"
 
   db1:
-    image: alpine:3.19
+    image: *target_image
     hostname: db1
-    command: >
-      /bin/sh -c "apk add --no-cache openssh python3 sudo ansible git && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && (adduser -D praetor || true) && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
+    command: *target_cmd
     volumes:
       - ./keys:/tmp/keys:ro
     networks:
@@ -245,10 +247,9 @@ services:
 
   # Keep backward compatibility
   target-host:
-    image: alpine:3.19
+    image: *target_image
     hostname: target-host
-    command: >
-      /bin/sh -c "apk add --no-cache openssh python3 sudo && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh && while [ ! -f /tmp/keys/id_rsa.pub ]; do echo 'Waiting for keys...'; sleep 1; done && cat /tmp/keys/id_rsa.pub > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && adduser -D praetor && echo 'praetor:praetor' | chpasswd && mkdir -p /home/praetor/.ssh && chmod 700 /home/praetor/.ssh && cat /tmp/keys/id_rsa.pub > /home/praetor/.ssh/authorized_keys && chmod 600 /home/praetor/.ssh/authorized_keys && chown -R praetor:praetor /home/praetor/.ssh && echo 'praetor ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && /usr/sbin/sshd -D"
+    command: *target_cmd
     volumes:
       - ./keys:/tmp/keys:ro
     networks:
