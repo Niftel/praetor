@@ -1,0 +1,61 @@
+---
+# Uninstall Gitea — reverses playbooks/gitea.yml.
+#
+# Stops the running Gitea process, then removes the binary, its data/working
+# directory, and the service user. The git client is left installed (it's a
+# general-purpose tool); pass -e gitea_remove_git=true to remove it too.
+#
+#   ansible-playbook -i <inventory> playbooks/gitea_uninstall.yml
+#
+# WARNING: this deletes Gitea's data directory ({{ gitea_work_dir }}) — repos,
+# database and config are all removed.
+
+- name: Uninstall Gitea
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    gitea_work_dir: /var/lib/gitea
+    gitea_remove_git: false
+
+  tasks:
+    - name: Stop the Gitea process
+      # pkill -x matches the exact process name (the gitea binary), not this
+      # shell command. rc 1 = "no process matched", which is fine (idempotent).
+      ansible.builtin.command: pkill -x gitea
+      register: gitea_kill
+      changed_when: gitea_kill.rc == 0
+      failed_when: gitea_kill.rc not in [0, 1]
+
+    - name: Give it a moment to exit
+      ansible.builtin.command: sleep 2
+      changed_when: false
+      when: gitea_kill.rc == 0
+
+    - name: Remove the Gitea binary
+      ansible.builtin.file:
+        path: /usr/local/bin/gitea
+        state: absent
+
+    - name: Remove Gitea's data and working directory
+      ansible.builtin.file:
+        path: "{{ gitea_work_dir }}"
+        state: absent
+
+    - name: Remove the gitea service user and its home
+      ansible.builtin.user:
+        name: git
+        state: absent
+        remove: true
+
+    - name: Remove the git client (only when explicitly requested)
+      ansible.builtin.apt:
+        name: git
+        state: absent
+        purge: true
+      when: gitea_remove_git | bool
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "Gitea removed (binary, {{ gitea_work_dir }}, and the git user){{ ' + git client' if gitea_remove_git | bool else '' }}."

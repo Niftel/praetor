@@ -1,4 +1,4 @@
-.PHONY: build host-runner execpack test clean run-api run-scheduler run-ingestion migrate-up migrate-down
+.PHONY: build host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api run-scheduler run-ingestion migrate-up migrate-down
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -30,6 +30,25 @@ host-runner:
 	@echo "Building host-runner for $(HOST_RUNNER_OS)/$(HOST_RUNNER_ARCH)..."
 	mkdir -p build/$(HOST_RUNNER_OS)
 	GOOS=$(HOST_RUNNER_OS) GOARCH=$(HOST_RUNNER_ARCH) CGO_ENABLED=0 go build -o $(HOST_RUNNER_BINARY) ./cmd/host-runner
+
+# Release the host-runner daemon as versioned, per-arch artifacts in Gitea (the
+# source of truth for this infra artifact; the execution-pack build pulls it from
+# there). Example: make release-host-runner VERSION=0.1.0
+release-host-runner:
+	@test -n "$(VERSION)" || { echo "usage: make release-host-runner VERSION=x.y.z"; exit 1; }
+	VERSION=$(VERSION) ./scripts/release-host-runner.sh
+
+# Mirror the pinned standalone CPython runtime into Gitea's generic package
+# registry so pack builds are reproducible/air-gapped (no GitHub at build time).
+# Needs GITEA_TOKEN. Example: make mirror-python GITEA_TOKEN=xxxx
+mirror-python:
+	./scripts/mirror-python.sh
+
+# Mirror the Ansible + pip dependency wheelhouse (linux amd64+arm64) into Gitea's
+# PyPI registry so pack builds pip-install from Gitea only. Needs GITEA_TOKEN.
+# Example: make mirror-pip GITEA_TOKEN=xxxx REQS="ansible docker"
+mirror-pip:
+	./scripts/mirror-pip.sh
 
 # Build an Execution Pack (self-contained Python + Ansible pushed to hosts) from a
 # declarative YAML spec — the ExecPack equivalent of ansible-builder. Output goes

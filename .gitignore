@@ -1,6 +1,7 @@
 # Secrets / keys
 keys
 *.pem
+inventory/gitea_ed25519
 .env
 web/.env.local
 
@@ -15,6 +16,7 @@ web/.env.local
 /ingestion
 /migrator
 /scheduler
+/packbuilder
 /praetor-host-runner-linux
 /build/praetor-host-runner
 /build/linux/

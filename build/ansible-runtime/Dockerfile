@@ -25,18 +25,22 @@ ARG ANSIBLE_SPEC=ansible
 ARG EXTRA_PIP=
 # GALAXY_COLLECTIONS: space-separated ansible-galaxy collections
 ARG GALAXY_COLLECTIONS=
+# Gitea mirror the pack pulls Python + wheels from (reproducible / air-gapped;
+# no GitHub or PyPI at build time). Reachable from the build via the packbuilder's
+# --network=host + --add-host gitea-host:<ip>.
+ARG GITEA_URL=http://gitea-host:3000
+ARG GITEA_OWNER=praetor
+# HOST_RUNNER_VERSION: the host-runner daemon release (in Gitea) to bundle, so the
+# pack is the single self-contained bootstrapping unit (daemon + Python + Ansible).
+ARG HOST_RUNNER_VERSION=v0.1.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-# Fetch a standalone CPython for the target arch and lay it out at the fixed prefix.
+# Fetch the standalone CPython for the target arch from the Gitea generic registry
+# (mirrored by scripts/mirror-python.sh) and lay it out at the fixed prefix.
 RUN set -eux; \
-    case "$TARGETARCH" in \
-      arm64) PBS_ARCH=aarch64 ;; \
-      amd64) PBS_ARCH=x86_64 ;; \
-      *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
-    esac; \
-    url="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_TAG}/cpython-${PY_VERSION}+${PBS_TAG}-${PBS_ARCH}-unknown-linux-gnu-install_only.tar.gz"; \
+    url="${GITEA_URL}/api/packages/${GITEA_OWNER}/generic/python-standalone/${PY_VERSION}+${PBS_TAG}/python-standalone-${PY_VERSION}-linux-${TARGETARCH}.tar.gz"; \
     echo "Downloading $url"; \
     mkdir -p /opt/praetor "$(dirname "$PREFIX")"; \
     curl -fsSL "$url" -o /tmp/py.tgz; \
@@ -44,10 +48,23 @@ RUN set -eux; \
     mv /opt/praetor/python "$PREFIX"; \
     "$PREFIX/bin/python3" --version
 
-# Install Ansible + any extra pip packages defined by the spec.
+# Bundle the host-runner daemon (Praetor comms + WAL) from its Gitea release into
+# the pack, so the pack is one self-contained bootstrapping unit.
 RUN set -eux; \
-    "$PREFIX/bin/pip" install --no-cache-dir --upgrade pip; \
-    "$PREFIX/bin/pip" install --no-cache-dir ${ANSIBLE_SPEC} ${EXTRA_PIP}; \
+    url="${GITEA_URL}/${GITEA_OWNER}/host-runner/releases/download/${HOST_RUNNER_VERSION}/praetor-host-runner-linux-${TARGETARCH}"; \
+    echo "Downloading $url"; \
+    curl -fsSL "$url" -o "$PREFIX/bin/praetor-host-runner"; \
+    chmod 0755 "$PREFIX/bin/praetor-host-runner"; \
+    test -s "$PREFIX/bin/praetor-host-runner"
+
+# Install Ansible + any extra pip packages from the Gitea PyPI mirror only
+# (mirrored by scripts/mirror-pip.sh) — no PyPI at build time.
+RUN set -eux; \
+    host="$(printf '%s' "${GITEA_URL}" | sed -E 's#^https?://([^:/]+).*#\1#')"; \
+    "$PREFIX/bin/pip" install --no-cache-dir \
+      --index-url "${GITEA_URL}/api/packages/${GITEA_OWNER}/pypi/simple/" \
+      --trusted-host "$host" \
+      ${ANSIBLE_SPEC} ${EXTRA_PIP}; \
     "$PREFIX/bin/ansible-playbook" --version
 
 # Install any extra Galaxy collections into site-packages/ansible_collections,
