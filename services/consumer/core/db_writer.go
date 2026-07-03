@@ -88,6 +88,8 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 			TerminalTransitions.WithLabelValues("successful").Inc()
 		case "JOB_FAILED":
 			TerminalTransitions.WithLabelValues("failed").Inc()
+		case "JOB_CANCELED":
+			TerminalTransitions.WithLabelValues("canceled").Inc()
 		}
 		w.Notifier.Dispatch(evt) // no-op on a nil notifier; sends in the background
 	}
@@ -113,6 +115,10 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 	case "JOB_FAILED":
 		newState = "failed"
 		newStatus = "failed"
+		finished = true
+	case "JOB_CANCELED":
+		newState = "canceled"
+		newStatus = "canceled"
 		finished = true
 	default:
 		// Normal task events don't change state

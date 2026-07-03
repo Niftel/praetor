@@ -86,7 +86,7 @@ func (s *Scheduler) processPendingJobs() error {
 	query := `
 		SELECT id, name, unified_job_template_id, status, job_args
 		FROM unified_jobs
-		WHERE status = 'pending' AND current_run_id IS NULL
+		WHERE status = 'pending' AND current_run_id IS NULL AND NOT cancel_requested
 		FOR UPDATE SKIP LOCKED
 		LIMIT 10`
 

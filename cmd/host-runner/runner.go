@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
@@ -56,7 +58,7 @@ func (r *Runner) emit(req *events.ExecutionRequest, eventType, host, msg string,
 	}
 }
 
-func (r *Runner) Execute() error {
+func (r *Runner) Execute(ctx context.Context) error {
 	// 1. Read Manifest
 	manifestPath := filepath.Join(r.JobDir, "manifest.json")
 	manifestBytes, err := os.ReadFile(manifestPath)
@@ -205,7 +207,19 @@ func (r *Runner) Execute() error {
 	// ansible-playbook if no runtime is present.
 	ansiblePlaybook, ansibleInterpreter := resolveAnsible(req.JobManifest.ExecutionPack)
 
-	cmd := exec.Command(ansiblePlaybook, playArgs...)
+	// Run under a context so a cancel request (detected by the heartbeat loop)
+	// terminates the play. Put ansible-playbook in its own process group and, on
+	// cancel, SIGTERM the whole group so its ssh/module children die too; WaitDelay
+	// escalates to SIGKILL if it doesn't exit promptly.
+	cmd := exec.CommandContext(ctx, ansiblePlaybook, playArgs...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 10 * time.Second
 	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
 	// Point Ansible at the bundled interpreter explicitly (no system symlinks —
 	// the runtime stays entirely under /opt/praetor). This makes module execution
@@ -281,9 +295,17 @@ func (r *Runner) Execute() error {
 	finalState := "successful"
 	eventType := events.EventJobCompleted
 	if err != nil {
-		finalState = "failed"
-		eventType = events.EventJobFailed
-		log.Printf("Ansible execution failed: %v", err)
+		// A canceled context means the operator asked to stop — report it as
+		// canceled, not a failure, so the run's terminal state reflects intent.
+		if ctx.Err() == context.Canceled {
+			finalState = "canceled"
+			eventType = events.EventJobCanceled
+			log.Printf("Ansible execution canceled by request")
+		} else {
+			finalState = "failed"
+			eventType = events.EventJobFailed
+			log.Printf("Ansible execution failed: %v", err)
+		}
 	}
 
 	msgEnd := fmt.Sprintf("Job finished in %v. State: %s", duration, finalState)

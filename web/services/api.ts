@@ -52,6 +52,7 @@ export const api = {
     // Jobs
     getJobs: () => fetchWithAuth('/jobs').then(r => r.json()),
     launchJob: (data: any) => fetchWithAuth('/jobs', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    cancelJob: (id: number) => fetchWithAuth(`/jobs/${id}/cancel`, { method: 'POST' }).then(r => r.json()),
 
     // Dashboard Stats (derived from jobs for now)
     getDashboardStats: async () => {
