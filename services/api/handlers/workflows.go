@@ -82,13 +82,14 @@ func (rs *WorkflowsResource) ListWorkflows(w http.ResponseWriter, r *http.Reques
 // CreateWorkflow POST /api/v1/workflow-templates
 func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		OrganizationID int64          `json:"organization_id"`
-		Name           string         `json:"name"`
-		WebhookEnabled bool           `json:"webhook_enabled"`
-		WebhookService string         `json:"webhook_service"`
-		WebhookKey     string         `json:"webhook_key"`
-		Nodes          []workflowNode `json:"nodes"`
-		Edges          []workflowEdge `json:"edges"`
+		OrganizationID    int64          `json:"organization_id"`
+		Name              string         `json:"name"`
+		WebhookEnabled    bool           `json:"webhook_enabled"`
+		WebhookService    string         `json:"webhook_service"`
+		WebhookKey        string         `json:"webhook_key"`
+		AllowSimultaneous bool           `json:"allow_simultaneous"`
+		Nodes             []workflowNode `json:"nodes"`
+		Edges             []workflowEdge `json:"edges"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
@@ -106,9 +107,9 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 
 	var id int64
 	if err := tx.QueryRowxContext(r.Context(),
-		`INSERT INTO workflow_templates (organization_id, name, webhook_enabled, webhook_service, webhook_key)
-		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		body.OrganizationID, body.Name, body.WebhookEnabled, nullIfEmpty(body.WebhookService), nullIfEmpty(body.WebhookKey)).Scan(&id); err != nil {
+		`INSERT INTO workflow_templates (organization_id, name, webhook_enabled, webhook_service, webhook_key, allow_simultaneous)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		body.OrganizationID, body.Name, body.WebhookEnabled, nullIfEmpty(body.WebhookService), nullIfEmpty(body.WebhookKey), body.AllowSimultaneous).Scan(&id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -158,12 +159,13 @@ func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var body struct {
-		Name           string         `json:"name"`
-		WebhookEnabled bool           `json:"webhook_enabled"`
-		WebhookService string         `json:"webhook_service"`
-		WebhookKey     string         `json:"webhook_key"`
-		Nodes          []workflowNode `json:"nodes"`
-		Edges          []workflowEdge `json:"edges"`
+		Name              string         `json:"name"`
+		WebhookEnabled    bool           `json:"webhook_enabled"`
+		WebhookService    string         `json:"webhook_service"`
+		WebhookKey        string         `json:"webhook_key"`
+		AllowSimultaneous bool           `json:"allow_simultaneous"`
+		Nodes             []workflowNode `json:"nodes"`
+		Edges             []workflowEdge `json:"edges"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
@@ -178,9 +180,9 @@ func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Reque
 
 	if _, err := tx.ExecContext(r.Context(),
 		`UPDATE workflow_templates SET name=$2, webhook_enabled=$3, webhook_service=$4,
-		        webhook_key=COALESCE(NULLIF($5,''), webhook_key), modified_at=now()
+		        webhook_key=COALESCE(NULLIF($5,''), webhook_key), allow_simultaneous=$6, modified_at=now()
 		 WHERE id=$1`,
-		id, body.Name, body.WebhookEnabled, nullIfEmpty(body.WebhookService), nullIfEmpty(body.WebhookKey)); err != nil {
+		id, body.Name, body.WebhookEnabled, nullIfEmpty(body.WebhookService), nullIfEmpty(body.WebhookKey), body.AllowSimultaneous); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -237,14 +239,16 @@ func (rs *WorkflowsResource) GetWorkflow(w http.ResponseWriter, r *http.Request)
 	_ = rs.DB.SelectContext(r.Context(), &edges,
 		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, id)
 	var wh struct {
-		Enabled bool   `db:"webhook_enabled"`
-		Service string `db:"webhook_service"`
+		Enabled  bool   `db:"webhook_enabled"`
+		Service  string `db:"webhook_service"`
+		AllowSim bool   `db:"allow_simultaneous"`
 	}
 	_ = rs.DB.GetContext(r.Context(), &wh,
-		`SELECT webhook_enabled, COALESCE(webhook_service,'') AS webhook_service FROM workflow_templates WHERE id=$1`, id)
+		`SELECT webhook_enabled, COALESCE(webhook_service,'') AS webhook_service, allow_simultaneous FROM workflow_templates WHERE id=$1`, id)
 	render.JSON(w, r, map[string]interface{}{
 		"id": id, "organization_id": org, "nodes": nodes, "edges": edges,
 		"webhook_enabled": wh.Enabled, "webhook_service": wh.Service,
+		"allow_simultaneous": wh.AllowSim,
 	})
 }
 
@@ -278,6 +282,22 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
 		return
 	}
+
+	// Concurrency guard: unless the workflow opts into simultaneous runs, refuse a
+	// launch while a prior run is still active (prevents accidental double-triggers).
+	var allowSim bool
+	_ = rs.DB.GetContext(r.Context(), &allowSim, `SELECT allow_simultaneous FROM workflow_templates WHERE id=$1`, id)
+	if !allowSim {
+		var active int
+		if err := rs.DB.GetContext(r.Context(), &active,
+			`SELECT count(*) FROM workflow_jobs
+			 WHERE workflow_template_id = $1 AND status NOT IN ('successful','failed','canceled','error')`,
+			id); err == nil && active > 0 {
+			render.ErrConflict(fmt.Errorf("this workflow is already running; wait for it to finish or enable Allow Simultaneous")).Render(w, r)
+			return
+		}
+	}
+
 	tx, err := rs.DB.Beginx()
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)

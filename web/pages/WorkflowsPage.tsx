@@ -41,6 +41,7 @@ const WorkflowsPage = () => {
   const [whEnabled, setWhEnabled] = useState(false);
   const [whService, setWhService] = useState('generic');
   const [whKey, setWhKey] = useState('');
+  const [allowSim, setAllowSim] = useState(false);
 
   // Template preview modal
   const [viewWf, setViewWf] = useState<Workflow | null>(null);
@@ -83,7 +84,7 @@ const WorkflowsPage = () => {
   const openBuilder = () => {
     setEditingId(null);
     setName(''); setOrgId(orgs[0]?.id ?? ''); setNodes([]); setEdges([]); setNodeSeq(1); setError('');
-    setWhEnabled(false); setWhService('generic'); setWhKey('');
+    setWhEnabled(false); setWhService('generic'); setWhKey(''); setAllowSim(false);
     setBuilderOpen(true);
   };
   const openEdit = async (wf: Workflow) => {
@@ -104,6 +105,7 @@ const WorkflowsPage = () => {
       setNodeSeq(maxN + 1);
       setWhEnabled(!!full.webhook_enabled);
       setWhService(full.webhook_service || 'generic');
+      setAllowSim(!!full.allow_simultaneous);
       setWhKey(''); // never returned; blank keeps the existing secret
       setBuilderOpen(true);
     } catch (e: any) { alert(e.message || 'Failed to load workflow for editing.'); }
@@ -143,6 +145,7 @@ const WorkflowsPage = () => {
       webhook_enabled: whEnabled,
       webhook_service: whEnabled ? whService : '',
       webhook_key: whEnabled ? whKey.trim() : '',
+      allow_simultaneous: allowSim,
       nodes: nodes.map(n => ({
         node_key: n.node_key, node_type: n.node_type, name: n.name.trim(),
         job_template_id: n.node_type === 'job' ? n.job_template_id : null,
@@ -276,6 +279,11 @@ const WorkflowsPage = () => {
               </select>
             </div>
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={allowSim} onChange={e => setAllowSim(e.target.checked)} />
+            Allow simultaneous runs (off = a launch is refused while a run is still active)
+          </label>
 
           {/* Webhook trigger — a remote event launches the whole workflow */}
           <div className="border border-gray-200 rounded-md p-3 bg-gray-50">

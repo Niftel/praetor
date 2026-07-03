@@ -139,3 +139,17 @@ func ErrForbidden(err error) render.Renderer {
 		ErrorText:      "Permission denied",
 	}
 }
+
+// ErrConflict signals the request clashes with current state (HTTP 409), e.g. a
+// launch refused because a prior run of the same template is still active.
+func ErrConflict(err error) render.Renderer {
+	msg := "Conflict"
+	if err != nil {
+		msg = err.Error()
+	}
+	return &ErrorResponse{
+		Err:            err,
+		HTTPStatusCode: http.StatusConflict,
+		ErrorText:      msg,
+	}
+}

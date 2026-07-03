@@ -128,15 +128,30 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 		AskLimitOnLaunch     bool            `db:"ask_limit_on_launch"`
 		SurveyEnabled        bool            `db:"survey_enabled"`
 		SurveySpec           json.RawMessage `db:"survey_spec"`
+		AllowSimultaneous    bool            `db:"allow_simultaneous"`
 	}
 	if err := rs.DB.GetContext(r.Context(), &jt,
-		`SELECT id, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec
+		`SELECT id, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec, allow_simultaneous
 		 FROM job_templates WHERE unified_job_template_id = $1`, req.UnifiedJobTemplateID); err != nil {
 		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job template")))
 		return
 	}
 	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jt.ID, actExecute) {
 		return
+	}
+
+	// Concurrency guard: unless the template opts into simultaneous runs, refuse a
+	// launch while a prior run of the same template is still active. Stops
+	// accidental double-triggers from queuing a second overlapping run.
+	if !jt.AllowSimultaneous {
+		var active int
+		if err := rs.DB.GetContext(r.Context(), &active,
+			`SELECT count(*) FROM unified_jobs
+			 WHERE unified_job_template_id = $1 AND status NOT IN ('successful','failed','canceled','error')`,
+			req.UnifiedJobTemplateID); err == nil && active > 0 {
+			render.Render(w, r, ErrConflict(fmt.Errorf("a run of this job template is already active; wait for it to finish or enable Allow Simultaneous")))
+			return
+		}
 	}
 
 	// Collect launch overrides, accepting each only if the template opts in.
@@ -370,6 +385,17 @@ func ErrInvalidRequest(err error) render.Renderer {
 		Err:            err,
 		HTTPStatusCode: 400,
 		StatusText:     "Invalid Request",
+		ErrorText:      err.Error(),
+	}
+}
+
+// ErrConflict (409) — the launch clashes with current state (e.g. a prior run of
+// the same template is still active).
+func ErrConflict(err error) render.Renderer {
+	return &ErrResponse{
+		Err:            err,
+		HTTPStatusCode: 409,
+		StatusText:     "Conflict",
 		ErrorText:      err.Error(),
 	}
 }
