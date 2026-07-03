@@ -70,11 +70,14 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(modelAuth.AuthMiddleware)
+		r.Use(modelAuth.AuthMiddleware(db))
 		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
 
 		// Execution Packs registry (the self-contained runtimes pushed to hosts).
 		r.Mount("/execution-packs", handlers.NewExecutionPacksResource(db).Routes())
+
+		// Personal access tokens (headless / CI API auth) — each user manages own.
+		r.Mount("/tokens", handlers.NewTokensResource(db).Routes())
 
 		// Activity stream (audit log) — superuser/auditor only
 		r.Get("/activity-stream", content.ListActivityStream)
