@@ -1,0 +1,23 @@
+# Dynamic TLS config (Traefik file provider). Registers the locally-trusted
+# mkcert certificate as the default cert for the websecure entrypoint, so every
+# *.localhost router serves HTTPS without a browser warning.
+#
+# The cert is generated on the host with `mkcert` (see deployments/traefik/certs)
+# and is machine-specific — regenerate it with (list hosts EXPLICITLY: a
+# `*.localhost` wildcard won't validate, as TLS clients reject wildcards directly
+# under a single-label suffix):
+#   mkcert -cert-file deployments/traefik/certs/localhost.pem \
+#          -key-file  deployments/traefik/certs/localhost-key.pem \
+#          localhost praetor.localhost api.praetor.localhost gitea.localhost \
+#          traefik.localhost "*.praetor.localhost" 127.0.0.1 ::1
+#
+# Requires the mkcert local CA in your trust store once: `mkcert -install`.
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/localhost.pem
+        keyFile: /certs/localhost-key.pem
+  certificates:
+    - certFile: /certs/localhost.pem
+      keyFile: /certs/localhost-key.pem
