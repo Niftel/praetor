@@ -378,6 +378,38 @@ services:
       - "traefik.http.routers.dashboard-web.middlewares=to-https@docker"
       - "traefik.http.routers.dashboard-web.service=api@internal"
 
+  # Metrics stack: Prometheus scrapes every service's /metrics (in-network by
+  # service name); Grafana renders them with a pre-provisioned datasource +
+  # starter dashboard. Both are dev conveniences reachable on published ports.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - praetor-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.0
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./deployments/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3005:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - praetor-net
+    restart: unless-stopped
+
 networks:
   praetor-net:
     driver: bridge
@@ -385,6 +417,8 @@ networks:
 volumes:
   nats-data:
   praetor-ssh:
+  prometheus-data:
+  grafana-data:
   # Pre-existing volume holding Gitea's config/DB/repos/packages (created out of
   # band); referenced as external so compose never wipes it.
   gitea-data:

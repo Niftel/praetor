@@ -1,0 +1,85 @@
+{
+  "uid": "praetor-overview",
+  "title": "Praetor Overview",
+  "tags": ["praetor"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "15s",
+  "annotations": { "list": [] },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Queue depth",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "praetor_scheduler_queue_depth" } ]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Jobs dispatched (rate/s)",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(praetor_scheduler_jobs_dispatched_total[$__rate_interval]))", "legendFormat": "dispatched" } ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Terminal transitions (rate/s)",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (status) (rate(praetor_consumer_terminal_transitions_total[$__rate_interval]))", "legendFormat": "{{status}}" } ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Reconcile outcomes (rate/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (outcome) (rate(praetor_reconciler_outcomes_total[$__rate_interval]))", "legendFormat": "{{outcome}}" } ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Executor bootstraps & failures (rate/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (mode) (rate(praetor_executor_bootstraps_total[$__rate_interval]))", "legendFormat": "{{mode}}" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (mode) (rate(praetor_executor_bootstrap_failures_total[$__rate_interval]))", "legendFormat": "fail {{mode}}" }
+      ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "API requests by route (rate/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (route) (rate(praetor_api_http_requests_total[$__rate_interval]))", "legendFormat": "{{route}}" } ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "API p95 latency by route (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 0 } }, "overrides": [] },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "histogram_quantile(0.95, sum by (le, route) (rate(praetor_api_http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "{{route}}" } ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Scheduler tick p95 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 0 } }, "overrides": [] },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "histogram_quantile(0.95, sum by (le) (rate(praetor_scheduler_tick_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "tick p95" } ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Events ingested (rate/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(praetor_ingestion_events_total[$__rate_interval]))", "legendFormat": "events" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(praetor_consumer_events_projected_total[$__rate_interval]))", "legendFormat": "projected" }
+      ]
+    }
+  ]
+}
