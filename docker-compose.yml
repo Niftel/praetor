@@ -125,6 +125,32 @@ services:
       - "traefik.http.routers.praetor-api-web.entrypoints=web"
       - "traefik.http.routers.praetor-api-web.middlewares=to-https@docker"
 
+  # Pull-based recovery: SSHes to hosts whose runs are parked in 'reconciling'
+  # (by the scheduler's heartbeat check) and harvests their WAL, so a job that
+  # finished on the host but never pushed is recovered to its true outcome.
+  reconciler:
+    build:
+      context: .
+      dockerfile: build/package/Dockerfile.reconciler
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
+      # Run event/log endpoints live on the ingestion service.
+      INGESTION_URL: http://ingestion:8081
+      RECONCILE_INTERVAL: "30s"
+    volumes:
+      # Share the executor's SSH known_hosts so host-key trust is consistent.
+      - praetor-ssh:/home/praetor/.ssh
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      ingestion:
+        condition: service_started
+    networks:
+      - praetor-net
+    restart: unless-stopped
+
   scheduler:
     build:
       context: .
