@@ -42,5 +42,11 @@ chmod 600 /root/.ssh/id_rsa
 chmod 644 /root/.ssh/id_rsa.pub
 chmod 600 /root/.ssh/config
 
+# Localhost jobs run the host-runner on the executor itself: it writes job dirs
+# under /var/lib/praetor and extracts the Execution Pack under /opt/praetor. Make
+# both writable by the runtime user (the process runs as praetor via gosu).
+mkdir -p /var/lib/praetor /opt/praetor
+chown praetor:praetor /var/lib/praetor /opt/praetor
+
 # Drop privileges and exec
 exec gosu praetor "$@"

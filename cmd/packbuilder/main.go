@@ -20,13 +20,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Spec is the Execution Pack definition (mirrors cmd/execpack).
+// Spec is the Execution Pack definition (mirrors cmd/execpack). Every element of
+// the bootstrapping unit is declared here: the Python + Ansible runtime, its
+// deps, the target arches, and the host-runner daemon version to bundle.
 type Spec struct {
 	Python      string   `yaml:"python"`
 	Ansible     string   `yaml:"ansible"`
 	Pip         []string `yaml:"pip"`
 	Collections []string `yaml:"collections"`
 	Arches      []string `yaml:"arches"`
+	HostRunner  string   `yaml:"host_runner"` // daemon release version to bundle (e.g. v0.1.0)
 }
 
 func main() {
@@ -109,7 +112,11 @@ func buildPack(name, specYAML string) (string, error) {
 	giteaURL := envOr("GITEA_URL", "http://gitea-host:3000")
 	giteaOwner := envOr("GITEA_OWNER", "praetor")
 	giteaHost := hostFromURL(giteaURL)
-	hostRunnerVersion := envOr("HOST_RUNNER_VERSION", "v0.1.0")
+	// The daemon version is a pack.yml element; fall back to env/default if unset.
+	hostRunnerVersion := spec.HostRunner
+	if hostRunnerVersion == "" {
+		hostRunnerVersion = envOr("HOST_RUNNER_VERSION", "v0.1.0")
+	}
 
 	var out strings.Builder
 	for _, arch := range spec.Arches {
@@ -127,7 +134,7 @@ func buildPack(name, specYAML string) (string, error) {
 			"--build-arg", "GITEA_OWNER=" + giteaOwner,
 			"--build-arg", "HOST_RUNNER_VERSION=" + hostRunnerVersion,
 		}
-		if ip := bridgeIP(giteaHost); ip != "" {
+		if ip := containerIP(giteaHost); ip != "" {
 			args = append(args, "--add-host", giteaHost+":"+ip)
 		}
 		args = append(args, "-t", img, "/build/ansible-runtime")
@@ -206,16 +213,20 @@ func hostFromURL(u string) string {
 	return u
 }
 
-// bridgeIP returns a container's IP on the default bridge network, or "" if it
-// can't be determined. Used to add an --add-host entry so the (host-networked)
-// pack build can resolve the Gitea container by name.
-func bridgeIP(container string) string {
+// containerIP returns a container's IP on any of its networks (first non-empty),
+// or "" if it can't be determined. Used to add an --add-host entry so the
+// host-networked pack build can resolve the Gitea container by name whether it's
+// on the default bridge or a user-defined compose network.
+func containerIP(container string) string {
 	out, err := exec.Command("docker", "inspect", "-f",
-		`{{(index .NetworkSettings.Networks "bridge").IPAddress}}`, container).Output()
+		`{{range .NetworkSettings.Networks}}{{if .IPAddress}}{{.IPAddress}} {{end}}{{end}}`, container).Output()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	if fields := strings.Fields(string(out)); len(fields) > 0 {
+		return fields[0]
+	}
+	return ""
 }
 
 func tail(s string, n int) string {

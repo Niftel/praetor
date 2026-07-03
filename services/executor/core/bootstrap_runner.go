@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -89,14 +90,13 @@ func tofuHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
 	return nil
 }
 
-// BootstrapRunner deploys the host-runner (and the self-contained execution
-// environment) to a target host directly over SSH — no Ansible and no Python are
-// required on the target. It copies the host-runner binary, the Ansible runtime
-// bundle, the checkpoint plugin, the manifest and the key over SSH sessions, then
-// launches the host-runner. The target only needs sshd, a POSIX shell and tar.
+// BootstrapRunner deploys the self-contained Execution Pack (host-runner daemon +
+// Python + Ansible) to a target host directly over SSH — no Ansible and no Python
+// are required on the target. It pushes the pack, installs the daemon from it, and
+// copies the checkpoint plugin, manifest and key over SSH, then launches the
+// daemon. The target only needs sshd, a POSIX shell and tar.
 type BootstrapRunner struct {
-	RunnerPayloadPath string
-	RuntimeDir        string // dir holding <pack>-linux-<arch>.tar.gz Execution Packs
+	RuntimeDir string // dir holding <pack>-linux-<arch>.tar.gz Execution Packs
 }
 
 func NewBootstrapRunner() *BootstrapRunner {
@@ -104,10 +104,7 @@ func NewBootstrapRunner() *BootstrapRunner {
 	if runtimeDir == "" {
 		runtimeDir = "/tmp/build/runtime"
 	}
-	return &BootstrapRunner{
-		RunnerPayloadPath: "/tmp/build/linux/praetor-host-runner",
-		RuntimeDir:        runtimeDir,
-	}
+	return &BootstrapRunner{RuntimeDir: runtimeDir}
 }
 
 func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) error {
@@ -272,13 +269,48 @@ func (r *BootstrapRunner) localBootstrap(req *events.ExecutionRequest, manifestB
 		return err
 	}
 	log.Printf("BootstrapRunner: no runner host — executing locally for run %s", req.ExecutionRunID)
-	cmd := exec.Command(r.RunnerPayloadPath,
+	// Localhost jobs run on the executor itself, but still source the daemon (and
+	// Ansible runtime) from the pack — same as the remote path — so the daemon is
+	// versioned via the pack rather than the executor image.
+	pack := firstNonEmpty(req.JobManifest.ExecutionPack, "ansible-runtime")
+	hostRunner, err := r.ensureLocalPack(pack)
+	if err != nil {
+		return fmt.Errorf("prepare Execution Pack %q locally: %w", pack, err)
+	}
+	cmd := exec.Command(hostRunner,
 		"--job-dir="+jobDir, "--api-url="+callbackURL, "--run-id="+runID)
 	logFile, _ := os.OpenFile(jobDir+"/runner.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if logFile != nil {
 		cmd.Stdout, cmd.Stderr = logFile, logFile
 	}
 	return cmd.Start() // detached; do not wait
+}
+
+// ensureLocalPack extracts the pack for the executor's own arch under
+// /opt/praetor/packs/<pack> if absent, and returns the path to the bundled
+// host-runner daemon. Mirrors the remote bootstrap: the daemon + runtime come
+// from the pack, not a separately-shipped binary.
+func (r *BootstrapRunner) ensureLocalPack(pack string) (string, error) {
+	prefix := "/opt/praetor/packs/" + pack
+	hostRunner := prefix + "/bin/praetor-host-runner"
+	if _, err := os.Stat(prefix + "/bin/ansible-playbook"); err == nil {
+		return hostRunner, nil // already extracted
+	}
+	tarball := fmt.Sprintf("%s/%s-linux-%s.tar.gz", r.RuntimeDir, pack, runtime.GOARCH)
+	f, err := os.Open(tarball)
+	if err != nil {
+		return "", fmt.Errorf("open Execution Pack %q for %s: %w", pack, runtime.GOARCH, err)
+	}
+	defer f.Close()
+	if err := os.MkdirAll("/opt/praetor/packs", 0o755); err != nil {
+		return "", err
+	}
+	cmd := exec.Command("tar", "-xzf", "-", "-C", "/")
+	cmd.Stdin = f
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("extract pack %q: %w: %s", pack, err, out)
+	}
+	return hostRunner, nil
 }
 
 // --- SSH helpers ---
