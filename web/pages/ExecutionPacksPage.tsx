@@ -103,9 +103,8 @@ const ExecutionPacksPage = () => {
       <Card className="bg-brand-50/40 border-brand-100">
         <p className="text-sm text-gray-600">
           An <b>Execution Pack</b> is the self-contained Python + Ansible runtime Praetor pushes onto a host at run time,
-          so hosts need nothing pre-installed. Build one from a YAML spec, then register it here so templates can select it:
+          so hosts need nothing pre-installed. Build one from a YAML spec, then register it here so templates can select it.
         </p>
-        <pre className="mt-2 bg-white border border-gray-200 rounded-md p-2 text-[11px] font-mono text-gray-700 overflow-x-auto">make execpack SPEC=build/execpack/specs/docker.yml   # builds build/runtime/docker-tools-linux-&lt;arch&gt;.tar.gz</pre>
       </Card>
 
       <Card className="overflow-hidden">
