@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/render"
 	"github.com/jmoiron/sqlx"
+	promMetrics "github.com/praetordev/praetor/pkg/metrics"
 	"github.com/praetordev/praetor/services/api/handlers"
 	modelAuth "github.com/praetordev/praetor/services/api/middleware"
 	praetorRender "github.com/praetordev/praetor/services/api/render"
@@ -24,6 +25,7 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.URLFormat)
+	r.Use(modelAuth.Metrics)
 	r.Use(render.SetContentType(render.ContentTypeJSON))
 
 	// CORS
@@ -48,6 +50,9 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	r.Get("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		praetorRender.JSON(w, r, map[string]string{"status": "pong"})
 	})
+
+	// Prometheus scrape endpoint (unauthenticated, like /ping).
+	r.Handle("/metrics", promMetrics.Handler())
 
 	// Public Host Runner Heartbeat (for host-runner agents)
 	hosts := handlers.NewHostsResource(db)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/metrics"
 	core "github.com/praetordev/praetor/services/reconciler/core"
 )
 
@@ -47,6 +48,8 @@ func main() {
 			interval = d
 		}
 	}
+
+	metrics.Serve("")
 
 	rec := core.NewReconciler(database, interval, apiURL)
 	go rec.Start()

@@ -46,6 +46,7 @@ func (s *Scheduler) Start() {
 		case <-s.Done:
 			return
 		case <-s.Ticker.C:
+			tickStart := time.Now()
 			if err := s.processPendingJobs(); err != nil {
 				log.Printf("Error processing jobs: %v", err)
 			}
@@ -60,6 +61,7 @@ func (s *Scheduler) Start() {
 			}
 			s.processWorkflows()
 			s.processEventTriggers()
+			TickDuration.Observe(time.Since(tickStart).Seconds())
 		}
 	}
 }
@@ -368,7 +370,11 @@ func (s *Scheduler) processPendingJobs() error {
 		log.Printf("Enqueued ExecutionRequest for Job %d (run %s). Playbook: %s", job.ID, runID, manifest.Playbook)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	JobsDispatched.Add(float64(len(jobs)))
+	return nil
 }
 
 // relayOutbox publishes committed-but-unsent launches to the durable request
@@ -527,7 +533,15 @@ func (s *Scheduler) processTimedOutJobs() error {
 	if err != nil {
 		log.Printf("Error moving stale runs to reconciling: %v", err)
 	} else if rows, _ := rec.RowsAffected(); rows > 0 {
+		RunsReconciling.Add(float64(rows))
 		log.Printf("Moved %d stale remote runs to reconciling", rows)
+	}
+
+	// Queue depth: jobs accepted but not yet running. Sampled once per tick.
+	var depth float64
+	if err := s.DB.GetContext(ctx, &depth,
+		`SELECT count(*) FROM unified_jobs WHERE status IN ('pending','queued')`); err == nil {
+		QueueDepth.Set(depth)
 	}
 
 	// 1b. Lost runs: a LOCAL run (no runner host — ran on the executor itself)
@@ -551,6 +565,7 @@ func (s *Scheduler) processTimedOutJobs() error {
 	if err != nil {
 		log.Printf("Error reconciling lost runs: %v", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
+		RunsLost.Add(float64(rows))
 		log.Printf("Marked %d local runs as lost (stale/absent heartbeat)", rows)
 	}
 

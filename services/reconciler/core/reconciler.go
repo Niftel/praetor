@@ -88,6 +88,7 @@ type candidate struct {
 }
 
 func (r *Reconciler) tick() {
+	defer func(start time.Time) { ReconcileTick.Observe(time.Since(start).Seconds()) }(time.Now())
 	ctx := context.Background()
 	var cs []candidate
 	err := r.DB.SelectContext(ctx, &cs, `
@@ -222,6 +223,7 @@ func (r *Reconciler) projectEvents(ctx context.Context, client *ssh.Client, sudo
 	if err := r.postJSON(fmt.Sprintf("%s/api/v1/runs/%s/events", r.APIURL, c.RunID), batch); err != nil {
 		return c.PersistedSeq, err
 	}
+	ReconcileEventsProjected.Add(float64(len(batch)))
 	return maxSeq, nil
 }
 
@@ -248,6 +250,7 @@ func (r *Reconciler) projectLogs(ctx context.Context, client *ssh.Client, sudo, 
 		if err := r.postBytes(url, chunk); err != nil {
 			return err
 		}
+		ReconcileChunksProjected.Inc()
 		seq++
 	}
 	return nil
@@ -279,6 +282,7 @@ func (r *Reconciler) finalize(ctx context.Context, c candidate, state string, ma
 		c.UnifiedJobID, state, fin); err != nil {
 		log.Printf("Reconciler: finalize job %d failed: %v", c.UnifiedJobID, err)
 	}
+	ReconcileOutcomes.WithLabelValues("recovered_" + state).Inc()
 }
 
 // advance records progress on a still-running job: bump persisted_event_seq,
@@ -290,12 +294,14 @@ func (r *Reconciler) advance(ctx context.Context, c candidate, newSeq int64) {
 		WHERE id = $1`, c.RunID, newSeq); err != nil {
 		log.Printf("Reconciler: advance run %s failed: %v", c.RunID, err)
 	}
+	ReconcileOutcomes.WithLabelValues("still_running").Inc()
 }
 
 // backoff schedules the next attempt with exponential delay, giving up (marking
 // the run lost) once MaxAttempts unproductive tries have elapsed.
 func (r *Reconciler) backoff(ctx context.Context, c candidate, reason string) {
 	attempts := c.Attempts + 1
+	ReconcileAttempts.Inc()
 	if attempts >= r.MaxAttempts {
 		r.markLost(ctx, c, fmt.Sprintf("gave up after %d attempts (%s)", attempts, reason))
 		return
@@ -323,6 +329,7 @@ func (r *Reconciler) markLost(ctx context.Context, c candidate, reason string) {
 		WHERE id = $1 AND status NOT IN ('successful','failed','canceled','error')`, c.UnifiedJobID); err != nil {
 		log.Printf("Reconciler: markLost job %d failed: %v", c.UnifiedJobID, err)
 	}
+	ReconcileOutcomes.WithLabelValues("lost").Inc()
 }
 
 // --- HTTP helpers (same endpoints the host-runner pushes to) ---

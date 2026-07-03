@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/ingestion/core"
@@ -53,6 +54,9 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(handler.Metrics)
+
+	r.Handle("/metrics", metrics.Handler())
 
 	r.Post("/api/v1/runs/{run_id}/events", h.Ingest)
 	r.Post("/api/v1/runs/{run_id}/logs", h.IngestLog)

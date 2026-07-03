@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/metrics"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,6 +40,8 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer database.Close()
+
+	metrics.Serve("")
 
 	for {
 		var pack struct {
