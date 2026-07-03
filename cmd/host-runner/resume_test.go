@@ -82,6 +82,31 @@ func terminalState(t *testing.T, jobDir string) string {
 	return s.State
 }
 
+// TestResumeSkipsNewerWALFormat proves the version guard: a job dir written by a
+// newer WAL format than this runner understands is left untouched (deferred to
+// the reconciler), not resumed — so an old binary can't misread a newer format.
+func TestResumeSkipsNewerWALFormat(t *testing.T) {
+	root := t.TempDir()
+	cp := newFakeControlPlane()
+	defer cp.server.Close()
+
+	jobDir := writeInterruptedJob(t, root, cp.server.URL)
+	// Rewrite the meta claiming a format newer than this runner supports.
+	m, _ := json.Marshal(runnerMeta{RunID: filepath.Base(jobDir), APIURL: cp.server.URL, WALVersion: walFormat + 1})
+	if err := os.WriteFile(filepath.Join(jobDir, "runner-meta.json"), m, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resumeAll(root)
+
+	if st := terminalState(t, jobDir); st != "" {
+		t.Fatalf("a newer-format job must not be resumed, but it reached state %q", st)
+	}
+	if cp.eventCount() != 0 {
+		t.Fatalf("a newer-format job must not sync events, got %d", cp.eventCount())
+	}
+}
+
 // TestResumeRunsInterruptedJobAndSkipsFinished is the host-side resume guard:
 // a boot scan re-runs an interrupted job to a terminal state and syncs its
 // events, and a second scan leaves the now-finished job alone.

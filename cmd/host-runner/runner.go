@@ -313,6 +313,7 @@ func (r *Runner) Execute(ctx context.Context) error {
 
 	// Write status.json
 	status := map[string]interface{}{
+		"wal_version":      walFormat,
 		"execution_run_id": req.ExecutionRunID,
 		"state":            finalState,
 		"completed_at":     time.Now(),

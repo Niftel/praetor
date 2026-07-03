@@ -36,12 +36,24 @@ func main() {
 	}
 }
 
+// walFormat is the on-disk format version of a job directory's WAL/state
+// (events.jsonl, the byte cursors, status.json, checkpoint.json). Bump it ONLY
+// for a STRUCTURAL/breaking change. Additive JSON changes — new fields or new
+// event_type values — must NOT bump it: readers ignore unknown fields and the
+// consumer's projection switch no-ops on unknown events, so those stay
+// compatible on their own. A runner understands every format <= walFormat and
+// refuses to resume a job written by a newer format (see resumeAll).
+const walFormat = 1
+
 // runnerMeta is the small bit of state, persisted in the job directory, that a
 // boot-time resume needs but cannot otherwise recover (the run id is also the
-// directory name; the ingestion URL is only known at bootstrap time).
+// directory name; the ingestion URL is only known at bootstrap time). WALVersion
+// records the format the job dir was written with, so a resuming runner can
+// refuse a format newer than it understands.
 type runnerMeta struct {
-	RunID  string `json:"run_id"`
-	APIURL string `json:"api_url"`
+	RunID      string `json:"run_id"`
+	APIURL     string `json:"api_url"`
+	WALVersion int    `json:"wal_version"`
 }
 
 // runJob executes a single job in jobDir. It is identical for a fresh run and a
@@ -68,7 +80,7 @@ func runJob(jobDir, apiURL, runID string) error {
 
 	// Persist resume metadata before doing any work so an interruption at any
 	// later point is recoverable.
-	writeRunnerMeta(jobDir, runnerMeta{RunID: runID, APIURL: apiURL})
+	writeRunnerMeta(jobDir, runnerMeta{RunID: runID, APIURL: apiURL, WALVersion: walFormat})
 
 	log.Printf("Running job dir %s (run %s)", jobDir, runID)
 
@@ -125,6 +137,14 @@ func resumeAll(root string) {
 		meta, err := readRunnerMeta(dir)
 		if err != nil {
 			log.Printf("resume: skipping %s (no runner metadata): %v", dir, err)
+			continue
+		}
+		// Refuse a job dir written by a newer WAL format than this runner
+		// understands (a downgrade / mixed-fleet mistake). Misreading it could
+		// corrupt state or replay wrongly, so leave it untouched for the
+		// reconciler (or a matching-version runner) to harvest safely.
+		if meta.WALVersion > walFormat {
+			log.Printf("resume: skipping %s — WAL format v%d is newer than this runner supports (v%d); leaving it for the reconciler", dir, meta.WALVersion, walFormat)
 			continue
 		}
 		rid := meta.RunID
