@@ -83,7 +83,9 @@ func main() {
 		} else {
 			log.Printf("Pack %q built.", pack.Name)
 		}
-		database.Exec(`UPDATE execution_packs SET status=$1, build_log=$2 WHERE id=$3`, status, tail(out, 8000), pack.ID)
+		if _, err := database.Exec(`UPDATE execution_packs SET status=$1, build_log=$2 WHERE id=$3`, status, tail(out, 8000), pack.ID); err != nil {
+			log.Printf("Pack %q: recording final status %q failed: %v", pack.Name, status, err)
+		}
 	}
 }
 
@@ -112,6 +114,14 @@ func buildPack(name, specYAML string) (string, error) {
 	giteaURL := envOr("GITEA_URL", "http://gitea-host:3000")
 	giteaOwner := envOr("GITEA_OWNER", "praetor")
 	giteaHost := hostFromURL(giteaURL)
+	// A *.localhost Gitea URL is the browser-facing name fronted by Traefik (so
+	// Gitea's absolute package/repo URLs resolve the same in the browser and in
+	// this build). Host networking has no Docker DNS, so add-host that name to the
+	// Traefik container; other hostnames resolve straight to Gitea's container.
+	routeContainer := giteaHost
+	if strings.HasSuffix(giteaHost, ".localhost") {
+		routeContainer = envOr("TRAEFIK_CONTAINER", "praetor-traefik")
+	}
 	// The daemon version is a pack.yml element; fall back to env/default if unset.
 	hostRunnerVersion := spec.HostRunner
 	if hostRunnerVersion == "" {
@@ -134,7 +144,7 @@ func buildPack(name, specYAML string) (string, error) {
 			"--build-arg", "GITEA_OWNER=" + giteaOwner,
 			"--build-arg", "HOST_RUNNER_VERSION=" + hostRunnerVersion,
 		}
-		if ip := containerIP(giteaHost); ip != "" {
+		if ip := containerIP(routeContainer); ip != "" {
 			args = append(args, "--add-host", giteaHost+":"+ip)
 		}
 		args = append(args, "-t", img, "/build/ansible-runtime")
@@ -229,7 +239,12 @@ func containerIP(container string) string {
 	return ""
 }
 
+// tail sanitizes build output for storage in the build_log TEXT column, then
+// keeps the last n bytes. Docker/BuildKit progress output contains NUL bytes
+// (and may contain invalid UTF-8); Postgres TEXT rejects both, which previously
+// made the status UPDATE fail and left successful packs stuck at 'building'.
 func tail(s string, n int) string {
+	s = strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "")
 	if len(s) <= n {
 		return s
 	}

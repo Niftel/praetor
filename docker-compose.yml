@@ -249,6 +249,11 @@ services:
       dockerfile: build/package/Dockerfile.packbuilder
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
+      # Build against Gitea's browser-facing name (fronted by Traefik) so the pack's
+      # absolute package URLs resolve identically in the browser and at build time.
+      GITEA_URL: "${PRAETOR_GITEA_URL:-http://gitea.localhost}"
+      GITEA_OWNER: "${PRAETOR_GITEA_OWNER:-praetor}"
+      TRAEFIK_CONTAINER: praetor-traefik
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./build:/build:rw
@@ -300,6 +305,7 @@ services:
   # *.localhost auto-resolves to 127.0.0.1). Dashboard at http://traefik.localhost.
   traefik:
     image: traefik:v3.7.6
+    container_name: praetor-traefik
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
