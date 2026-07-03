@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/metrics"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/executor/core"
 )
@@ -97,6 +98,10 @@ func main() {
 		log.Println("One-shot execution finished successfully.")
 		return
 	}
+
+	// Long-running (daemon) mode exposes Prometheus /metrics; one-shot exits too
+	// fast to scrape.
+	metrics.Serve("")
 
 	// 2. Create Agent (Daemon Mode)
 	// We use NATS for Subscription (bus), and our selected publisher for Events

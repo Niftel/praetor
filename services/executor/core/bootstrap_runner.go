@@ -11,6 +11,7 @@ import (
 	"path"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/hostconn"
@@ -34,7 +35,23 @@ func NewBootstrapRunner() *BootstrapRunner {
 	return &BootstrapRunner{RuntimeDir: runtimeDir}
 }
 
-func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) error {
+func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) (err error) {
+	// Bootstrap metrics by mode, observed on return.
+	mode := "remote"
+	if req.JobManifest.InventorySync {
+		mode = "inventory_sync"
+	} else if req.JobManifest.RunnerHost == "" {
+		mode = "local"
+	}
+	bootStart := time.Now()
+	BootstrapTotal.WithLabelValues(mode).Inc()
+	defer func() {
+		BootstrapDuration.WithLabelValues(mode).Observe(time.Since(bootStart).Seconds())
+		if err != nil {
+			BootstrapFailures.WithLabelValues(mode).Inc()
+		}
+	}()
+
 	// Inventory-sync runs don't bootstrap a host-runner: the executor runs
 	// ansible-inventory locally and upserts the result via ingestion.
 	if req.JobManifest.InventorySync {

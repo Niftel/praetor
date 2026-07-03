@@ -6,6 +6,7 @@ import (
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/metrics"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/consumer/core"
 )
@@ -35,6 +36,8 @@ func main() {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer bus.Close()
+
+	metrics.Serve("")
 
 	// 3. Create Consumer (with notification dispatch on lifecycle events)
 	writer := core.NewDBWriter(database)

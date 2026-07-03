@@ -19,7 +19,6 @@ func TestExecutionRequestSerialization(t *testing.T) {
 			ProjectURL:      "https://github.com/example/repo.git",
 			Playbook:        "playbook.yml",
 			ExtraVars:       map[string]interface{}{"foo": "bar"},
-			EnvironmentRefs: []string{"env1"},
 		},
 		CreatedAt: time.Now(),
 	}

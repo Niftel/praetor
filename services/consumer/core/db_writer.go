@@ -82,6 +82,13 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 	}
 
 	if newlyInserted {
+		EventsProjected.Inc()
+		switch evt.EventType {
+		case "JOB_COMPLETED":
+			TerminalTransitions.WithLabelValues("successful").Inc()
+		case "JOB_FAILED":
+			TerminalTransitions.WithLabelValues("failed").Inc()
+		}
 		w.Notifier.Dispatch(evt) // no-op on a nil notifier; sends in the background
 	}
 	return nil

@@ -9,6 +9,7 @@ import (
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/metrics"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	core "github.com/praetordev/praetor/services/scheduler/core"
 )
@@ -39,6 +40,9 @@ func main() {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer bus.Close()
+
+	// Expose Prometheus /metrics.
+	metrics.Serve("")
 
 	// 3. Init Scheduler
 	// Poll every 5 seconds

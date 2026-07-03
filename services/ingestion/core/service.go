@@ -247,6 +247,7 @@ func (s *IngestionService) IngestEvents(ctx context.Context, runID uuid.UUID, ev
 	if len(eventsList) == 0 {
 		return nil
 	}
+	EventsIngested.Add(float64(len(eventsList)))
 
 	// 1. Fetch the UnifiedJobID for this run.
 	// We trust the runID from the URL, but the DB requires unified_job_id for the FK in job_events.
