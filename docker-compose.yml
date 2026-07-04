@@ -188,6 +188,12 @@ services:
       # (reachable from both on-network and external hosts). In a real deployment
       # this is the control plane's routable URL.
       HOST_RUNNER_CALLBACK_URL: "${HOST_RUNNER_CALLBACK_URL:-http://host.docker.internal:8090}"
+      # Pull Execution Packs from Gitea's package registry over HTTP (the artifact
+      # store the packbuilder publishes to), decoupling the executor from the
+      # builder's filesystem. The ./build mount below is now only a fallback for
+      # packs not in the registry (execpack CLI / pre-built artifacts).
+      GITEA_INTERNAL_URL: "${PRAETOR_GITEA_INTERNAL_URL:-http://gitea-host:3000}"
+      GITEA_OWNER: "${PRAETOR_GITEA_OWNER:-praetor}"
       EXECUTOR_WORKERS: 2
       ANSIBLE_FORKS: 1
     shm_size: 1gb
@@ -289,6 +295,12 @@ services:
       GITEA_URL: "${PRAETOR_GITEA_URL:-http://gitea.localhost}"
       GITEA_OWNER: "${PRAETOR_GITEA_OWNER:-praetor}"
       TRAEFIK_CONTAINER: praetor-traefik
+      # Publish the built pack to Gitea's generic package registry (in-cluster
+      # name, server-side; distinct from the browser-facing GITEA_URL used for the
+      # build). Needs a write:package token; without one the builder falls back to
+      # writing the tarball into the shared ./build/runtime dir (legacy).
+      GITEA_INTERNAL_URL: "${PRAETOR_GITEA_INTERNAL_URL:-http://gitea-host:3000}"
+      GITEA_TOKEN: "${PRAETOR_GITEA_TOKEN:-}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./build:/build:rw

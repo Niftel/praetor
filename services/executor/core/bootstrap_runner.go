@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -24,7 +26,14 @@ import (
 // copies the checkpoint plugin, manifest and key over SSH, then launches the
 // daemon. The target only needs sshd, a POSIX shell and tar.
 type BootstrapRunner struct {
-	RuntimeDir string // dir holding <pack>-linux-<arch>.tar.gz Execution Packs
+	// GiteaURL is the in-cluster base URL of the pack artifact store (generic
+	// package registry). When set, packs are pulled from it over HTTP; empty
+	// disables it and packs come only from RuntimeDir.
+	GiteaURL   string
+	GiteaOwner string
+	// RuntimeDir is the legacy shared dir holding <pack>-linux-<arch>.tar.gz — a
+	// fallback for packs not in the registry (execpack CLI / pre-built artifacts).
+	RuntimeDir string
 }
 
 func NewBootstrapRunner() *BootstrapRunner {
@@ -32,7 +41,57 @@ func NewBootstrapRunner() *BootstrapRunner {
 	if runtimeDir == "" {
 		runtimeDir = "/tmp/build/runtime"
 	}
-	return &BootstrapRunner{RuntimeDir: runtimeDir}
+	owner := os.Getenv("GITEA_OWNER")
+	if owner == "" {
+		owner = "praetor"
+	}
+	return &BootstrapRunner{
+		GiteaURL:   os.Getenv("GITEA_INTERNAL_URL"),
+		GiteaOwner: owner,
+		RuntimeDir: runtimeDir,
+	}
+}
+
+// fetchPackTarball resolves the pack's tarball for arch to a local file path,
+// preferring the Gitea generic registry (the published artifact store) and
+// falling back to the shared RuntimeDir (execpack CLI / pre-built packs). The
+// returned cleanup removes any temp file it created (a no-op for the shared dir).
+func (r *BootstrapRunner) fetchPackTarball(pack, arch string) (string, func(), error) {
+	file := fmt.Sprintf("%s-linux-%s.tar.gz", pack, arch)
+	noop := func() {}
+
+	// 1. Gitea registry: GET .../generic/execpack-<pack>/current/<file> (anon).
+	if r.GiteaURL != "" {
+		url := fmt.Sprintf("%s/api/packages/%s/generic/execpack-%s/current/%s",
+			strings.TrimRight(r.GiteaURL, "/"), r.GiteaOwner, pack, file)
+		if resp, err := http.Get(url); err == nil {
+			if resp.StatusCode == http.StatusOK {
+				tmp, terr := os.CreateTemp("", "pack-*-"+file)
+				if terr != nil {
+					resp.Body.Close()
+					return "", noop, terr
+				}
+				_, cerr := io.Copy(tmp, resp.Body)
+				resp.Body.Close()
+				tmp.Close()
+				if cerr != nil {
+					os.Remove(tmp.Name())
+					return "", noop, fmt.Errorf("download Execution Pack %q (%s) from Gitea: %w", pack, arch, cerr)
+				}
+				log.Printf("BootstrapRunner: fetched Execution Pack %q (%s) from Gitea", pack, arch)
+				return tmp.Name(), func() { os.Remove(tmp.Name()) }, nil
+			}
+			resp.Body.Close() // non-200 (e.g. not published): fall through to shared dir
+		}
+	}
+
+	// 2. Shared runtime dir fallback.
+	shared := filepath.Join(r.RuntimeDir, file)
+	if _, err := os.Stat(shared); err == nil {
+		return shared, noop, nil
+	}
+	return "", noop, fmt.Errorf("Execution Pack %q (%s) not found: not in Gitea (%s) and no %s in runtime dir %s",
+		pack, arch, r.GiteaURL, file, r.RuntimeDir)
 }
 
 func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) (err error) {
@@ -191,7 +250,11 @@ fi`, pack))
 	if arch == "unknown" || arch == "" {
 		return fmt.Errorf("unsupported host CPU arch for Execution Pack")
 	}
-	tarball := fmt.Sprintf("%s/%s-linux-%s.tar.gz", r.RuntimeDir, pack, arch)
+	tarball, cleanup, err := r.fetchPackTarball(pack, arch)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	f, err := os.Open(tarball)
 	if err != nil {
 		return fmt.Errorf("open Execution Pack %q for %s: %w", pack, arch, err)
@@ -240,7 +303,11 @@ func (r *BootstrapRunner) ensureLocalPack(pack string) (string, error) {
 	if _, err := os.Stat(prefix + "/bin/ansible-playbook"); err == nil {
 		return hostRunner, nil // already extracted
 	}
-	tarball := fmt.Sprintf("%s/%s-linux-%s.tar.gz", r.RuntimeDir, pack, runtime.GOARCH)
+	tarball, cleanup, err := r.fetchPackTarball(pack, runtime.GOARCH)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
 	f, err := os.Open(tarball)
 	if err != nil {
 		return "", fmt.Errorf("open Execution Pack %q for %s: %w", pack, runtime.GOARCH, err)

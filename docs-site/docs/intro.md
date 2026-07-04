@@ -23,14 +23,14 @@ The control plane is a set of Go services over two datastores:
 | **ingestion** | HTTP | Endpoint the host-runner POSTs to; republishes onto the event bus; stores log blobs |
 | **consumer** | NATS consumer | Durably projects events into Postgres; fires notifications |
 | **reconciler** | loop | SSHes back to a host to harvest its WAL when a push never landed |
-| **packbuilder** | loop | Builds [Execution Packs](./concepts/execution-packs.md) from their YAML spec via the Docker daemon |
+| **packbuilder** | loop | Builds [Execution Packs](./concepts/execution-packs.md) from their YAML spec via the Docker daemon; publishes them to Gitea |
 
 **Datastores:**
 
 - **Postgres** — all durable state (jobs, runs, projected events, RBAC, …) *and* the dispatch **outbox** (`execution_outbox`).
 - **NATS JetStream** — the message bus (durable, file-backed streams) *and* the log blob store (JetStream Object Store bucket `PRAETOR_LOGS`).
 
-Plus **LDAP** (directory), **Gitea** (artifact registry: host-runner releases + a mirror of Python/pip so pack builds pull nothing from the public internet), and **Traefik** (reverse proxy, `*.localhost` routing, mkcert TLS).
+Plus **LDAP** (directory), **Gitea** (artifact registry: built Execution Packs, host-runner releases, and a mirror of Python/pip so pack builds pull nothing from the public internet), and **Traefik** (reverse proxy, `*.localhost` routing, mkcert TLS).
 
 ## The messaging fabric (NATS JetStream)
 
