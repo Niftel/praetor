@@ -383,6 +383,26 @@ services:
       - "traefik.http.routers.dashboard-web.middlewares=to-https@docker"
       - "traefik.http.routers.dashboard-web.service=api@internal"
 
+  # Documentation site (Docusaurus, built to static HTML + nginx). Reachable at
+  # https://docs.localhost via Traefik, or http://localhost:3006.
+  docs:
+    build:
+      context: ./docs-site
+      dockerfile: Dockerfile
+    ports:
+      - "${PRAETOR_DOCS_PORT:-3006}:80"
+    networks:
+      - praetor-net
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.docs.rule=Host(`docs.localhost`)"
+      - "traefik.http.routers.docs.entrypoints=websecure"
+      - "traefik.http.services.docs.loadbalancer.server.port=80"
+      - "traefik.http.routers.docs-web.rule=Host(`docs.localhost`)"
+      - "traefik.http.routers.docs-web.entrypoints=web"
+      - "traefik.http.routers.docs-web.middlewares=to-https@docker"
+
   # Metrics stack: Prometheus scrapes every service's /metrics (in-network by
   # service name); Grafana renders them with a pre-provisioned datasource +
   # starter dashboard. Both are dev conveniences reachable on published ports.
