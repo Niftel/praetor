@@ -9,7 +9,7 @@
 #   mkcert -cert-file deployments/traefik/certs/localhost.pem \
 #          -key-file  deployments/traefik/certs/localhost-key.pem \
 #          localhost praetor.localhost api.praetor.localhost gitea.localhost \
-#          traefik.localhost "*.praetor.localhost" 127.0.0.1 ::1
+#          traefik.localhost docs.localhost "*.praetor.localhost" 127.0.0.1 ::1
 #
 # Requires the mkcert local CA in your trust store once: `mkcert -install`.
 tls:
