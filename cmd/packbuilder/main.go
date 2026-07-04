@@ -18,20 +18,8 @@ import (
 
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/praetor/pkg/metrics"
-	"gopkg.in/yaml.v3"
+	"github.com/praetordev/praetor/pkg/packspec"
 )
-
-// Spec is the Execution Pack definition (mirrors cmd/execpack). Every element of
-// the bootstrapping unit is declared here: the Python + Ansible runtime, its
-// deps, the target arches, and the host-runner daemon version to bundle.
-type Spec struct {
-	Python      string   `yaml:"python"`
-	Ansible     string   `yaml:"ansible"`
-	Pip         []string `yaml:"pip"`
-	Collections []string `yaml:"collections"`
-	Arches      []string `yaml:"arches"`
-	HostRunner  string   `yaml:"host_runner"` // daemon release version to bundle (e.g. v0.1.0)
-}
 
 func main() {
 	log.Println("Execution Pack builder starting...")
@@ -95,21 +83,27 @@ func main() {
 // buildPack builds every arch of a pack from its YAML spec and extracts the
 // tarball(s) into /build/runtime (shared with the executor).
 func buildPack(name, specYAML string) (string, error) {
-	var spec Spec
-	if strings.TrimSpace(specYAML) != "" {
-		if err := yaml.Unmarshal([]byte(specYAML), &spec); err != nil {
-			return "", fmt.Errorf("parse spec: %w", err)
-		}
+	spec, err := packspec.Parse(specYAML)
+	if err != nil {
+		return "", err
 	}
 	if spec.Python == "" {
 		spec.Python = "3.11.9"
 	}
-	if spec.Ansible == "" {
-		spec.Ansible = "ansible"
-	}
 	if len(spec.Arches) == 0 {
 		spec.Arches = []string{"arm64"}
 	}
+	// Validate before building: every field must be a clean, typed value (versions,
+	// package specs, known arches). This is the guard that keeps the build inputs —
+	// which end up in a requirements.txt and in the artifact pushed to hosts — from
+	// smuggling pip flags or shell metacharacters. Git-backed specs pass through
+	// here too, so an untrusted repo can't inject a build.
+	if err := spec.Validate(); err != nil {
+		return "", fmt.Errorf("invalid spec: %w", err)
+	}
+	// The requirements the pack installs (ansible engine + module deps), each
+	// already validated — written to a file and `pip install -r`, never shell-split.
+	requirements := strings.Join(spec.Requirements(), "\n") + "\n"
 
 	// The pack pulls Python + wheels from the Gitea mirror. The build reaches
 	// Gitea (a container) via --network=host + an --add-host entry resolving the
@@ -133,15 +127,25 @@ func buildPack(name, specYAML string) (string, error) {
 
 	var out strings.Builder
 	for _, arch := range spec.Arches {
+		// Per-build context holding only requirements.txt; the Dockerfile is
+		// referenced with -f and COPYs requirements.txt from this context. A temp
+		// dir avoids races between concurrent arch builds.
+		ctx, err := os.MkdirTemp("", "packbuild-")
+		if err != nil {
+			return out.String(), fmt.Errorf("temp build context: %w", err)
+		}
+		if werr := os.WriteFile(filepath.Join(ctx, "requirements.txt"), []byte(requirements), 0644); werr != nil {
+			os.RemoveAll(ctx)
+			return out.String(), fmt.Errorf("write requirements.txt: %w", werr)
+		}
+
 		img := "praetor-execpack-" + name + "-" + arch
 		args := []string{"build", "--target", "build",
 			"--platform", "linux/" + arch,
 			"--network", "host",
+			"-f", "/build/ansible-runtime/Dockerfile",
 			"--build-arg", "TARGETARCH=" + arch,
 			"--build-arg", "PY_VERSION=" + spec.Python,
-			"--build-arg", "ANSIBLE_SPEC=" + spec.Ansible,
-			"--build-arg", "EXTRA_PIP=" + strings.Join(spec.Pip, " "),
-			"--build-arg", "GALAXY_COLLECTIONS=" + strings.Join(spec.Collections, " "),
 			"--build-arg", "PACK_NAME=" + name,
 			"--build-arg", "GITEA_URL=" + giteaURL,
 			"--build-arg", "GITEA_OWNER=" + giteaOwner,
@@ -150,11 +154,12 @@ func buildPack(name, specYAML string) (string, error) {
 		if ip := containerIP(routeContainer); ip != "" {
 			args = append(args, "--add-host", giteaHost+":"+ip)
 		}
-		args = append(args, "-t", img, "/build/ansible-runtime")
+		args = append(args, "-t", img, ctx)
 		build := exec.Command("docker", args...)
 		// --platform needs buildkit for cross-arch (qemu) builds.
 		build.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
 		b, err := build.CombinedOutput()
+		os.RemoveAll(ctx)
 		out.Write(b)
 		if err != nil {
 			return out.String(), fmt.Errorf("docker build (%s): %w", arch, err)

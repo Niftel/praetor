@@ -9,8 +9,24 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/packspec"
 	"github.com/praetordev/praetor/services/api/render"
 )
+
+// validatePackSpec rejects a malformed or unsafe inline pack spec before it's
+// stored (and later fed to the packbuilder). An empty/absent spec is fine — the
+// pack is a pre-built artifact or git-backed (whose spec the packbuilder
+// validates when it fetches it). See pkg/packspec.
+func validatePackSpec(spec *string) error {
+	if spec == nil || strings.TrimSpace(*spec) == "" {
+		return nil
+	}
+	s, err := packspec.Parse(*spec)
+	if err != nil {
+		return err
+	}
+	return s.Validate()
+}
 
 // ExecutionPacksResource manages the registry of Execution Packs — the named,
 // self-contained Python+Ansible runtimes Praetor pushes onto hosts. Packs are
@@ -67,6 +83,10 @@ func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request)
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
+	if err := validatePackSpec(in.Spec); err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
 	// A pack with a spec OR a git source is queued for the packbuilder; one
 	// registered without either (a pre-built artifact) is immediately usable.
 	hasGit := in.SCMURL != nil && strings.TrimSpace(*in.SCMURL) != ""
@@ -102,6 +122,10 @@ func (rs *ExecutionPacksResource) Update(w http.ResponseWriter, r *http.Request)
 	var in executionPack
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	if err := validatePackSpec(in.Spec); err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 	hasGit := in.SCMURL != nil && strings.TrimSpace(*in.SCMURL) != ""

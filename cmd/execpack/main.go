@@ -12,20 +12,11 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/praetordev/praetor/pkg/packspec"
 )
-
-// Spec is the Execution Pack definition.
-type Spec struct {
-	Name        string   `yaml:"name"`        // output pack name -> <name>-linux-<arch>.tar.gz
-	Python      string   `yaml:"python"`      // standalone CPython version, e.g. "3.11.9"
-	Ansible     string   `yaml:"ansible"`     // pip requirement: "ansible", "ansible-core==2.16.*"
-	Pip         []string `yaml:"pip"`         // extra pip packages (module deps: docker, jmespath, boto3, ...)
-	Collections []string `yaml:"collections"` // extra ansible-galaxy collections
-	Arches      []string `yaml:"arches"`      // target CPU arches: arm64, amd64
-}
 
 func main() {
 	specPath := flag.String("spec", "", "path to the Execution Pack YAML spec")
@@ -39,49 +30,62 @@ func main() {
 	if err != nil {
 		log.Fatalf("read spec: %v", err)
 	}
-	var spec Spec
-	if err := yaml.Unmarshal(data, &spec); err != nil {
+	spec, err := packspec.Parse(string(data))
+	if err != nil {
 		log.Fatalf("parse spec %s: %v", *specPath, err)
 	}
 
-	// Defaults.
+	// Defaults, then validate (see pkg/packspec — same rules the service enforces).
 	if spec.Name == "" {
 		spec.Name = "execpack"
 	}
 	if spec.Python == "" {
 		spec.Python = "3.11.9"
 	}
-	if spec.Ansible == "" {
-		spec.Ansible = "ansible"
-	}
 	if len(spec.Arches) == 0 {
 		spec.Arches = []string{"arm64"}
+	}
+	if err := spec.Validate(); err != nil {
+		log.Fatalf("invalid spec %s: %v", *specPath, err)
 	}
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		log.Fatalf("create out dir: %v", err)
 	}
 
+	// The engine + module deps, validated, written to the build context as a
+	// requirements.txt the Dockerfile installs with `pip install -r`.
+	requirements := strings.Join(spec.Requirements(), "\n") + "\n"
+
 	for _, arch := range spec.Arches {
-		log.Printf("Building Execution Pack %q for linux/%s (python %s, ansible %q, %d collections, %d pip)...",
-			spec.Name, arch, spec.Python, spec.Ansible, len(spec.Collections), len(spec.Pip))
+		ctx, err := os.MkdirTemp("", "execpack-")
+		if err != nil {
+			log.Fatalf("temp build context: %v", err)
+		}
+		if werr := os.WriteFile(filepath.Join(ctx, "requirements.txt"), []byte(requirements), 0o644); werr != nil {
+			os.RemoveAll(ctx)
+			log.Fatalf("write requirements.txt: %v", werr)
+		}
+
+		log.Printf("Building Execution Pack %q for linux/%s (python %s, %s, %d pip)...",
+			spec.Name, arch, spec.Python, spec.AnsibleRequirement(), len(spec.Pip))
 		args := []string{
 			"buildx", "build",
 			"--platform", "linux/" + arch,
+			"-f", "build/ansible-runtime/Dockerfile",
 			"--build-arg", "TARGETARCH=" + arch,
 			"--build-arg", "PY_VERSION=" + spec.Python,
-			"--build-arg", "ANSIBLE_SPEC=" + spec.Ansible,
-			"--build-arg", "EXTRA_PIP=" + strings.Join(spec.Pip, " "),
-			"--build-arg", "GALAXY_COLLECTIONS=" + strings.Join(spec.Collections, " "),
 			"--build-arg", "PACK_NAME=" + spec.Name,
 			"--target", "export",
 			"-o", "type=local,dest=" + *out,
-			"build/ansible-runtime",
+			ctx,
 		}
 		cmd := exec.Command("docker", args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		err = cmd.Run()
+		os.RemoveAll(ctx)
+		if err != nil {
 			log.Fatalf("docker build for %s failed: %v", arch, err)
 		}
 		fmt.Printf("  -> %s/%s-linux-%s.tar.gz\n", *out, spec.Name, arch)
