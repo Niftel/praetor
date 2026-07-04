@@ -1,14 +1,17 @@
 // Command packbuilder builds Execution Packs from their YAML spec. It polls the
 // execution_packs table for pending packs, runs the parameterised Dockerfile via
-// the Docker daemon, extracts the pack tarball into build/runtime/ (shared with
-// the executor), and marks the pack ready or failed. This is what makes "define
-// a pack from YAML in Praetor" actually produce the pack.
+// the Docker daemon, and publishes the resulting pack tarball to Gitea's generic
+// package registry (the artifact store the executor pulls packs from over HTTP),
+// then marks the pack ready or failed. This is what makes "define a pack from
+// YAML in Praetor" actually produce the pack.
 package main
 
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -110,6 +113,12 @@ func buildPack(name, specYAML string) (string, error) {
 	// Gitea hostname to its bridge IP, so pip/curl inside the build can hit it.
 	giteaURL := envOr("GITEA_URL", "http://gitea-host:3000")
 	giteaOwner := envOr("GITEA_OWNER", "praetor")
+	// Server-side base URL for publishing the built pack to Gitea's package
+	// registry (in-cluster name, not the browser-facing Traefik host used for the
+	// build). A write:package token enables publishing; without one the builder
+	// falls back to the legacy shared runtime dir.
+	giteaAPI := envOr("GITEA_INTERNAL_URL", "http://gitea-host:3000")
+	giteaToken := os.Getenv("GITEA_TOKEN")
 	giteaHost := hostFromURL(giteaURL)
 	// A *.localhost Gitea URL is the browser-facing name fronted by Traefik (so
 	// Gitea's absolute package/repo URLs resolve the same in the browser and in
@@ -165,21 +174,96 @@ func buildPack(name, specYAML string) (string, error) {
 			return out.String(), fmt.Errorf("docker build (%s): %w", arch, err)
 		}
 
-		// Extract the pack tarball from the built image into the shared dir.
+		// Extract the pack tarball from the built image.
 		cid, err := exec.Command("docker", "create", img).Output()
 		if err != nil {
 			return out.String(), fmt.Errorf("docker create: %w", err)
 		}
 		id := strings.TrimSpace(string(cid))
-		if cp, err := exec.Command("docker", "cp", id+":/out/.", "/build/runtime/").CombinedOutput(); err != nil {
-			out.Write(cp)
-			return out.String(), fmt.Errorf("docker cp: %w", err)
+		file := fmt.Sprintf("%s-linux-%s.tar.gz", name, arch)
+
+		if giteaToken != "" {
+			// Publish to Gitea's generic registry — the artifact store the executor
+			// pulls from over HTTP, decoupling it from this builder's filesystem.
+			// Copy the tarball out of the image to a temp file, upload it, drop it.
+			pub, perr := os.MkdirTemp("", "packpub-")
+			if perr != nil {
+				exec.Command("docker", "rm", id).Run()
+				return out.String(), fmt.Errorf("temp publish dir: %w", perr)
+			}
+			local := filepath.Join(pub, file)
+			if cp, err := exec.Command("docker", "cp", id+":/out/"+file, local).CombinedOutput(); err != nil {
+				out.Write(cp)
+				os.RemoveAll(pub)
+				exec.Command("docker", "rm", id).Run()
+				return out.String(), fmt.Errorf("docker cp: %w", err)
+			}
+			perr = publishPack(giteaAPI, giteaOwner, giteaToken, name, arch, local)
+			os.RemoveAll(pub)
+			if perr != nil {
+				exec.Command("docker", "rm", id).Run()
+				return out.String(), fmt.Errorf("publish pack to Gitea: %w", perr)
+			}
+			out.WriteString(fmt.Sprintf("\npublished %s to %s/generic/execpack-%s@current\n", file, giteaOwner, name))
+		} else {
+			// No token: legacy behavior — extract into the shared runtime dir the
+			// executor also mounts. (Set GITEA_TOKEN to publish to the registry.)
+			if cp, err := exec.Command("docker", "cp", id+":/out/.", "/build/runtime/").CombinedOutput(); err != nil {
+				out.Write(cp)
+				exec.Command("docker", "rm", id).Run()
+				return out.String(), fmt.Errorf("docker cp: %w", err)
+			}
+			out.WriteString(fmt.Sprintf("\nbuilt %s (shared dir; set GITEA_TOKEN to publish to Gitea)\n", file))
 		}
 		exec.Command("docker", "rm", id).Run()
 		exec.Command("docker", "rmi", img).Run()
-		out.WriteString(fmt.Sprintf("\nbuilt %s-linux-%s.tar.gz\n", name, arch))
 	}
 	return out.String(), nil
+}
+
+// publishPack uploads a built pack tarball to Gitea's generic package registry
+// under execpack-<pack>/current/<pack>-linux-<arch>.tar.gz. The generic registry
+// rejects re-upload of an existing file, so it deletes first — a rebuild refreshes
+// the "current" artifact. Reads are anonymous; the executor pulls it over HTTP.
+func publishPack(giteaURL, owner, token, pack, arch, localPath string) error {
+	file := fmt.Sprintf("%s-linux-%s.tar.gz", pack, arch)
+	dst := fmt.Sprintf("%s/api/packages/%s/generic/execpack-%s/current/%s",
+		strings.TrimRight(giteaURL, "/"), owner, pack, file)
+
+	// Best-effort delete so a rebuild can re-put the same path.
+	if delReq, err := http.NewRequest(http.MethodDelete, dst, nil); err == nil {
+		delReq.Header.Set("Authorization", "token "+token)
+		if resp, err := http.DefaultClient.Do(delReq); err == nil {
+			resp.Body.Close()
+		}
+	}
+
+	f, err := os.Open(localPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPut, dst, f)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = st.Size() // an *os.File body isn't auto-sized by net/http
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("gitea upload %s: HTTP %d: %s", file, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
 }
 
 // fetchSpecFromGit shallow-clones the pack's repo/branch and returns the YAML at

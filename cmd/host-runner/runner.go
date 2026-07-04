@@ -1,14 +1,20 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -58,7 +64,7 @@ func (r *Runner) emit(req *events.ExecutionRequest, eventType, host, msg string,
 	}
 }
 
-func (r *Runner) Execute(ctx context.Context) error {
+func (r *Runner) Execute(ctx context.Context) (err error) {
 	// 1. Read Manifest
 	manifestPath := filepath.Join(r.JobDir, "manifest.json")
 	manifestBytes, err := os.ReadFile(manifestPath)
@@ -82,6 +88,34 @@ func (r *Runner) Execute(ctx context.Context) error {
 			host = hn
 		}
 	}
+
+	// Report a terminal state exactly once. Used by both the normal completion
+	// path and the deferred setup-failure guard below. Emitting a terminal event
+	// (and writing status.json) is what tells the control plane the job's fate.
+	terminalWritten := false
+	writeTerminal := func(state, eventType, msg string) {
+		r.emit(&req, eventType, host, msg, nil)
+		status := map[string]interface{}{
+			"wal_version":      walFormat,
+			"execution_run_id": req.ExecutionRunID,
+			"state":            state,
+			"completed_at":     time.Now(),
+			"max_seq":          r.seq.current(),
+		}
+		statusBytes, _ := json.Marshal(status)
+		_ = os.WriteFile(filepath.Join(r.JobDir, "status.json"), statusBytes, 0644)
+		terminalWritten = true
+	}
+	// Guard: if any setup step before the play runs (git clone, galaxy install,
+	// inventory write, …) returns an error, still report the run as failed with
+	// the error as its output. Without this an early return emitted JOB_STARTED
+	// but no terminal event, leaving the run stuck in 'running' with no output.
+	defer func() {
+		if err != nil && !terminalWritten && ctx.Err() != context.Canceled {
+			log.Printf("run setup failed before execution: %v", err)
+			writeTerminal("failed", events.EventJobFailed, "Job failed during setup: "+err.Error())
+		}
+	}()
 
 	// Detect a resume up front: a usable checkpoint means a previous invocation
 	// was interrupted (commonly a host reboot) and we are continuing it. We reuse
@@ -119,16 +153,12 @@ func (r *Runner) Execute(ctx context.Context) error {
 			return fmt.Errorf("failed to write inline playbook: %w", err)
 		}
 	} else if req.JobManifest.ProjectURL != "" {
-		// New: Support Git Cloning
-		// For MVP: shallow clone to temporary dir or subfolder?
-		// We are in r.JobDir. Let's clone into "project" subdir.
+		// Fetch the project into a "project" subdir of the job dir. Preferred path
+		// is an in-process HTTP archive fetch (no git/curl/tar needed on the
+		// target — matches the self-contained model); git clone is the fallback.
 		projectDir := filepath.Join(r.JobDir, "project")
-
-		log.Printf("Cloning project from %s into %s", req.JobManifest.ProjectURL, projectDir)
-
-		gitCmd := exec.Command("git", "clone", "--depth=1", req.JobManifest.ProjectURL, projectDir)
-		if out, err := gitCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git clone failed: %v, output: %s", err, string(out))
+		if err := fetchProject(req.JobManifest.ProjectURL, req.JobManifest.ProjectRef, projectDir); err != nil {
+			return err
 		}
 
 		// Install the project's Ansible Galaxy requirements (roles/collections)
@@ -309,24 +339,139 @@ func (r *Runner) Execute(ctx context.Context) error {
 	}
 
 	msgEnd := fmt.Sprintf("Job finished in %v. State: %s", duration, finalState)
-	r.emit(&req, eventType, host, msgEnd, nil)
-
-	// Write status.json
-	status := map[string]interface{}{
-		"wal_version":      walFormat,
-		"execution_run_id": req.ExecutionRunID,
-		"state":            finalState,
-		"completed_at":     time.Now(),
-		"max_seq":          r.seq.current(),
-	}
-	statusBytes, _ := json.Marshal(status)
-	_ = os.WriteFile(filepath.Join(r.JobDir, "status.json"), statusBytes, 0644)
+	writeTerminal(finalState, eventType, msgEnd)
 
 	// Heartbeating during execution is driven from main.go (it targets the run,
 	// not just the host) so the reconciler can tell a live long-running job from
 	// a lost one. The runner returns once the playbook finishes; the deferred
 	// syncer/heartbeat shutdown in main.go then performs a final flush.
 	return err
+}
+
+// fetchProject places the playbook project into destDir. It prefers an
+// in-process HTTP archive fetch (Gitea serves {repo}/archive/{ref}.tar.gz), so a
+// target needs no git, curl, or tar — consistent with the self-contained model
+// where everything the host needs travels over SSH or HTTP. If the archive can't
+// be derived or fetched (e.g. a non-Gitea URL), it falls back to `git clone`,
+// which works wherever git happens to be present.
+func fetchProject(projectURL, ref, destDir string) error {
+	if archiveURL := archiveURLFor(projectURL, ref); archiveURL != "" {
+		log.Printf("Fetching project archive %s into %s", archiveURL, destDir)
+		if err := fetchArchive(archiveURL, destDir); err == nil {
+			return nil
+		} else {
+			log.Printf("archive fetch failed (%v); falling back to git clone", err)
+		}
+	}
+	log.Printf("Cloning project from %s into %s", projectURL, destDir)
+	args := []string{"clone", "--depth=1"}
+	if ref != "" {
+		args = append(args, "--branch", ref)
+	}
+	args = append(args, projectURL, destDir)
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("project fetch failed: no HTTP archive and git clone failed: %v, output: %s", err, string(out))
+	}
+	return nil
+}
+
+// archiveURLFor derives the archive endpoint for an http(s) git URL, matching
+// Gitea's {scheme}://{host}/{owner}/{repo}/archive/{ref}.tar.gz. It returns ""
+// for non-http URLs (ssh://, git@…) so the caller falls back to git. An empty ref
+// uses HEAD, which Gitea resolves to the repo's default branch.
+func archiveURLFor(projectURL, ref string) string {
+	u, err := url.Parse(projectURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	repoPath := strings.TrimSuffix(strings.TrimRight(u.Path, "/"), ".git")
+	if repoPath == "" {
+		return ""
+	}
+	if ref == "" {
+		ref = "HEAD"
+	}
+	u.Path = path.Join(repoPath, "archive", ref+".tar.gz")
+	return u.String()
+}
+
+// fetchArchive downloads a .tar.gz over HTTP and extracts it into destDir,
+// stripping the single top-level directory the archive is wrapped in (Gitea wraps
+// contents in a {repo}/ prefix) so files land directly in destDir — the same
+// layout a git clone produces. Extraction is pure Go: no tar binary on the host.
+func fetchArchive(archiveURL, destDir string) error {
+	resp, err := http.Get(archiveURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("archive HTTP %d", resp.StatusCode)
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		// Strip the leading path component (the {repo}/ wrapper).
+		rel := stripFirstComponent(hdr.Name)
+		if rel == "" {
+			continue
+		}
+		// Guard against path traversal (../ or absolute) in archive entries.
+		target := filepath.Join(destDir, rel)
+		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			f.Close()
+		case tar.TypeSymlink, tar.TypeLink:
+			// Skip links: playbook projects don't need them and they widen the
+			// traversal surface.
+			continue
+		}
+	}
+	return nil
+}
+
+// stripFirstComponent removes the leading path element of a tar entry name
+// (e.g. "ping/roles/x.yml" -> "roles/x.yml"), returning "" for the wrapper dir
+// entry itself.
+func stripFirstComponent(name string) string {
+	name = strings.TrimPrefix(name, "./")
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		return name[i+1:]
+	}
+	return ""
 }
 
 // WAL is an append-only, fsync'd write-ahead log of job events. On the host it
