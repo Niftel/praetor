@@ -1,96 +1,109 @@
 ---
 slug: /
 sidebar_position: 1
-title: Introduction
+title: Introduction & Architecture
 ---
 
-# Praetor
+# Praetor: architecture
 
-Praetor is an Ansible automation platform. On the surface it's AWX/AAP-shaped — organizations, RBAC, inventories, credentials, job templates, workflows, schedules, surveys, webhooks, notifications, an audit stream. What's different is *where and how the automation actually runs*, and that one decision changes the operational model enough to be worth understanding before anything else.
+Praetor is an Ansible automation platform (organizations, RBAC, inventories, credentials, job templates, workflows, schedules). The distinguishing design decision is **where the engine runs**: instead of executing playbooks from a central control node or execution-environment container, Praetor **bootstraps a self-contained runtime onto the target over SSH and runs the play there**. The control plane's job is to *dispatch* and *collect*, not to *execute*.
 
-## The problem it's reacting to
+This page describes the actual infrastructure and the data path a job takes through it.
 
-Every Ansible-at-scale tool has to answer one question: **where does the engine run, and what does it require of the targets and the control plane?** The common answers each have a cost:
+## Components
 
-- **Central control node (plain `ansible` / `ansible-pull` shops).** The box running Ansible must carry the *entire* world — the right Ansible version, every collection, every Python dependency — and every play streams over SSH from that one place. It becomes a bottleneck and a version monolith: one dependency set for everyone.
-- **AWX / AAP with Execution Environments.** Better isolated (the engine lives in a container image), but you're now building and distributing EE images, running a standing execution fleet, and — critically — **the control plane and its message bus must stay up and reachable for the duration of a job.** If the controller or the network to it drops mid-run, the job is lost.
+The control plane is a set of Go services over two datastores:
 
-Both models keep the engine *at the center* and reach outward. Praetor inverts that.
+| Process | Kind | Responsibility |
+|---|---|---|
+| **api** | HTTP | REST + AuthN/Z (JWT / [PAT](./api/authentication.md)); serves the SPA's calls |
+| **scheduler** | loop | Claims `pending` jobs, builds the manifest, writes the **outbox**; relays outbox→NATS; schedules, triggers, workflows, [retention](./operations/retention.md) |
+| **executor** | NATS consumer | Pulls launches off the work queue; SSH-bootstraps the pack + host-runner onto the runner host |
+| **host-runner** | on the target | Runs `ansible-playbook` from the pack; writes the WAL; syncs events/logs/heartbeats back |
+| **ingestion** | HTTP | Endpoint the host-runner POSTs to; republishes onto the event bus; stores log blobs |
+| **consumer** | NATS consumer | Durably projects events into Postgres; fires notifications |
+| **reconciler** | loop | SSHes back to a host to harvest its WAL when a push never landed |
+| **packbuilder** | loop | Builds [Execution Packs](./concepts/execution-packs.md) from their YAML spec via the Docker daemon |
 
-## The Praetor model: push the engine to the edge
+**Datastores:**
 
-> **Praetor delivers a complete, self-contained execution environment onto the target over SSH, and runs the playbook there — locally, on the host itself.**
+- **Postgres** — all durable state (jobs, runs, projected events, RBAC, …) *and* the dispatch **outbox** (`execution_outbox`).
+- **NATS JetStream** — the message bus (durable, file-backed streams) *and* the log blob store (JetStream Object Store bucket `PRAETOR_LOGS`).
 
-At launch, the executor opens a plain SSH connection (using a [Machine credential](./concepts/credentials.md) you own), streams an [**Execution Pack**](./concepts/execution-packs.md) onto the host, and starts a small **host-runner** that executes `ansible-playbook` from the pack. The pack is a relocatable bundle — a standalone CPython, Ansible, your collections and pip deps, and the host-runner daemon — laid out under `/opt/praetor`.
+Plus **LDAP** (directory), **Gitea** (artifact registry: host-runner releases + a mirror of Python/pip so pack builds pull nothing from the public internet), and **Traefik** (reverse proxy, `*.localhost` routing, mkcert TLS).
 
-The consequences of that flip are the whole point:
+## The messaging fabric (NATS JetStream)
 
-- **The target needs almost nothing.** Just `sshd`, a POSIX shell, `tar`, and a system `python3` (for module execution). No pre-installed Ansible, no standing agent, no managed-node onboarding. Delete `/opt/praetor` and the host is exactly as it was.
-- **The engine is per-job and versioned, not central.** Different templates can carry different packs (different Ansible/collection sets) with no shared, drifting dependency monolith. Packs are built from a YAML spec and are reproducible.
-- **The control plane stops being on the critical path** for a running job (see [Reliability](#reliability-the-job-outlives-the-control-plane) below).
+Three subjects across two streams, defined in [`pkg/transport/nats/bus.go`](https://github.com/praetordev/praetor):
 
-## The nuance: "agentless" is the wrong word
+| Stream | Subject(s) | Retention | Purpose |
+|---|---|---|---|
+| `PRAETOR_REQUESTS` | `job.requests` | **WorkQueue** (removed on ack) + dedup window keyed on `execution_run_id` | job launches → executor |
+| `PRAETOR_EVENTS` | `job.events`, `job.logs` | Limits (MaxAge) | run events + log-chunk refs → consumer |
 
-Praetor is *not* purely agentless — it puts a process (the host-runner) on the target. But it's also not an agent platform in the AWX/Salt sense, because **nothing is pre-installed or kept running between jobs.** The runner is bootstrapped fresh, per run, over ordinary SSH, and it's part of the pushed pack rather than something you provision and patch on a fleet.
+Durable consumers: `praetor-executor` (work queue, queue group — load-balances across executors), `praetor-event-consumer`, `praetor-logchunk-consumer`. All file-backed, so nothing is lost across restarts.
 
-So the honest framing is a deliberate middle ground: **agentless to deploy, agent-like at runtime.** You get the zero-onboarding of agentless SSH *and* the local-execution resilience of an on-host agent, without maintaining either a central execution fleet or a permanent per-host agent. The trade-off — stated plainly — is that a job does run a Praetor binary on the host for its duration, and that binary (via the pack) is glibc-only, covering mainstream Linux but not musl/Alpine targets.
+## Dispatch: the transactional outbox
 
-## Reliability: the job outlives the control plane
+A launch must never be lost *or* double-sent, so the scheduler doesn't publish to NATS directly. In one Postgres transaction it claims the `pending` job (`FOR UPDATE SKIP LOCKED`), creates the `execution_run`, and **inserts the `ExecutionRequest` into `execution_outbox`** (`scheduler.go`). Because that's atomic, a crash can't leave a job claimed-but-unqueued.
 
-Because the play runs on the host, Praetor is built so **the control plane can be unreliable without losing work.** The host-runner writes a durable, append-only **write-ahead log** (`events.jsonl`) plus `stdout.log` and a terminal `status.json` into the job directory, and *then* best-effort syncs them back:
+A separate pass, `relayOutbox`, reads committed outbox rows and publishes them to `job.requests` with `MsgId = execution_run_id` — JetStream's duplicate-suppression means a retried relay can't enqueue the same launch twice. Rows are marked sent/failed with an attempt count.
 
-- If the control plane or network is down, the job **keeps running to completion** and records everything locally.
-- Event/log syncers advance their cursor only after receipt is confirmed, so a restart re-delivers from the last acknowledged point; projection is idempotent (`ON CONFLICT (run, seq)`). At-least-once on the wire, exactly-once in effect.
-- If a push never lands, a **pull-based reconciler** later SSHes back to the host, reads the WAL, and recovers the run to its *true* outcome — instead of falsely marking a job that actually succeeded as failed.
-- After a host reboot, a systemd unit resumes any interrupted job from its on-disk state.
+The executor binds a **durable, manual-ack, work-queue** consumer (`SubscribeToExecutionRequests`). It **acks on receipt** (once the request is handed to a local worker), not on completion — a mid-run crash is recovered by the scheduler's stale-run reconciliation, *not* by redelivery, which is what prevents double-bootstrapping a host.
 
-This is a genuinely different posture from a controller-centric design, where losing the controller mid-run loses the run. See [Resilience & the WAL](./operations/resilience.md).
+## Bootstrap: executor → host, over pure SSH
 
-## What stays familiar
+For a run with an inventory, the executor ([`bootstrap_runner.go`](https://github.com/praetordev/praetor)) resolves the runner host's address from its inventory vars + the job's [Machine credential](./concepts/credentials.md), dials SSH (trust-on-first-use host keys, persisted in `known_hosts`), and over that one connection:
 
-None of the above costs you the platform surface you expect:
+1. `mkdir` the job dir (`/var/lib/praetor/jobs/<run_id>`) and plugin dirs.
+2. Push the checkpoint callback plugin (task-level resume).
+3. **Push the [Execution Pack](./concepts/execution-packs.md)** — arch-probed (`uname -m`), streamed as `<pack>-linux-<arch>.tar.gz` piped into `tar -x`. **Skipped if the pack is already present** on the host.
+4. Install the host-runner from the pack to `/usr/local/bin`.
+5. Push `manifest.json` (the full `ExecutionRequest`) and the job's SSH key.
+6. Install a `praetor-resume` systemd unit (best-effort) for reboot recovery.
+7. `setsid` the host-runner, detached, so it outlives the SSH session.
 
-- **Organizations, teams, users, RBAC** (object-scoped roles), backed by an **LDAP** directory, with an **activity/audit stream**.
-- **Inventories** (static + dynamic cloud sources, fact caching) and **[job templates](./concepts/inventories-and-templates.md)** with extra-vars, limits, prompts, and **surveys**.
-- **[Credentials](./concepts/credentials.md)** on the AAP machine-credential model (encrypted at rest, injected at run time; no shared platform key).
-- **[Workflows](./concepts/workflows.md)** — DAGs of templates with success/failure/always edges and approval gates.
-- **Triggers** — schedules (rrule), inbound [webhooks](./api/webhooks.md), and a REST API you drive with [personal access tokens](./api/authentication.md).
-- **Operations** — Prometheus [metrics](./operations/observability.md) on every service, opt-in [retention pruning](./operations/retention.md), and cooperative [job cancellation](./operations/job-cancellation.md).
+The runner host therefore needs only **sshd, a POSIX shell, and `tar`**. Python is *not* required: the play runs the pack's `ansible-playbook`, and for module execution the runner uses the host's Python if present, else the pack's bundled interpreter ([`runtime.go`](https://github.com/praetordev/praetor) `resolveAnsible`). (Musl/Alpine hosts are unsupported — the pack's CPython is glibc.)
 
-## Life of a job
+## Execution & the write-ahead log
 
-Concretely, one run flows like this:
+The host-runner runs the play and writes everything to the job dir first, then syncs — so the control plane is off the critical path:
 
-1. **Launch** (UI, API, schedule, webhook, or a workflow node) inserts a `pending` job.
-2. The **scheduler** claims it and builds a *manifest* — playbook, inventory, resolved credential injectors, which pack, extra vars/limit — snapshotting what the run needs.
-3. The **executor** SSHes to the inventory's runner host, streams + extracts the Execution Pack (skipped if already present), installs and launches the **host-runner**.
-4. The host-runner runs `ansible-playbook` from the pack against the inventory, writing the WAL and streaming events/logs/heartbeats back to **ingestion**.
-5. The **consumer** idempotently projects those events into Postgres and fires notifications; the UI shows live status + streamed output.
-6. On finish it writes a terminal `status.json`; if anything got lost in transit, the **reconciler** harvests it from the host afterward.
+- **`events.jsonl`** — an append-only, fsync'd WAL of job events (monotonic `seq`).
+- **`stdout.log`** — raw playbook output.
+- **`status.json`** — terminal state + `max_seq` (also carries the WAL format version).
+- **`events.cursor` / `stdout.cursor`** — byte offsets the syncers have confirmed delivered.
 
-Along the way you can **cancel** (the runner learns via its heartbeat and stops the play), and every service exposes metrics for what's happening.
+Two syncers ship the WAL and the log to **ingestion** over HTTP; a heartbeat loop (~15s) posts liveness and reads back a cancel flag. Each syncer advances its cursor **only after a 2xx**, so a failed push or a restart re-delivers from the last acknowledged byte.
 
-## Architecture at a glance
+## Ingestion → consumer: the collection pipeline
 
-Go services around Postgres and NATS:
+The host-runner never touches Postgres or NATS directly — it POSTs to **ingestion** (`/api/v1/runs/{id}/events`, `/logs`, `/heartbeat`, `/facts`). Ingestion:
 
-| Service | Role |
-|---|---|
-| **api** | REST API + AuthN/Z (JWT + [PATs](./api/authentication.md)) |
-| **scheduler** | Claims jobs, builds manifests, dispatches; schedules, triggers, workflows, [retention](./operations/retention.md) |
-| **executor** | SSH-bootstraps the pack + host-runner onto the target |
-| **host-runner** | Runs on the target: executes the play, writes the WAL, syncs back |
-| **ingestion** | Receives events/logs/heartbeats/facts |
-| **consumer** | Idempotently projects events; fires notifications |
-| **reconciler** | Pulls a host's WAL back when a push never landed |
-| **packbuilder** | Builds Execution Packs from their YAML spec |
+- **events** → `PublishJobEvent` on `job.events`. This **blocks for the JetStream persistence ack**, so the 2xx the host-runner sees means the event is *durably stored* — which is exactly what lets the syncer advance its cursor safely.
+- **logs** → the raw chunk is written to the `PRAETOR_LOGS` object store, then a reference is published on `job.logs`.
+- **heartbeat** → stamps `last_heartbeat_at`, returns whether the job's `cancel_requested` is set.
 
-Supporting infrastructure: **Postgres** (state), **NATS/JetStream** (event bus + log object store), **LDAP** (directory), **Gitea** (artifact registry for the host-runner + a mirror of Python/pip so pack builds need nothing from the public internet), and **Traefik** (reverse proxy, `*.localhost` routing).
+The **consumer** binds durable, manual-ack consumers on `job.events`/`job.logs` and projects each into Postgres: `INSERT … ON CONFLICT (execution_run_id, seq) DO NOTHING` (idempotent), updating run/job state on terminal events. On a DB error it **NAKs** the message → JetStream redelivers → a database outage is survived by replay, not by loss. Net delivery: at-least-once on the wire, **exactly-once in effect**.
+
+Remote host-runners reach ingestion at a host-routable callback address (`HOST_RUNNER_CALLBACK_URL`, published as `:8090`), not internal Docker DNS.
+
+## Reliability properties, and where each comes from
+
+- **No lost/duplicated launch** — transactional outbox + JetStream dedup + work-queue ack.
+- **No double-bootstrap** — executor acks-on-receipt; crashes recovered by stale-run reconciliation, not redelivery.
+- **Job survives a control-plane outage** — it runs entirely on the host against the local WAL; nothing central is required for completion.
+- **No lost events** — persistence-ack gates the syncer cursor; consumer NAK-replays past DB outages; projection is idempotent.
+- **Recovery of un-pushed runs** — the [reconciler](./operations/resilience.md) SSHes back, reads the WAL, and projects it, advancing `persisted_event_seq` to the host's `max_seq`.
+- **Reboot recovery** — the systemd unit resumes non-terminal job dirs; a [WAL format version](./operations/resilience.md) makes a resume by a mismatched binary refuse rather than misread.
+
+## Network surface
+
+Behind Traefik (`80`/`443`, `*.localhost`): the UI (`praetor.localhost`), API (`api.praetor.localhost`), Gitea (`gitea.localhost`), docs (`docs.localhost`). Directly published: NATS client `4222` (+ monitoring `8222`), LDAP `389`/`636`, **ingestion `8090`** (host-runner callbacks), Prometheus `9090`, Grafana `3005`. The api/ui/scheduler/etc. talk to Postgres and NATS on the internal `praetor-net`.
 
 ## Where to go next
 
-- **[Getting Started](./getting-started.md)** — bring the stack up and run your first job.
-- **[Execution Packs](./concepts/execution-packs.md)** — the pushed runtime, in depth.
-- **[Resilience & the WAL](./operations/resilience.md)** — how a job survives an unreliable control plane.
-- **[Credentials](./concepts/credentials.md)** — the machine-credential model.
-- **[API & Authentication](./api/authentication.md)** — drive Praetor from scripts/CI.
+- **[Getting Started](./getting-started.md)** — bring the stack up and run a job.
+- **[Execution Packs](./concepts/execution-packs.md)** — how the pushed runtime is built and delivered.
+- **[Resilience & the WAL](./operations/resilience.md)** — the durability model in depth.
+- **[Observability](./operations/observability.md)** — the metrics every service exposes.
