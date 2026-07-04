@@ -18,13 +18,12 @@ ARG TARGETARCH
 # multiple packs coexist (each host-runner uses /opt/praetor/packs/<name>).
 ARG PACK_NAME=execpack
 ARG PREFIX=/opt/praetor/packs/${PACK_NAME}
-# Spec-driven contents (no inline comments — Docker treats them as part of the value):
-# ANSIBLE_SPEC: pip requirement, e.g. ansible or ansible-core==2.16.*
-ARG ANSIBLE_SPEC=ansible
-# EXTRA_PIP: space-separated extra pip packages (module deps)
-ARG EXTRA_PIP=
-# GALAXY_COLLECTIONS: space-separated ansible-galaxy collections
-ARG GALAXY_COLLECTIONS=
+# The pack's Python + Ansible deps come from a requirements.txt supplied in the
+# build context (composed and validated by the packbuilder from the pack spec —
+# see pkg/packspec). Nothing dependency-related is passed as a shell-interpolated
+# build-arg, so a spec can't inject pip flags or shell metacharacters. Collections
+# are NOT baked into the pack; they come from the project's requirements.yml at run
+# time (see cmd/host-runner/galaxy.go).
 # Gitea mirror the pack pulls Python + wheels from (reproducible / air-gapped;
 # no GitHub or PyPI at build time). Reachable from the build via the packbuilder's
 # --network=host + --add-host gitea-host:<ip>.
@@ -57,23 +56,18 @@ RUN set -eux; \
     chmod 0755 "$PREFIX/bin/praetor-host-runner"; \
     test -s "$PREFIX/bin/praetor-host-runner"
 
-# Install Ansible + any extra pip packages from the Gitea PyPI mirror only
-# (mirrored by scripts/mirror-pip.sh) — no PyPI at build time.
+# Install the engine + module deps from the Gitea PyPI mirror only (mirrored by
+# scripts/mirror-pip.sh) — no public PyPI at build time. The requirements are read
+# from the validated requirements.txt in the build context; `pip install -r` means
+# no value is ever expanded by the shell.
+COPY requirements.txt /tmp/requirements.txt
 RUN set -eux; \
     host="$(printf '%s' "${GITEA_URL}" | sed -E 's#^https?://([^:/]+).*#\1#')"; \
     "$PREFIX/bin/pip" install --no-cache-dir \
       --index-url "${GITEA_URL}/api/packages/${GITEA_OWNER}/pypi/simple/" \
       --trusted-host "$host" \
-      ${ANSIBLE_SPEC} ${EXTRA_PIP}; \
+      -r /tmp/requirements.txt; \
     "$PREFIX/bin/ansible-playbook" --version
-
-# Install any extra Galaxy collections into site-packages/ansible_collections,
-# where Ansible auto-discovers them (no runtime env needed).
-RUN set -eux; \
-    if [ -n "${GALAXY_COLLECTIONS}" ]; then \
-      SITE="$("$PREFIX/bin/python3" -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])')"; \
-      "$PREFIX/bin/ansible-galaxy" collection install ${GALAXY_COLLECTIONS} -p "$SITE"; \
-    fi
 
 # Trim caches to keep the tarball smaller.
 RUN find "$PREFIX" -type d -name __pycache__ -prune -exec rm -rf {} + ; \

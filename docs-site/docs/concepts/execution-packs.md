@@ -38,19 +38,20 @@ Packs are declarative. A YAML spec drives a parameterised build:
 
 ```yaml
 name: docker-tools
-python: "3.11.9"
-ansible: ansible-core
-pip:
+python: "3.11.9"          # standalone CPython version
+ansible_core: "2.19.11"   # OR  ansible: "12.3.0"  — set exactly one, a version
+pip:                      # module deps only (validated, pin-able)
   - docker
   - jmespath
-collections:
-  - community.docker
-  - community.general
 arches:
   - arm64
   - amd64
-host_runner: v0.4.0   # daemon release bundled into the pack
+host_runner: v0.4.0       # daemon release bundled into the pack
 ```
+
+The pack declares only the **engine**: a Python version, one of `ansible_core` / `ansible` (each a *version* — `ansible_core` installs `ansible-core==<v>`, `ansible` installs the full `ansible==<v>` bundle), and any pip module deps. **Collections are not part of a pack** — they come from the project's `requirements.yml`, installed at run time (see [Inventories & Templates](./inventories-and-templates.md)).
+
+Every field is a typed value the builder composes into a `requirements.txt` (never a shell string), and each is validated against a strict pattern — so a spec can't smuggle pip flags (`--extra-index-url`) or shell metacharacters into the build, whether it's submitted via the API or pulled from a git repo.
 
 Register a pack (with its spec) in the UI or API and the **packbuilder** service builds it: it runs the parameterised Dockerfile per arch (amd64 cross-builds under qemu), extracts the tarball into the shared runtime dir, and flips the pack `ready`/`failed` with a build log.
 

@@ -1,12 +1,10 @@
-# Example custom Execution Pack: a lean ansible-core plus the pieces needed to
-# manage Docker and query JSON. Shows how a spec adds collections and pip deps.
+# Example custom Execution Pack: lean ansible-core plus the pip deps needed to
+# manage Docker and query JSON. Collections are NOT baked into the pack — declare
+# them in the project's collections/requirements.yml instead.
 #   make execpack SPEC=build/execpack/specs/docker.yml
 name: docker-tools             # -> build/runtime/docker-tools-linux-<arch>.tar.gz
 python: "3.11.9"
-ansible: ansible-core          # lean base (no bundled community collections)
-collections:
-  - community.docker           # docker_container / docker_image modules
-  - community.general
+ansible_core: "2.19.11"        # lean engine (no bundled collections), pinned
 pip:
   - docker                     # the Docker SDK the community.docker modules need
   - jmespath                   # for the json_query filter
