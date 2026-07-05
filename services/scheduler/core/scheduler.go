@@ -252,10 +252,9 @@ func (s *Scheduler) processPendingJobs() error {
 			// inventoryContent remains empty, Executor will default to localhost
 		}
 
-		var pbContent string
-		if template.PlaybookContent != nil {
-			pbContent = *template.PlaybookContent
-		}
+		// Inline playbooks are disabled: playbooks come only from a source-control
+		// project (never dispatch template.PlaybookContent, even if a legacy row
+		// still has it). The API rejects inline content on create/update.
 
 		// 7. Find the designated runner host for this inventory
 		var runnerHostName string
@@ -314,7 +313,7 @@ func (s *Scheduler) processPendingJobs() error {
 			Inventory:       inventoryContent,
 			ProjectURL:      projectURL,
 			Playbook:        template.Playbook,
-			PlaybookContent: pbContent,
+			PlaybookContent: "", // inline playbooks disabled — SCM projects only
 			ExtraVars:       extraVars,
 			Limit:           limit,
 			UseFactCache:    template.UseFactCache,
