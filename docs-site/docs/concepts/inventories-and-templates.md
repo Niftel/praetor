@@ -21,7 +21,7 @@ With `use_fact_cache` on, the scheduler ships an inventory's stored facts into t
 
 A **job template** ties together everything a run needs:
 
-- **playbook** — a `playbook` name (from a synced project) or inline `playbook_content`,
+- **playbook** — a `playbook` path within a **source-control [project](#projects-scm)** (inline playbook content is disabled),
 - **inventory** + **[credential](./credentials.md)** + **[execution pack](./execution-packs.md)**,
 - **extra vars** and a default **limit**,
 - prompt-on-launch flags (`ask_variables_on_launch`, `ask_limit_on_launch`) and an optional **survey**,
@@ -39,3 +39,5 @@ Launching validates any prompts/survey answers, then inserts a `pending` unified
 ## Projects (SCM)
 
 A **project** references a git repo (`scm_url`, `scm_branch`); syncing validates access and records the revision. Templates reference a project to source their playbook.
+
+**Playbooks come only from source control.** Inline playbook content is disabled: the API rejects `playbook_content` on template create/update and requires a `project_id` + a `playbook` path, and the scheduler never dispatches inline content. This keeps every run's playbook reviewable and versioned in git rather than pasted into a template. At run time the host-runner fetches the project as a `.tar.gz` archive over HTTP (see [Execution Packs](./execution-packs.md#how-a-job-uses-one)).

@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
@@ -13,6 +15,24 @@ import (
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
+
+// requireSCMPlaybook enforces that a job template's playbook comes from source
+// control: inline playbook content is disabled, and the template must reference a
+// project (SCM) plus a playbook path within it. It also clears any inline content
+// so it is never stored. Applied on both create and update.
+func requireSCMPlaybook(input *models.JobTemplate) error {
+	if input.PlaybookContent != nil && strings.TrimSpace(*input.PlaybookContent) != "" {
+		return fmt.Errorf("inline playbooks are disabled; commit the playbook to a source-control project and reference it")
+	}
+	input.PlaybookContent = nil // never persist inline content
+	if input.ProjectID == nil {
+		return fmt.Errorf("a project (source control) is required")
+	}
+	if strings.TrimSpace(input.Playbook) == "" {
+		return fmt.Errorf("a playbook path within the project is required")
+	}
+	return nil
+}
 
 // genWebhookKey returns a random shared secret for verifying inbound webhooks.
 func genWebhookKey() string {
@@ -110,9 +130,9 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Validation: Playbook is required if no content provided
-	if input.Playbook == "" && input.PlaybookContent == nil {
-		render.ErrInvalidRequest(nil).Render(w, r)
+	// Playbooks must come from source control — inline content is disabled.
+	if err := requireSCMPlaybook(&input); err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 
@@ -232,6 +252,12 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 
 	var input models.JobTemplate
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
+	// Playbooks must come from source control — inline content is disabled.
+	if err := requireSCMPlaybook(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
