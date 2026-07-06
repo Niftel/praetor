@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -13,15 +14,28 @@ import (
 	"github.com/praetordev/praetor/services/api/store"
 )
 
+// InventoryStore is the inventories-domain data access the handler depends on.
+type InventoryStore interface {
+	ListAll(ctx context.Context, limit, offset int) ([]models.Inventory, error)
+	CountAll(ctx context.Context) (int64, error)
+	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Inventory, error)
+	Get(ctx context.Context, id int64) (models.Inventory, error)
+	Create(ctx context.Context, input models.Inventory) (models.Inventory, error)
+	UpdateContent(ctx context.Context, id int64, input models.Inventory) (models.Inventory, error)
+	UpdateKind(ctx context.Context, id int64, input models.Inventory) (models.Inventory, error)
+	Delete(ctx context.Context, id int64) error
+}
+
 // InventoriesResource handles inventory operations
 type InventoriesResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	store InventoryStore
 }
 
 // NewInventoriesResource creates a new inventories resource handler
 func NewInventoriesResource(db *sqlx.DB) *InventoriesResource {
-	return &InventoriesResource{DB: db, Authorizer: NewAuthorizer(db)}
+	return &InventoriesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewInventoryStore(db)}
 }
 
 // Routes creates a REST router for the Inventories resource
@@ -44,26 +58,23 @@ func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Re
 	var total int64
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &inventories, `SELECT `+store.InventoryCols+` FROM inventories ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+		var err error
+		if inventories, err = rs.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		_ = rs.DB.Get(&total, "SELECT count(*) FROM inventories")
+		total, _ = rs.store.CountAll(r.Context())
 	} else {
 		ids, err := rs.readableIDs(r, rbac.ContentTypeInventory)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		if len(ids) > 0 {
-			q, args, _ := sqlx.In(`SELECT `+store.InventoryCols+` FROM inventories WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
-			q = rs.DB.Rebind(q)
-			if err := rs.DB.SelectContext(r.Context(), &inventories, q, args...); err != nil {
-				render.ErrInternal(err).Render(w, r)
-				return
-			}
-			total = int64(len(ids))
+		if inventories, err = rs.store.ListByIDs(r.Context(), ids, pg.Limit, pg.Offset); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
 		}
+		total = int64(len(ids))
 	}
 
 	if inventories == nil {
@@ -108,17 +119,7 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 		input.Kind = "static"
 	}
 
-	query := `
-		INSERT INTO inventories (organization_id, name, description, kind, content) 
-		VALUES ($1, $2, $3, $4, $5) 
-		RETURNING ` + store.InventoryCols
-
-	var created models.Inventory
-	err := rs.DB.QueryRowxContext(r.Context(), query,
-		input.OrganizationID, input.Name, input.Description,
-		input.Kind, input.Content,
-	).StructScan(&created)
-
+	created, err := rs.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -141,9 +142,7 @@ func (rs *InventoriesResource) GetInventory(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var inventory models.Inventory
-	query := `SELECT ` + store.InventoryCols + ` FROM inventories WHERE id = $1`
-	err = rs.DB.GetContext(r.Context(), &inventory, query, id)
+	inventory, err := rs.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return
@@ -171,17 +170,7 @@ func (rs *InventoriesResource) UpdateInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	query := `
-		UPDATE inventories
-		SET name = $2, description = $3, content = $4, modified_at = now()
-		WHERE id = $1 
-		RETURNING ` + store.InventoryCols
-
-	var updated models.Inventory
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		id, input.Name, input.Description, input.Content,
-	).StructScan(&updated)
-
+	updated, err := rs.store.UpdateContent(r.Context(), id, input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -203,9 +192,7 @@ func (rs *InventoriesResource) DeleteInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	query := `DELETE FROM inventories WHERE id = $1`
-	_, err = rs.DB.ExecContext(r.Context(), query, id)
-	if err != nil {
+	if err := rs.store.Delete(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -226,9 +213,7 @@ func (rs *InventoriesResource) GetInventoryByParam(w http.ResponseWriter, r *htt
 		return
 	}
 
-	var inventory models.Inventory
-	query := `SELECT ` + store.InventoryCols + ` FROM inventories WHERE id = $1`
-	err = rs.DB.GetContext(r.Context(), &inventory, query, id)
+	inventory, err := rs.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return
@@ -256,17 +241,7 @@ func (rs *InventoriesResource) UpdateInventoryByParam(w http.ResponseWriter, r *
 		return
 	}
 
-	query := `
-		UPDATE inventories 
-		SET name = $2, description = $3, kind = $4, modified_at = now() 
-		WHERE id = $1 
-		RETURNING ` + store.InventoryCols
-
-	var updated models.Inventory
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		id, input.Name, input.Description, input.Kind,
-	).StructScan(&updated)
-
+	updated, err := rs.store.UpdateKind(r.Context(), id, input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -288,9 +263,7 @@ func (rs *InventoriesResource) DeleteInventoryByParam(w http.ResponseWriter, r *
 		return
 	}
 
-	query := `DELETE FROM inventories WHERE id = $1`
-	_, err = rs.DB.ExecContext(r.Context(), query, id)
-	if err != nil {
+	if err := rs.store.Delete(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
