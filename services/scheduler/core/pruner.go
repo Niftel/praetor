@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -27,7 +26,7 @@ func (s *Scheduler) maybePrune(ctx context.Context) {
 	}
 	s.lastPrune = time.Now()
 	if err := s.pruneOldJobs(ctx); err != nil {
-		log.Printf("retention: prune failed: %v", err)
+		logger.Error("retention prune failed", "err", err)
 	}
 }
 
@@ -63,7 +62,7 @@ func (s *Scheduler) pruneOldJobs(ctx context.Context) error {
 			if err := s.DB.SelectContext(ctx, &keys, s.DB.Rebind(q), args...); err == nil {
 				for _, k := range keys {
 					if derr := s.Logs.Delete(k); derr != nil {
-						log.Printf("retention: blob delete %s: %v", k, derr)
+						logger.Error("retention blob delete failed", "key", k, "err", derr)
 					}
 				}
 			}
@@ -80,6 +79,6 @@ func (s *Scheduler) pruneOldJobs(ctx context.Context) error {
 		return err
 	}
 	n, _ := res.RowsAffected()
-	log.Printf("retention: pruned %d job(s) finished more than %d day(s) ago", n, s.RetentionDays)
+	logger.Info("retention pruned jobs", "count", n, "older_than_days", s.RetentionDays)
 	return nil
 }

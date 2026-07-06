@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"strings"
 
 	"github.com/praetordev/praetor/pkg/crypto"
@@ -21,7 +20,7 @@ func (s *Scheduler) resolveGalaxyServers(ctx context.Context, orgID int64) []eve
 		WHERE ogc.organization_id = $1
 		ORDER BY ogc.position, ogc.id`, orgID)
 	if err != nil {
-		log.Printf("galaxy: resolve for org %d failed: %v", orgID, err)
+		logger.Error("galaxy resolve for org failed", "org_id", orgID, "err", err)
 		return nil
 	}
 	defer rows.Close()

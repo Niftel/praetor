@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 )
@@ -39,14 +38,14 @@ const wfLockNamespace = 0x5057
 func (s *Scheduler) advanceWorkflowLocked(ctx context.Context, id int64) {
 	conn, err := s.DB.Connx(ctx)
 	if err != nil {
-		log.Printf("workflow %d: acquire conn: %v", id, err)
+		logger.Error("workflow acquire conn failed", "workflow_id", id, "err", err)
 		return
 	}
 	defer conn.Close()
 
 	var got bool
 	if err := conn.GetContext(ctx, &got, `SELECT pg_try_advisory_lock($1::int, $2::int)`, wfLockNamespace, id); err != nil {
-		log.Printf("workflow %d: advisory lock: %v", id, err)
+		logger.Error("workflow advisory lock failed", "workflow_id", id, "err", err)
 		return
 	}
 	if !got {
@@ -54,12 +53,12 @@ func (s *Scheduler) advanceWorkflowLocked(ctx context.Context, id int64) {
 	}
 	defer func() {
 		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1::int, $2::int)`, wfLockNamespace, id); err != nil {
-			log.Printf("workflow %d: advisory unlock: %v", id, err)
+			logger.Error("workflow advisory unlock failed", "workflow_id", id, "err", err)
 		}
 	}()
 
 	if err := s.advanceWorkflow(ctx, id); err != nil {
-		log.Printf("workflow %d: %v", id, err)
+		logger.Error("workflow advance failed", "workflow_id", id, "err", err)
 	}
 }
 
@@ -205,7 +204,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 				`UPDATE workflow_job_nodes SET status='awaiting_event', event_token=$1 WHERE id=$2`, token, n.ID)
 			n.Status = "awaiting_event"
 			n.EventToken = token
-			log.Printf("workflow %d: node %q awaiting remote event", wjID, n.NodeKey)
+			logger.Info("workflow node awaiting remote event", "workflow_id", wjID, "node", n.NodeKey)
 			continue
 		}
 
@@ -219,7 +218,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			}
 			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
 			n.Status = newSt
-			log.Printf("workflow %d: node %q webhook_out -> %s", wjID, n.NodeKey, newSt)
+			logger.Info("workflow node webhook_out", "workflow_id", wjID, "node", n.NodeKey, "status", newSt)
 			continue
 		}
 
@@ -255,7 +254,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 		n.Status = "running"
 		jid := jobID
 		n.UnifiedJobID = &jid
-		log.Printf("workflow %d: launched node %q as job %d", wjID, n.NodeKey, jobID)
+		logger.Info("workflow node launched as job", "workflow_id", wjID, "node", n.NodeKey, "job_id", jobID)
 	}
 
 	// 3. Finalize the workflow when every node is terminal.
@@ -278,7 +277,7 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			status = "failed"
 		}
 		logExec(ctx, s.DB, `UPDATE workflow_jobs SET status=$1, finished_at=now() WHERE id=$2`, status, wjID)
-		log.Printf("workflow %d finished: %s", wjID, status)
+		logger.Info("workflow finished", "workflow_id", wjID, "status", status)
 	}
 	return nil
 }
@@ -295,7 +294,7 @@ func newEventToken() string {
 // configured it sends a small JSON describing the workflow/node.
 func postWorkflowWebhook(url, body, workflowName string, wjID int64, nodeKey string) bool {
 	if url == "" {
-		log.Printf("workflow %d: node %q webhook_out has no URL", wjID, nodeKey)
+		logger.Warn("workflow node webhook_out has no URL", "workflow_id", wjID, "node", nodeKey)
 		return false
 	}
 	if body == "" {
@@ -307,13 +306,13 @@ func postWorkflowWebhook(url, body, workflowName string, wjID int64, nodeKey str
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader([]byte(body)))
 	if err != nil {
-		log.Printf("workflow %d: node %q webhook_out bad request: %v", wjID, nodeKey, err)
+		logger.Error("workflow node webhook_out bad request", "workflow_id", wjID, "node", nodeKey, "err", err)
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("workflow %d: node %q webhook_out POST failed: %v", wjID, nodeKey, err)
+		logger.Error("workflow node webhook_out POST failed", "workflow_id", wjID, "node", nodeKey, "err", err)
 		return false
 	}
 	defer resp.Body.Close()

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -21,8 +20,14 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/objectstore"
+	"github.com/praetordev/praetor/pkg/plog"
 	"github.com/teambition/rrule-go"
 )
+
+// logger is the scheduler package's structured, component-tagged logger. The
+// composition root installs the handler (see pkg/plog); this tags every record
+// with component=scheduler across the package's files.
+var logger = plog.New("scheduler")
 
 type Scheduler struct {
 	DB        *sqlx.DB
@@ -79,11 +84,11 @@ func (s *Scheduler) tickTasks() []tickTask {
 func (s *Scheduler) Start(ctx context.Context) {
 	defer s.Ticker.Stop()
 	tasks := s.tickTasks()
-	log.Println("Scheduler started")
+	logger.Info("scheduler started")
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Scheduler stopped")
+			logger.Info("scheduler stopped")
 			return
 		case <-s.Ticker.C:
 			s.runTick(ctx, tasks)
@@ -97,7 +102,7 @@ func (s *Scheduler) runTick(ctx context.Context, tasks []tickTask) {
 	tickStart := time.Now()
 	for _, t := range tasks {
 		if err := t.run(ctx); err != nil {
-			log.Printf("scheduler tick task %q: %v", t.name, err)
+			logger.Error("tick task failed", "task", t.name, "err", err)
 			TickTaskErrors.WithLabelValues(t.name).Inc()
 		}
 	}
@@ -138,7 +143,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			RETURNING id`, job.ID).Scan(&runID)
 
 		if err != nil {
-			log.Printf("Failed to create run for job %d: %v", job.ID, err)
+			logger.Error("create run for job failed", "job_id", job.ID, "err", err)
 			return err // Rollback
 		}
 
@@ -149,7 +154,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			WHERE id = $2`, runID, job.ID)
 
 		if err != nil {
-			log.Printf("Failed to update job %d: %v", job.ID, err)
+			logger.Error("update job failed", "job_id", job.ID, "err", err)
 			return err // Rollback
 		}
 
@@ -165,7 +170,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			}
 			if err := tx.GetContext(ctx, &src,
 				`SELECT inventory_id, source, source_kind, credential_id FROM inventory_sources WHERE id = $1`, srcID); err != nil {
-				log.Printf("sync job %d: source %d not found: %v", job.ID, srcID, err)
+				logger.Error("inventory sync source not found", "job_id", job.ID, "source_id", srcID, "err", err)
 				logExec(ctx, tx, "UPDATE unified_jobs SET status='failed' WHERE id=$1", job.ID)
 				continue
 			}
@@ -183,7 +188,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 				syncManifest.CredentialID = *src.CredentialID
 				if _, uerr := tx.ExecContext(ctx,
 					`UPDATE execution_runs SET credential_id = $1 WHERE id = $2`, *src.CredentialID, runID); uerr != nil {
-					log.Printf("sync job %d: snapshot credential id on run %s failed: %v", job.ID, runID, uerr)
+					logger.Error("snapshot credential id on run failed", "job_id", job.ID, "run_id", runID, "err", uerr)
 				}
 			}
 			req := &events.ExecutionRequest{ExecutionRunID: runID, UnifiedJobID: job.ID, JobManifest: syncManifest, CreatedAt: time.Now()}
@@ -195,13 +200,13 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 				`INSERT INTO execution_outbox (execution_run_id, payload) VALUES ($1, $2)`, runID, payload); err != nil {
 				return err
 			}
-			log.Printf("Enqueued inventory sync for job %d (run %s, source %d)", job.ID, runID, srcID)
+			logger.Info("enqueued inventory sync", "job_id", job.ID, "run_id", runID, "source_id", srcID)
 			continue
 		}
 
 		// 5. Resolve Project from Template - REQUIRES a template with a project
 		if job.UnifiedJobTemplateID == nil {
-			log.Printf("Job %d has no template - skipping (template required)", job.ID)
+			logger.Warn("job has no template - skipping (template required)", "job_id", job.ID)
 			logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 			continue
 		}
@@ -210,7 +215,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		var template models.JobTemplate
 		err = tx.GetContext(ctx, &template, "SELECT * FROM job_templates WHERE id = $1", *job.UnifiedJobTemplateID)
 		if err != nil {
-			log.Printf("Failed to find template %d for job %d: %v", *job.UnifiedJobTemplateID, job.ID, err)
+			logger.Error("find template for job failed", "template_id", *job.UnifiedJobTemplateID, "job_id", job.ID, "err", err)
 			logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 			continue
 		}
@@ -221,14 +226,14 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			var project models.Project
 			err = tx.GetContext(ctx, &project, "SELECT * FROM projects WHERE id = $1", *template.ProjectID)
 			if err != nil {
-				log.Printf("Failed to find project %d for template %s: %v", *template.ProjectID, template.Name, err)
+				logger.Error("find project for template failed", "project_id", *template.ProjectID, "template", template.Name, "err", err)
 				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
 			projectURL = project.SCMURL
-			log.Printf("Using project %s (%s) for job %d", project.Name, project.SCMURL, job.ID)
+			logger.Info("using project for job", "project", project.Name, "scm_url", project.SCMURL, "job_id", job.ID)
 		} else {
-			log.Printf("Template %s has no project - using default/inline logic for job %d", template.Name, job.ID)
+			logger.Info("template has no project - using default/inline logic", "template", template.Name, "job_id", job.ID)
 		}
 
 		// 6. Generate inventory from structured hosts and groups
@@ -237,7 +242,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			var inventory models.Inventory
 			err = tx.GetContext(ctx, &inventory, "SELECT * FROM inventories WHERE id = $1", *template.InventoryID)
 			if err != nil {
-				log.Printf("Failed to find inventory %d for template %s: %v", *template.InventoryID, template.Name, err)
+				logger.Error("find inventory for template failed", "inventory_id", *template.InventoryID, "template", template.Name, "err", err)
 				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
@@ -246,7 +251,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			var hosts []models.Host
 			err = tx.SelectContext(ctx, &hosts, "SELECT * FROM hosts WHERE inventory_id = $1 AND enabled = true", *template.InventoryID)
 			if err != nil {
-				log.Printf("Failed to fetch hosts for inventory %d: %v", *template.InventoryID, err)
+				logger.Error("fetch hosts for inventory failed", "inventory_id", *template.InventoryID, "err", err)
 				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
@@ -255,19 +260,19 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			var groups []models.Group
 			err = tx.SelectContext(ctx, &groups, "SELECT * FROM groups WHERE inventory_id = $1", *template.InventoryID)
 			if err != nil {
-				log.Printf("Failed to fetch groups for inventory %d: %v", *template.InventoryID, err)
+				logger.Error("fetch groups for inventory failed", "inventory_id", *template.InventoryID, "err", err)
 			}
 
 			// Build INI inventory
 			inventoryContent = generateInventoryINI(tx, ctx, hosts, groups)
-			log.Printf("Generated inventory for %s (Job %d) Content:\n%s", inventory.Name, job.ID, inventoryContent)
-			log.Printf("Generated inventory for %s with %d hosts and %d groups for job %d", inventory.Name, len(hosts), len(groups), job.ID)
+			logger.Debug("generated inventory", "inventory", inventory.Name, "job_id", job.ID, "content", inventoryContent)
+			logger.Info("generated inventory", "inventory", inventory.Name, "hosts", len(hosts), "groups", len(groups), "job_id", job.ID)
 
 			if len(hosts) == 0 {
-				log.Printf("Inventory %s has no enabled hosts - proceeding anyway to allow Ansible to handle it (e.g. localhost or group vars)", inventory.Name)
+				logger.Warn("inventory has no enabled hosts - proceeding (localhost/group vars may apply)", "inventory", inventory.Name)
 			}
 		} else {
-			log.Printf("Template %s has no inventory - using default localhost for job %d", template.Name, job.ID)
+			logger.Info("template has no inventory - using default localhost", "template", template.Name, "job_id", job.ID)
 			// inventoryContent remains empty, Executor will default to localhost
 		}
 
@@ -287,7 +292,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			if err == nil {
 				runnerHostName = runnerHost.Name
 				runnerHostID = runnerHost.ID
-				log.Printf("Using runner host '%s' (ID %d) for job %d", runnerHostName, runnerHostID, job.ID)
+				logger.Info("using runner host", "host", runnerHostName, "host_id", runnerHostID, "job_id", job.ID)
 			} else {
 				// Fallback to first enabled host if no explicit runner host is set
 				var firstHost models.Host
@@ -298,7 +303,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 				if err == nil {
 					runnerHostName = firstHost.Name
 					runnerHostID = firstHost.ID
-					log.Printf("No runner host set - using first host '%s' (ID %d) for job %d", runnerHostName, runnerHostID, job.ID)
+					logger.Info("no runner host set - using first host", "host", runnerHostName, "host_id", runnerHostID, "job_id", job.ID)
 				}
 			}
 		}
@@ -310,7 +315,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		if runnerHostID != 0 {
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE execution_runs SET runner_host_id = $1 WHERE id = $2`, runnerHostID, runID); err != nil {
-				log.Printf("job %d: snapshot runner_host_id failed: %v", job.ID, err)
+				logger.Error("snapshot runner_host_id failed", "job_id", job.ID, "err", err)
 			}
 		}
 
@@ -359,7 +364,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			manifest.CredentialID = *template.CredentialID
 			if _, uerr := tx.ExecContext(ctx,
 				`UPDATE execution_runs SET credential_id = $1 WHERE id = $2`, *template.CredentialID, runID); uerr != nil {
-				log.Printf("job %d: snapshot credential id on run %s failed: %v", job.ID, runID, uerr)
+				logger.Error("snapshot credential id on run failed", "job_id", job.ID, "run_id", runID, "err", uerr)
 			}
 		}
 
@@ -387,17 +392,17 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		// relay delivers it.
 		payload, err := json.Marshal(req)
 		if err != nil {
-			log.Printf("Failed to marshal execution request for run %s: %v", runID, err)
+			logger.Error("marshal execution request failed", "run_id", runID, "err", err)
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO execution_outbox (execution_run_id, payload) VALUES ($1, $2)`,
 			runID, payload,
 		); err != nil {
-			log.Printf("Failed to enqueue execution request for run %s: %v", runID, err)
+			logger.Error("enqueue execution request failed", "run_id", runID, "err", err)
 			return err
 		}
-		log.Printf("Enqueued ExecutionRequest for Job %d (run %s). Playbook: %s", job.ID, runID, manifest.Playbook)
+		logger.Info("enqueued execution request", "job_id", job.ID, "run_id", runID, "playbook", manifest.Playbook)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -419,7 +424,7 @@ func (s *Scheduler) relayOutbox(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, `
 		UPDATE execution_outbox SET status = 'pending'
 		WHERE status = 'sending' AND sent_at < now() - interval '2 minutes'`); err != nil {
-		log.Printf("outbox: failed to recover stale claims: %v", err)
+		logger.Error("outbox: recover stale claims failed", "err", err)
 	}
 
 	// Atomically claim a batch. The single UPDATE ... RETURNING takes and releases
@@ -447,13 +452,13 @@ func (s *Scheduler) relayOutbox(ctx context.Context) error {
 	for _, row := range rows {
 		var req events.ExecutionRequest
 		if err := json.Unmarshal(row.Payload, &req); err != nil {
-			log.Printf("outbox: dropping unparseable row %d: %v", row.ID, err)
+			logger.Error("outbox: dropping unparseable row", "row_id", row.ID, "err", err)
 			logExec(ctx, s.DB, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
 		if err := s.Publisher.PublishExecutionRequest(&req); err != nil {
 			// Return the row to the queue for the next tick.
-			log.Printf("outbox: publish failed for row %d (will retry): %v", row.ID, err)
+			logger.Error("outbox: publish failed (will retry)", "row_id", row.ID, "err", err)
 			logExec(ctx, s.DB, `UPDATE execution_outbox SET status = 'pending', attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
@@ -462,7 +467,7 @@ func (s *Scheduler) relayOutbox(ctx context.Context) error {
 			row.ID); err != nil {
 			// Published but couldn't mark sent; leaving it 'sending' means stale-claim
 			// recovery requeues it and dedup makes the re-publish harmless.
-			log.Printf("outbox: published row %d but failed to mark sent: %v", row.ID, err)
+			logger.Error("outbox: published row but failed to mark sent", "row_id", row.ID, "err", err)
 		}
 	}
 	return nil
@@ -494,14 +499,14 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 	}
 
 	for _, sched := range schedules {
-		log.Printf("Processing schedule %d (%s) due at %s", sched.ID, sched.Name, sched.NextRun)
+		logger.Info("processing schedule", "schedule_id", sched.ID, "name", sched.Name, "due_at", sched.NextRun)
 
 		// 2. Launch the schedule's target — a workflow run or a job template.
 		if err := launchTarget(ctx, tx, sched.Name, sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); err != nil {
-			log.Printf("Failed to launch target for schedule %d: %v", sched.ID, err)
+			logger.Error("launch target for schedule failed", "schedule_id", sched.ID, "err", err)
 			continue
 		}
-		log.Printf("Launched target for schedule %d", sched.ID)
+		logger.Info("launched target for schedule", "schedule_id", sched.ID)
 
 		// 3. (Skipped) We do NOT create execution_run here.
 		// The existing processPendingJobs loop picks up 'pending' jobs with no current_run_id and handles it.
@@ -509,7 +514,7 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 		// 5. Calculate Next Run
 		rule, err := rrule.StrToRRule(sched.RRule)
 		if err != nil {
-			log.Printf("Invalid RRule for schedule %d: %v", sched.ID, err)
+			logger.Error("invalid RRule for schedule; disabling", "schedule_id", sched.ID, "err", err)
 			// Disable it to stop error loop
 			logExec(ctx, tx, "UPDATE schedules SET enabled = false WHERE id = $1", sched.ID)
 			continue
@@ -518,7 +523,7 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 		// rrule-go: rule.After(dt, inclusive)
 		next := rule.After(time.Now(), false)
 
-		log.Printf("Schedule %d next run: %s", sched.ID, next)
+		logger.Info("schedule next run computed", "schedule_id", sched.ID, "next_run", next)
 
 		_, err = tx.ExecContext(ctx, `
 			UPDATE schedules 
@@ -527,7 +532,7 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 			next, sched.ID)
 
 		if err != nil {
-			log.Printf("Failed to update schedule %d next_run: %v", sched.ID, err)
+			logger.Error("update schedule next_run failed", "schedule_id", sched.ID, "err", err)
 			continue
 		}
 	}
@@ -564,10 +569,10 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 		fmt.Sprintf("%d seconds", int(startGrace.Seconds())),
 	)
 	if err != nil {
-		log.Printf("Error moving stale runs to reconciling: %v", err)
+		logger.Error("move stale runs to reconciling failed", "err", err)
 	} else if rows, _ := rec.RowsAffected(); rows > 0 {
 		RunsReconciling.Add(float64(rows))
-		log.Printf("Moved %d stale remote runs to reconciling", rows)
+		logger.Info("moved stale remote runs to reconciling", "count", rows)
 	}
 
 	// Queue depth: jobs accepted but not yet running. Sampled once per tick.
@@ -596,10 +601,10 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 		fmt.Sprintf("%d seconds", int(startGrace.Seconds())),
 	)
 	if err != nil {
-		log.Printf("Error reconciling lost runs: %v", err)
+		logger.Error("reconcile lost runs failed", "err", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
 		RunsLost.Add(float64(rows))
-		log.Printf("Marked %d local runs as lost (stale/absent heartbeat)", rows)
+		logger.Warn("marked local runs as lost (stale/absent heartbeat)", "count", rows)
 	}
 
 	// 2. Queued too long: never picked up by an executor. With the durable
@@ -621,9 +626,9 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 		fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())),
 	)
 	if err != nil {
-		log.Printf("Error reconciling stuck queued jobs: %v", err)
+		logger.Error("reconcile stuck queued jobs failed", "err", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
-		log.Printf("Marked %d queued jobs as failed (never started)", rows)
+		logger.Warn("marked queued jobs as failed (never started)", "count", rows)
 	}
 
 	// Void any still-pending outbox row whose run is already terminal. Without
@@ -638,9 +643,9 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 		WHERE o.execution_run_id = er.id
 		  AND o.status = 'pending'
 		  AND er.state IN ('failed', 'canceled')`); verr != nil {
-		log.Printf("Error voiding outbox for terminal runs: %v", verr)
+		logger.Error("void outbox for terminal runs failed", "err", verr)
 	} else if n, _ := vr.RowsAffected(); n > 0 {
-		log.Printf("Voided %d pending outbox launch(es) for already-terminal runs", n)
+		logger.Info("voided pending outbox launches for already-terminal runs", "count", n)
 	}
 
 	return nil

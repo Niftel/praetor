@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 )
 
 // sqlExec is satisfied by both *sqlx.DB and *sqlx.Tx, so launchTarget works inside
@@ -20,7 +19,7 @@ type sqlExec interface {
 // workflow node stuck in the wrong state); at minimum that must be visible.
 func logExec(ctx context.Context, ex sqlExec, query string, args ...interface{}) {
 	if _, err := ex.ExecContext(ctx, query, args...); err != nil {
-		log.Printf("scheduler: state update failed: %v (query: %s)", err, query)
+		logger.Error("state update failed", "err", err, "query", query)
 	}
 }
 
@@ -102,9 +101,9 @@ func (s *Scheduler) processEventTriggers(ctx context.Context) {
 		}
 		name := fmt.Sprintf("%s (event: job %d)", m.Name, m.JobID)
 		if err := launchTarget(ctx, s.DB, name, m.WfID, m.UjtID); err != nil {
-			log.Printf("event trigger %d: launch failed: %v", m.TriggerID, err)
+			logger.Error("event trigger launch failed", "trigger_id", m.TriggerID, "err", err)
 			continue
 		}
-		log.Printf("event trigger %d fired on job %d", m.TriggerID, m.JobID)
+		logger.Info("event trigger fired", "trigger_id", m.TriggerID, "job_id", m.JobID)
 	}
 }
