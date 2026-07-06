@@ -45,10 +45,8 @@ func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var user models.User
 	// Get user including password_hash
-	query := `SELECT id, username, password_hash, first_name, last_name, email, is_superuser, is_system_auditor, is_active FROM users WHERE username = $1`
-	err := h.DB.Get(&user, query, req.Username)
+	user, err := h.users.ByUsernameWithHash(r.Context(), req.Username)
 	if err != nil {
 		// Generic error for security
 		render.ErrUnauthorized(nil).Render(w, r)
