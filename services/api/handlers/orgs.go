@@ -41,11 +41,37 @@ type ProjectStore interface {
 	TouchModified(ctx context.Context, id int64) error
 }
 
+// RoleStore is the roles-domain read access the content handler depends on
+// (role mutations go through the rbac Access service).
+type RoleStore interface {
+	ListAll(ctx context.Context) ([]rbac.Role, error)
+	ListSingletons(ctx context.Context) ([]rbac.Role, error)
+	GetByID(ctx context.Context, id int64) (rbac.Role, error)
+	UsersForRole(ctx context.Context, roleID int64) ([]models.User, error)
+	TeamsForRole(ctx context.Context, roleID int64) ([]models.Team, error)
+}
+
+// TeamStore is the teams-domain data access the content handler depends on.
+type TeamStore interface {
+	ListAll(ctx context.Context, limit, offset int) ([]models.Team, error)
+	CountAll(ctx context.Context) (int64, error)
+	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Team, error)
+	Get(ctx context.Context, id int64) (models.Team, error)
+	Create(ctx context.Context, input models.Team) (models.Team, error)
+	Update(ctx context.Context, input models.Team) (models.Team, error)
+	Delete(ctx context.Context, id int64) (int64, error)
+	AddMember(ctx context.Context, teamID, userID int64) error
+	RemoveMember(ctx context.Context, teamID, userID int64) error
+	Members(ctx context.Context, teamID int64) ([]models.User, error)
+}
+
 type ContentHandler struct {
 	DB *sqlx.DB
 	*Authorizer
 	orgs     OrgStore
 	projects ProjectStore
+	roles    RoleStore
+	teams    TeamStore
 }
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
@@ -54,6 +80,8 @@ func NewContentHandler(db *sqlx.DB) *ContentHandler {
 		Authorizer: NewAuthorizer(db),
 		orgs:       store.NewOrgStore(db),
 		projects:   store.NewProjectStore(db),
+		roles:      store.NewRoleStore(db),
+		teams:      store.NewTeamStore(db),
 	}
 }
 

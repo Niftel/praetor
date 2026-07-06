@@ -6,11 +6,9 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
 )
 
 // ListRoles GET /api/v1/roles
@@ -23,8 +21,7 @@ func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 
 	if userCtx.IsSuperuser {
 		// Superusers see all roles
-		err = h.DB.Select(&roles, `SELECT `+store.RoleCols+`
-			FROM roles ORDER BY content_type, object_id, role_field`)
+		roles, err = h.roles.ListAll(r.Context())
 	} else {
 		// Regular users see system roles + roles on objects they can access
 		roles, err = h.Access.GetUserRoles(r.Context(), userCtx.UserID)
@@ -36,9 +33,7 @@ func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Also include system singleton roles
-	var singletons []rbac.Role
-	h.DB.Select(&singletons, `SELECT `+store.RoleCols+`
-		FROM roles WHERE singleton_name IS NOT NULL`)
+	singletons, _ := h.roles.ListSingletons(r.Context())
 
 	// Merge (avoiding duplicates)
 	roleSet := make(map[int64]rbac.Role)
@@ -67,11 +62,7 @@ func (h *ContentHandler) GetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var role rbac.Role
-	err = h.DB.Get(&role, `
-		SELECT id, role_field, singleton_name, content_type, object_id, name, description, created_at, modified_at
-		FROM roles WHERE id = $1
-	`, roleID)
+	role, err := h.roles.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -104,8 +95,7 @@ func (h *ContentHandler) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get role to check permissions
-	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
+	role, err := h.roles.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -120,21 +110,10 @@ func (h *ContentHandler) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var users []models.User
-	err = h.DB.Select(&users, `
-		SELECT u.id, u.username, u.first_name, u.last_name, u.email, 
-		       u.is_superuser, u.is_system_auditor, u.is_active, u.created_at, u.modified_at
-		FROM users u
-		JOIN role_members rm ON u.id = rm.user_id
-		WHERE rm.role_id = $1
-	`, roleID)
+	users, err := h.roles.UsersForRole(r.Context(), roleID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if users == nil {
-		users = []models.User{}
 	}
 	render.JSON(w, r, users)
 }
@@ -149,8 +128,7 @@ func (h *ContentHandler) AddRoleUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
+	role, err := h.roles.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -206,8 +184,7 @@ func (h *ContentHandler) RemoveRoleUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
+	role, err := h.roles.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -246,8 +223,7 @@ func (h *ContentHandler) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
+	role, err := h.roles.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -261,20 +237,10 @@ func (h *ContentHandler) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var teams []models.Team
-	err = h.DB.Select(&teams, `
-		SELECT t.id, t.organization_id, t.name, t.description, t.created_at, t.modified_at
-		FROM teams t
-		JOIN team_roles tr ON t.id = tr.team_id
-		WHERE tr.role_id = $1
-	`, roleID)
+	teams, err := h.roles.TeamsForRole(r.Context(), roleID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if teams == nil {
-		teams = []models.Team{}
 	}
 	render.JSON(w, r, teams)
 }
@@ -289,8 +255,7 @@ func (h *ContentHandler) AddRoleTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
+	role, err := h.roles.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -344,8 +309,7 @@ func (h *ContentHandler) RemoveRoleTeam(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
+	role, err := h.roles.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
