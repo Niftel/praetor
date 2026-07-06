@@ -34,21 +34,33 @@ type BootstrapRunner struct {
 	// RuntimeDir is the legacy shared dir holding <pack>-linux-<arch>.tar.gz — a
 	// fallback for packs not in the registry (execpack CLI / pre-built artifacts).
 	RuntimeDir string
+	// IngestionURL is where inventory-sync results are POSTed (the executor runs
+	// those itself, with no host-runner). CallbackURL is the address the pushed
+	// host-runner reports events/logs back to; it defaults to IngestionURL but can
+	// differ when the target reaches ingestion by a different name than the executor.
+	IngestionURL string
+	CallbackURL  string
 }
 
-func NewBootstrapRunner() *BootstrapRunner {
-	runtimeDir := os.Getenv("RUNTIME_DIR")
+// NewBootstrapRunner constructs the runner from resolved config values. All
+// environment resolution happens in cmd/executor/main.go (the composition root),
+// so this core type stays free of os.Getenv and testable with plain values.
+func NewBootstrapRunner(giteaURL, giteaOwner, runtimeDir, ingestionURL, callbackURL string) *BootstrapRunner {
 	if runtimeDir == "" {
 		runtimeDir = "/tmp/build/runtime"
 	}
-	owner := os.Getenv("GITEA_OWNER")
-	if owner == "" {
-		owner = "praetor"
+	if giteaOwner == "" {
+		giteaOwner = "praetor"
+	}
+	if callbackURL == "" {
+		callbackURL = ingestionURL
 	}
 	return &BootstrapRunner{
-		GiteaURL:   os.Getenv("GITEA_INTERNAL_URL"),
-		GiteaOwner: owner,
-		RuntimeDir: runtimeDir,
+		GiteaURL:     giteaURL,
+		GiteaOwner:   giteaOwner,
+		RuntimeDir:   runtimeDir,
+		IngestionURL: ingestionURL,
+		CallbackURL:  callbackURL,
 	}
 }
 
@@ -124,10 +136,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		return fmt.Errorf("failed to marshal manifest: %w", err)
 	}
 
-	callbackURL := os.Getenv("HOST_RUNNER_CALLBACK_URL")
-	if callbackURL == "" {
-		callbackURL = os.Getenv("INGESTION_URL")
-	}
+	callbackURL := r.CallbackURL
 
 	// A job with no inventory runs on the executor itself (localhost).
 	if req.JobManifest.RunnerHost == "" {

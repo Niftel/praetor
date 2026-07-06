@@ -11,7 +11,7 @@ import (
 
 func TestAPISkeletonPing(t *testing.T) {
 	// Pass nil DB for skeleton test (ping doesn't need DB)
-	router := api.NewRouter(nil)
+	router := api.NewRouter(nil, api.Config{})
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 

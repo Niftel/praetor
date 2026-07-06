@@ -14,6 +14,7 @@ import (
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
 	core "github.com/praetordev/praetor/services/reconciler/core"
 )
@@ -26,24 +27,19 @@ func main() {
 		log.Fatalf("secrets misconfigured: %v", err)
 	}
 
-	database, err := db.InitDB()
+	database, err := db.Connect(env.String("DATABASE_URL", db.DefaultDSN))
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 	defer database.Close()
 
 	// The run event/log endpoints live on the ingestion service (the same target
-	// the host-runner pushes to), not the API.
-	apiURL := os.Getenv("INGESTION_URL")
-	if apiURL == "" {
-		apiURL = os.Getenv("API_URL")
-	}
-	if apiURL == "" {
-		apiURL = "http://ingestion:8081"
-	}
+	// the host-runner pushes to), not the API. Prefer INGESTION_URL, fall back to
+	// API_URL, then the in-cluster default.
+	apiURL := env.String("INGESTION_URL", env.String("API_URL", "http://ingestion:8081"))
 
 	interval := 30 * time.Second
-	if v := os.Getenv("RECONCILE_INTERVAL"); v != "" {
+	if v := env.String("RECONCILE_INTERVAL", ""); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			interval = d
 		}

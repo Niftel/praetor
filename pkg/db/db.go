@@ -10,7 +10,9 @@ import (
 	"github.com/praetordev/praetor/pkg/env"
 )
 
-const defaultDSN = "postgres://postgres:postgres@localhost:5432/praetor?sslmode=disable"
+// DefaultDSN is the local-dev fallback connection string, used by mains that
+// resolve DATABASE_URL via pkg/env before calling Connect.
+const DefaultDSN = "postgres://postgres:postgres@localhost:5432/praetor?sslmode=disable"
 
 // Connect opens and verifies a Postgres connection to the given DSN. Prefer this
 // from cmd/*/main.go with an explicitly-resolved DSN so the connection string is
@@ -31,5 +33,5 @@ func Connect(dsn string) (*sqlx.DB, error) {
 // Retained for the existing mains; new code should resolve the DSN and call
 // Connect directly.
 func InitDB() (*sqlx.DB, error) {
-	return Connect(env.String("DATABASE_URL", defaultDSN))
+	return Connect(env.String("DATABASE_URL", DefaultDSN))
 }

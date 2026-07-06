@@ -10,6 +10,10 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 )
 
+// DefaultURL is the local-dev NATS address, used by mains that resolve NATS_URL
+// via pkg/env. In-cluster deployments set NATS_URL to the service address.
+const DefaultURL = "nats://127.0.0.1:4222"
+
 const (
 	SubjectExecutionRequest = "job.requests"
 	SubjectJobEvent         = "job.events"

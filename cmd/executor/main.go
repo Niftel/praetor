@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/metrics"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
@@ -17,19 +18,15 @@ func main() {
 	log.Println("Starting Executor Agent...")
 
 	// 1. Setup Infrastructure
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
-	}
-	bus, err := natsTransport.NewNatsBus(natsURL)
+	bus, err := natsTransport.NewNatsBus(env.String("NATS_URL", natsTransport.DefaultURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer bus.Close()
 
 	// Determine Publisher (HTTP or NATS)
+	ingestionURL := env.String("INGESTION_URL", "")
 	var publisher core.EventPublisher = bus
-	ingestionURL := os.Getenv("INGESTION_URL")
 	if ingestionURL != "" {
 		log.Printf("Using HTTP Ingestion Publisher at %s", ingestionURL)
 		publisher = core.NewHttpEventPublisher(ingestionURL)
@@ -37,16 +34,19 @@ func main() {
 		log.Println("Using NATS Event Publisher")
 	}
 
-	// 4. Create Runner (Bootstrap Mode)
-	runner := core.NewBootstrapRunner()
+	// 4. Create Runner (Bootstrap Mode) — all config resolved here and passed in.
+	runner := core.NewBootstrapRunner(
+		env.String("GITEA_INTERNAL_URL", ""),
+		env.String("GITEA_OWNER", ""),
+		env.String("RUNTIME_DIR", ""),
+		ingestionURL,
+		env.String("HOST_RUNNER_CALLBACK_URL", ""),
+	)
 
 	// Check for One-Shot Mode
-	if os.Getenv("PRAETOR_MODE") == "oneshot" {
+	if env.String("PRAETOR_MODE", "") == "oneshot" {
 		log.Println("Starting in ONE-SHOT mode")
-		manifestPath := os.Getenv("PRAETOR_MANIFEST_PATH")
-		if manifestPath == "" {
-			manifestPath = "/etc/praetor/manifest.json"
-		}
+		manifestPath := env.String("PRAETOR_MANIFEST_PATH", "/etc/praetor/manifest.json")
 
 		// Read manifest
 		data, err := os.ReadFile(manifestPath)
@@ -105,7 +105,7 @@ func main() {
 
 	// 2. Create Agent (Daemon Mode)
 	// We use NATS for Subscription (bus), and our selected publisher for Events
-	agent := core.NewAgent(bus, publisher, runner)
+	agent := core.NewAgent(bus, publisher, runner, env.Int("EXECUTOR_WORKERS", 2))
 
 	// 4. Start
 	if err := agent.Start(); err != nil {

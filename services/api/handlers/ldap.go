@@ -19,9 +19,9 @@ type LDAPHandler struct {
 	ConfigPath string
 }
 
-// NewLDAPHandler creates a new LDAP handler.
-func NewLDAPHandler(db *sqlx.DB) *LDAPHandler {
-	configPath := os.Getenv("PRAETOR_LDAP_CONFIG")
+// NewLDAPHandler creates a new LDAP handler. configPath is resolved in main from
+// env (empty falls back to the in-cluster default).
+func NewLDAPHandler(db *sqlx.DB, configPath string) *LDAPHandler {
 	if configPath == "" {
 		configPath = "/etc/praetor/ldap.yaml"
 	}

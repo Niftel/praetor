@@ -18,7 +18,7 @@ func TestAgentProcessing(t *testing.T) {
 	pub := &TestPublisher{ch: eventChan}
 	runner := &core.MockRunner{} // Our mock runner emits 5 events total (1 start + 3 tasks + 1 end)
 
-	agent := core.NewAgent(sub, pub, runner)
+	agent := core.NewAgent(sub, pub, runner, 2)
 
 	// Start Agent in goroutine
 	go agent.Start()

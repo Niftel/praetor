@@ -15,8 +15,17 @@ import (
 	praetorRender "github.com/praetordev/praetor/services/api/render"
 )
 
+// Config holds the API's externally-supplied configuration, resolved from env in
+// cmd/api/main.go and passed in so handlers receive plain values.
+type Config struct {
+	// IngestionURL is the base URL the API proxies run-log reads to.
+	IngestionURL string
+	// LDAPConfigPath is the path to the LDAP config file mounted into the API.
+	LDAPConfigPath string
+}
+
 // NewRouter instantiates the chi Router and wires middleware.
-func NewRouter(db *sqlx.DB) *chi.Mux {
+func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Base Middleware
@@ -179,7 +188,7 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		// =======================================================================
 		// LDAP Management
 		// =======================================================================
-		ldapHandler := handlers.NewLDAPHandler(db)
+		ldapHandler := handlers.NewLDAPHandler(db, cfg.LDAPConfigPath)
 		r.Route("/ldap", func(r chi.Router) {
 			r.Get("/config", ldapHandler.GetConfig)
 			r.Post("/test-connection", ldapHandler.TestConnection)
@@ -198,7 +207,7 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 		// =======================================================================
 		// Jobs
 		// =======================================================================
-		jobs := handlers.NewJobsResource(db)
+		jobs := handlers.NewJobsResource(db, cfg.IngestionURL)
 		r.Mount("/jobs", jobs.Routes())
 
 		// =======================================================================

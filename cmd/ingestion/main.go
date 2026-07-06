@@ -3,11 +3,11 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
@@ -16,25 +16,18 @@ import (
 )
 
 func main() {
-	port := os.Getenv("INGESTION_PORT")
-	if port == "" {
-		port = "8081" // Distinct port from API (8080)
-	}
+	port := env.String("INGESTION_PORT", "8081") // Distinct port from API (8080)
 
 	log.Println("Starting Ingestion Service...")
 
 	// 1. DB
-	database, err := db.InitDB()
+	database, err := db.Connect(env.String("DATABASE_URL", db.DefaultDSN))
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 
 	// 2. NATS Infrastructure
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
-	}
-	bus, err := natsTransport.NewNatsBus(natsURL)
+	bus, err := natsTransport.NewNatsBus(env.String("NATS_URL", natsTransport.DefaultURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}

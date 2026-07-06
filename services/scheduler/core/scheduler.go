@@ -37,6 +37,11 @@ type Scheduler struct {
 	Logs          objectstore.LogStore
 	RetentionDays int
 	lastPrune     time.Time
+
+	// APIURL is the control-plane base URL embedded in the job manifest so the
+	// pushed host-runner knows where to report back. Resolved in main from env;
+	// empty is valid (callers fall back to the in-cluster default).
+	APIURL string
 }
 
 func NewScheduler(db *sqlx.DB, interval time.Duration, publisher EventPublisher) *Scheduler {
@@ -154,7 +159,7 @@ func (s *Scheduler) processPendingJobs() error {
 				InventorySource:     src.Source,
 				InventorySourceKind: src.Kind,
 				SyncInventoryID:     src.InventoryID,
-				APIURL:              os.Getenv("API_URL"),
+				APIURL:              s.APIURL,
 			}
 			// Resolve the source's cloud credential (if any) into injector env/files
 			// so the inventory plugin can authenticate.
@@ -320,7 +325,7 @@ func (s *Scheduler) processPendingJobs() error {
 			CachedFacts:     cachedFacts,
 			RunnerHost:      runnerHostName,
 			RunnerHostID:    runnerHostID,
-			APIURL:          os.Getenv("API_URL"),
+			APIURL:          s.APIURL,
 			GalaxyServers:   s.resolveGalaxyServers(ctx, template.OrganizationID),
 		}
 
