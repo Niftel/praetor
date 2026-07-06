@@ -259,6 +259,9 @@ func (rs *EventsResource) launch(ruleName string, ujt, wf sql.NullInt64, payload
 			`INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
 			 VALUES ($1,$2,'pending',now(),$3) RETURNING id`,
 			ruleName+" (event)", ujt.Int64, jobArgs).Scan(&id)
+		if isActiveRunConflict(err) {
+			return 0, nil // a heal is already in flight; skip this event
+		}
 		return id, err
 	case wf.Valid:
 		// Snapshot the workflow into a run (same as an inbound workflow webhook).

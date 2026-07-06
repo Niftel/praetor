@@ -95,6 +95,11 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
 		VALUES ($1, $2, 'pending', now(), $3) RETURNING id`,
 		t.Name+" (webhook)", *t.UJTID, jobArgs).Scan(&jobID); err != nil {
+		if isActiveRunConflict(err) {
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "skipped", "reason": "a run of this template is already active"})
+			return
+		}
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
