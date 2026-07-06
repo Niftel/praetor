@@ -9,11 +9,9 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
 )
 
 // ListProjects GET /api/v1/projects
@@ -26,26 +24,23 @@ func (h *ContentHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	var total int64
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := h.DB.Select(&projects, `SELECT `+store.ProjectCols+` FROM projects ORDER BY id LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+		var err error
+		if projects, err = h.projects.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		_ = h.DB.Get(&total, "SELECT count(*) FROM projects")
+		total, _ = h.projects.CountAll(r.Context())
 	} else {
 		ids, err := h.readableIDs(r, rbac.ContentTypeProject)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		if len(ids) > 0 {
-			q, args, _ := sqlx.In(`SELECT `+store.ProjectCols+` FROM projects WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
-			q = h.DB.Rebind(q)
-			if err := h.DB.Select(&projects, q, args...); err != nil {
-				render.ErrInternal(err).Render(w, r)
-				return
-			}
-			total = int64(len(ids))
+		if projects, err = h.projects.ListByIDs(r.Context(), ids, pg.Limit, pg.Offset); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
 		}
+		total = int64(len(ids))
 	}
 
 	if projects == nil {
@@ -84,30 +79,14 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		input.SCMType = "git"
 	}
 
-	query := `
-		INSERT INTO projects (organization_id, name, description, scm_type, scm_url, scm_branch) 
-		VALUES (:organization_id, :name, :description, :scm_type, :scm_url, :scm_branch) 
-		RETURNING ` + store.ProjectCols
-
-	rows, err := h.DB.NamedQuery(query, input)
+	created, err := h.projects.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var created models.Project
-		if err := rows.StructScan(&created); err != nil {
-			render.ErrInternal(err).Render(w, r)
-			return
-		}
-		// The creator becomes admin of the project they just made.
-		h.grantCreatorAdmin(r.Context(), rbac.ContentTypeProject, created.ID, currentUser(r))
-		render.Created(w, r, created)
-	} else {
-		render.ErrInternal(nil).Render(w, r)
-	}
+	// The creator becomes admin of the project they just made.
+	h.grantCreatorAdmin(r.Context(), rbac.ContentTypeProject, created.ID, currentUser(r))
+	render.Created(w, r, created)
 }
 
 // SyncProject POST /api/v1/projects/{id}/sync
@@ -125,8 +104,8 @@ func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var project models.Project
-	if err := h.DB.Get(&project, "SELECT "+store.ProjectCols+" FROM projects WHERE id = $1", id); err != nil {
+	project, err := h.projects.Get(r.Context(), id)
+	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
@@ -160,7 +139,7 @@ func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
 	message := string(msgOutput)
 
 	// Update modified_at to signal sync
-	_, _ = h.DB.Exec("UPDATE projects SET modified_at = NOW() WHERE id = $1", id)
+	_ = h.projects.TouchModified(r.Context(), id)
 
 	render.JSON(w, r, map[string]interface{}{
 		"success":    true,

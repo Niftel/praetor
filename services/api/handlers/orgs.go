@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -15,15 +16,44 @@ import (
 	"github.com/praetordev/praetor/services/api/store"
 )
 
+// OrgStore is the organizations-domain data access (incl. org-scoped sublists).
+type OrgStore interface {
+	ListAll(ctx context.Context, limit, offset int) ([]models.Organization, error)
+	CountAll(ctx context.Context) (int64, error)
+	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Organization, error)
+	Get(ctx context.Context, id int64) (models.Organization, error)
+	Create(ctx context.Context, input models.Organization) (models.Organization, error)
+	Update(ctx context.Context, input models.Organization) (models.Organization, error)
+	Delete(ctx context.Context, id int64) (int64, error)
+	UsersByRoleField(ctx context.Context, orgID int64, roleField string) ([]models.User, error)
+	ListTeams(ctx context.Context, orgID int64) ([]models.Team, error)
+	ListProjects(ctx context.Context, orgID int64) ([]models.Project, error)
+	ListInventories(ctx context.Context, orgID int64) ([]models.Inventory, error)
+}
+
+// ProjectStore is the projects-domain data access the content handler depends on.
+type ProjectStore interface {
+	ListAll(ctx context.Context, limit, offset int) ([]models.Project, error)
+	CountAll(ctx context.Context) (int64, error)
+	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Project, error)
+	Get(ctx context.Context, id int64) (models.Project, error)
+	Create(ctx context.Context, input models.Project) (models.Project, error)
+	TouchModified(ctx context.Context, id int64) error
+}
+
 type ContentHandler struct {
 	DB *sqlx.DB
 	*Authorizer
+	orgs     OrgStore
+	projects ProjectStore
 }
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
 	return &ContentHandler{
 		DB:         db,
 		Authorizer: NewAuthorizer(db),
+		orgs:       store.NewOrgStore(db),
+		projects:   store.NewProjectStore(db),
 	}
 }
 
@@ -38,13 +68,12 @@ func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Reques
 
 	// Superusers and system auditors see all
 	if userCtx.IsSuperuser {
-		query := `SELECT ` + store.OrganizationCols + ` FROM organizations ORDER BY id LIMIT $1 OFFSET $2`
-		err := h.DB.Select(&orgs, query, pg.Limit, pg.Offset)
-		if err != nil {
+		var err error
+		if orgs, err = h.orgs.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		_ = h.DB.Get(&total, "SELECT count(*) FROM organizations")
+		total, _ = h.orgs.CountAll(r.Context())
 	} else {
 		// Filter by accessible organizations
 		accessibleIDs, err := h.Access.FilterAccessibleIDs(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, rbac.RoleFieldRead)
@@ -52,20 +81,11 @@ func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Reques
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-
-		if len(accessibleIDs) == 0 {
-			orgs = []models.Organization{}
-			total = 0
-		} else {
-			query, args, _ := sqlx.In(`SELECT `+store.OrganizationCols+` FROM organizations WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, accessibleIDs, pg.Limit, pg.Offset)
-			query = h.DB.Rebind(query)
-			err = h.DB.Select(&orgs, query, args...)
-			if err != nil {
-				render.ErrInternal(err).Render(w, r)
-				return
-			}
-			total = int64(len(accessibleIDs))
+		if orgs, err = h.orgs.ListByIDs(r.Context(), accessibleIDs, pg.Limit, pg.Offset); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
 		}
+		total = int64(len(accessibleIDs))
 	}
 
 	if orgs == nil {
@@ -97,28 +117,12 @@ func (h *ContentHandler) CreateOrganization(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	query := `
-		INSERT INTO organizations (name, description) 
-		VALUES (:name, :description) 
-		RETURNING ` + store.OrganizationCols
-
-	rows, err := h.DB.NamedQuery(query, input)
+	created, err := h.orgs.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var created models.Organization
-		if err := rows.StructScan(&created); err != nil {
-			render.ErrInternal(err).Render(w, r)
-			return
-		}
-		render.Created(w, r, created)
-	} else {
-		render.ErrInternal(nil).Render(w, r)
-	}
+	render.Created(w, r, created)
 }
 
 // GetOrganization GET /api/v1/organizations/{id}
@@ -137,8 +141,7 @@ func (h *ContentHandler) GetOrganization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var org models.Organization
-	err = h.DB.Get(&org, "SELECT "+store.OrganizationCols+" FROM organizations WHERE id = $1", id)
+	org, err := h.orgs.Get(r.Context(), id)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -169,29 +172,15 @@ func (h *ContentHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 	}
 	input.ID = id
 
-	query := `
-		UPDATE organizations 
-		SET name=:name, description=:description, modified_at=NOW()
-		WHERE id=:id
-		RETURNING ` + store.OrganizationCols
-
-	rows, err := h.DB.NamedQuery(query, input)
-	if err != nil {
+	updated, err := h.orgs.Update(r.Context(), input)
+	if err == sql.ErrNoRows {
+		render.Render(w, r, render.ErrNotFound(nil))
+		return
+	} else if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var updated models.Organization
-		if err := rows.StructScan(&updated); err != nil {
-			render.ErrInternal(err).Render(w, r)
-			return
-		}
-		render.JSON(w, r, updated)
-	} else {
-		render.Render(w, r, render.ErrNotFound(nil))
-	}
+	render.JSON(w, r, updated)
 }
 
 // DeleteOrganization DELETE /api/v1/organizations/{id}
@@ -205,12 +194,11 @@ func (h *ContentHandler) DeleteOrganization(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	res, err := h.DB.Exec("DELETE FROM organizations WHERE id = $1", id)
+	count, err := h.orgs.Delete(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	count, _ := res.RowsAffected()
 	if count == 0 {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -236,22 +224,10 @@ func (h *ContentHandler) ListOrganizationUsers(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get all users who have the member_role for this org
-	var users []models.User
-	err = h.DB.Select(&users, `
-		SELECT DISTINCT u.id, u.username, u.first_name, u.last_name, u.email, 
-		       u.is_superuser, u.is_system_auditor, u.is_active, u.created_at, u.modified_at
-		FROM users u
-		JOIN role_members rm ON u.id = rm.user_id
-		JOIN roles r ON rm.role_id = r.id
-		WHERE r.content_type = 'organization' AND r.object_id = $1 AND r.role_field = 'member_role'
-	`, id)
+	users, err := h.orgs.UsersByRoleField(r.Context(), id, "member_role")
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if users == nil {
-		users = []models.User{}
 	}
 	render.JSON(w, r, users)
 }
@@ -354,22 +330,10 @@ func (h *ContentHandler) ListOrganizationAdmins(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var users []models.User
-	err = h.DB.Select(&users, `
-		SELECT DISTINCT u.id, u.username, u.first_name, u.last_name, u.email, 
-		       u.is_superuser, u.is_system_auditor, u.is_active, u.created_at, u.modified_at
-		FROM users u
-		JOIN role_members rm ON u.id = rm.user_id
-		JOIN roles r ON rm.role_id = r.id
-		WHERE r.content_type = 'organization' AND r.object_id = $1 AND r.role_field = 'admin_role'
-	`, id)
+	users, err := h.orgs.UsersByRoleField(r.Context(), id, "admin_role")
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if users == nil {
-		users = []models.User{}
 	}
 	render.JSON(w, r, users)
 }
@@ -429,14 +393,10 @@ func (h *ContentHandler) ListOrganizationTeams(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var teams []models.Team
-	err = h.DB.Select(&teams, `SELECT `+store.TeamCols+` FROM teams WHERE organization_id = $1 ORDER BY id`, id)
+	teams, err := h.orgs.ListTeams(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-	if teams == nil {
-		teams = []models.Team{}
 	}
 	render.JSON(w, r, teams)
 }
@@ -481,14 +441,10 @@ func (h *ContentHandler) ListOrganizationProjects(w http.ResponseWriter, r *http
 		return
 	}
 
-	var projects []models.Project
-	err = h.DB.Select(&projects, `SELECT `+store.ProjectCols+` FROM projects WHERE organization_id = $1 ORDER BY id`, id)
+	projects, err := h.orgs.ListProjects(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-	if projects == nil {
-		projects = []models.Project{}
 	}
 	render.JSON(w, r, projects)
 }
@@ -508,14 +464,10 @@ func (h *ContentHandler) ListOrganizationInventories(w http.ResponseWriter, r *h
 		return
 	}
 
-	var inventories []models.Inventory
-	err = h.DB.Select(&inventories, `SELECT `+store.InventoryCols+` FROM inventories WHERE organization_id = $1 ORDER BY id`, id)
+	inventories, err := h.orgs.ListInventories(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-	if inventories == nil {
-		inventories = []models.Inventory{}
 	}
 	render.JSON(w, r, inventories)
 }
