@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,19 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/services/api/store"
 )
+
+// JobStore is the jobs-domain data access the handler depends on (implemented by
+// services/api/store.JobStore). Declared here, consumer-side, so the handler owns
+// its data contract and stays testable with a fake.
+type JobStore interface {
+	ListRecent(ctx context.Context, limit int) ([]models.UnifiedJob, error)
+	ListReadable(ctx context.Context, tmplIDs []int64, limit int) ([]models.UnifiedJob, error)
+	GetRun(ctx context.Context, runID uuid.UUID) (models.ExecutionRun, error)
+	ListEvents(ctx context.Context, runID uuid.UUID) ([]models.JobEvent, error)
+	TemplateIDForRun(ctx context.Context, runID uuid.UUID) (int64, bool, error)
+}
 
 type JobsResource struct {
 	DB *sqlx.DB
@@ -24,24 +37,18 @@ type JobsResource struct {
 	// IngestionURL is the base URL the API proxies run-log reads to. Resolved in
 	// main from env; empty falls back to the in-cluster default.
 	IngestionURL string
+	store        JobStore
 }
 
 func NewJobsResource(db *sqlx.DB, ingestionURL string) *JobsResource {
-	return &JobsResource{DB: db, Authorizer: NewAuthorizer(db), IngestionURL: ingestionURL}
+	return &JobsResource{DB: db, Authorizer: NewAuthorizer(db), IngestionURL: ingestionURL, store: store.NewJobStore(db)}
 }
 
 // templateIDForRun resolves the job_templates.id that owns a given execution
-// run, via unified_job -> unified_job_template_id. ok is false when the run has
-// no governing template (e.g. an ad-hoc job).
+// run. ok is false when the run has no governing template (e.g. an ad-hoc job).
 func (rs *JobsResource) templateIDForRun(r *http.Request, runID uuid.UUID) (int64, bool) {
-	var jtID int64
-	err := rs.DB.GetContext(r.Context(), &jtID, `
-		SELECT jt.id
-		FROM execution_runs er
-		JOIN unified_jobs uj ON er.unified_job_id = uj.id
-		JOIN job_templates jt ON uj.unified_job_template_id = jt.unified_job_template_id
-		WHERE er.id = $1`, runID)
-	return jtID, err == nil
+	id, ok, _ := rs.store.TemplateIDForRun(r.Context(), runID)
+	return id, ok
 }
 
 // authorizeRunRead allows reading a run/its events when the user can read the
@@ -74,10 +81,10 @@ func (rs *JobsResource) Routes() chi.Router {
 // ListUnifiedJobs returns a list of unified jobs
 func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) {
 	uc := currentUser(r)
-	jobs := []models.UnifiedJob{}
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &jobs, `SELECT * FROM unified_jobs ORDER BY created_at DESC LIMIT 50`); err != nil {
+		jobs, err := rs.store.ListRecent(r.Context(), 50)
+		if err != nil {
 			render.Render(w, r, ErrInternal(err))
 			return
 		}
@@ -91,17 +98,10 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	if len(ids) > 0 {
-		q, args, _ := sqlx.In(`
-			SELECT uj.* FROM unified_jobs uj
-			JOIN job_templates jt ON uj.unified_job_template_id = jt.unified_job_template_id
-			WHERE jt.id IN (?)
-			ORDER BY uj.created_at DESC LIMIT 50`, ids)
-		q = rs.DB.Rebind(q)
-		if err := rs.DB.SelectContext(r.Context(), &jobs, q, args...); err != nil {
-			render.Render(w, r, ErrInternal(err))
-			return
-		}
+	jobs, err := rs.store.ListReadable(r.Context(), ids, 50)
+	if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
 	}
 	render.JSON(w, r, jobs)
 }
@@ -229,8 +229,7 @@ func (rs *JobsResource) GetExecutionRun(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var run models.ExecutionRun
-	err = rs.DB.GetContext(r.Context(), &run, `SELECT * FROM execution_runs WHERE id = $1`, runID)
+	run, err := rs.store.GetRun(r.Context(), runID)
 	if err == sql.ErrNoRows {
 		render.Render(w, r, ErrNotFound)
 		return
@@ -255,9 +254,8 @@ func (rs *JobsResource) ListJobEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `SELECT * FROM job_events WHERE execution_run_id = $1 ORDER BY seq ASC`
-	events := []models.JobEvent{}
-	if err := rs.DB.SelectContext(r.Context(), &events, query, runID); err != nil {
+	events, err := rs.store.ListEvents(r.Context(), runID)
+	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
