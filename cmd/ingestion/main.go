@@ -59,6 +59,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	r.Get("/api/v1/runs/{run_id}/runnable", h.Runnable)
 	r.Post("/api/v1/runs/{run_id}/events", h.Ingest)
 	r.Post("/api/v1/runs/{run_id}/logs", h.IngestLog)
 	r.Get("/api/v1/runs/{run_id}/logs", h.StreamLog)

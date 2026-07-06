@@ -23,6 +23,23 @@ func NewIngestionHandler(svc *core.IngestionService) *IngestionHandler {
 	return &IngestionHandler{Service: svc}
 }
 
+// Runnable GET /api/v1/runs/{run_id}/runnable — the executor's pre-bootstrap gate.
+// Returns {"runnable": bool}; false means the run is terminal/absent and must not
+// be bootstrapped (prevents a reaped/canceled launch from running as a ghost).
+func (h *IngestionHandler) Runnable(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "run_id"))
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	ok, err := h.Service.IsRunnable(r.Context(), runID)
+	if err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, map[string]bool{"runnable": ok})
+}
+
 // Ingest POST /api/v1/runs/{run_id}/events
 func (h *IngestionHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 	runIDStr := chi.URLParam(r, "run_id")

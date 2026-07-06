@@ -607,6 +607,23 @@ func (s *Scheduler) processTimedOutJobs() error {
 		log.Printf("Marked %d queued jobs as failed (never started)", rows)
 	}
 
+	// Void any still-pending outbox row whose run is already terminal. Without
+	// this, a launch that was reaped above (or canceled) while its outbox row was
+	// unsent — e.g. NATS was down so the relay never published — would be published
+	// on recovery and bootstrap a "ghost run" the DB already calls failed. The
+	// relay only picks status='pending', so flipping it to 'failed' retires it.
+	if vr, verr := s.DB.ExecContext(ctx, `
+		UPDATE execution_outbox o
+		SET status = 'failed', attempts = attempts + 1
+		FROM execution_runs er
+		WHERE o.execution_run_id = er.id
+		  AND o.status = 'pending'
+		  AND er.state IN ('failed', 'canceled')`); verr != nil {
+		log.Printf("Error voiding outbox for terminal runs: %v", verr)
+	} else if n, _ := vr.RowsAffected(); n > 0 {
+		log.Printf("Voided %d pending outbox launch(es) for already-terminal runs", n)
+	}
+
 	return nil
 }
 

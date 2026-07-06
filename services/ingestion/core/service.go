@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -43,6 +45,27 @@ func NewIngestionService(db *sqlx.DB, pub EventPublisher, store objectstore.LogS
 // rebooted and resumed) and 'reconciling' (a transient blip moved it there, but
 // the host is still heartbeating) — otherwise a reconciling run would sit stale
 // until the reconciler next SSHes in, even though it's plainly alive.
+// IsRunnable reports whether a run may still be bootstrapped/executed — it exists
+// and has not reached a terminal or reconciler-owned state. The executor calls
+// this before bootstrapping so a launch that was reaped (queued-timeout) or
+// canceled while sitting in the work queue is not run as a ghost after the fact.
+// A missing run is treated as not runnable.
+func (s *IngestionService) IsRunnable(ctx context.Context, runID uuid.UUID) (bool, error) {
+	var state string
+	if err := s.DB.GetContext(ctx, &state,
+		`SELECT state FROM execution_runs WHERE id = $1`, runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	switch state {
+	case "successful", "failed", "canceled", "lost":
+		return false, nil
+	}
+	return true, nil
+}
+
 func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID) (bool, error) {
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE execution_runs

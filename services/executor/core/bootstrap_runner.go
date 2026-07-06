@@ -106,6 +106,29 @@ func (r *BootstrapRunner) fetchPackTarball(pack, arch string) (string, func(), e
 		pack, arch, r.GiteaURL, file, r.RuntimeDir)
 }
 
+// checkRunnable asks ingestion whether the run may still be executed. It is
+// fail-open: any transport, status, or decode error returns true so a transient
+// ingestion issue never blocks a legitimate job. Only an explicit runnable=false
+// (run already terminal/absent) suppresses the bootstrap.
+func (r *BootstrapRunner) checkRunnable(runID string) (bool, error) {
+	url := fmt.Sprintf("%s/api/v1/runs/%s/runnable", r.IngestionURL, runID)
+	resp, err := http.Get(url)
+	if err != nil {
+		return true, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return true, fmt.Errorf("runnable check returned %d", resp.StatusCode)
+	}
+	var body struct {
+		Runnable bool `json:"runnable"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return true, err
+	}
+	return body.Runnable, nil
+}
+
 func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) (err error) {
 	// Bootstrap metrics by mode, observed on return.
 	mode := "remote"
@@ -122,6 +145,19 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 			BootstrapFailures.WithLabelValues(mode).Inc()
 		}
 	}()
+
+	// Pre-flight: don't bootstrap a run the control plane has already given up on.
+	// The executor is DB-free, so it asks ingestion (which owns the DB) whether the
+	// run is still runnable. This closes the "ghost run" window where a launch was
+	// reaped by the queued-timeout (or canceled) while sitting in the work queue and
+	// is then delivered to a recovering executor. Fail-open: a check error must not
+	// block a legitimate job (checkRunnable returns true on any transport error).
+	if r.IngestionURL != "" {
+		if runnable, _ := r.checkRunnable(req.ExecutionRunID.String()); !runnable {
+			log.Printf("BootstrapRunner: run %s is no longer runnable (already terminal); skipping bootstrap", req.ExecutionRunID)
+			return nil
+		}
+	}
 
 	// Inventory-sync runs don't bootstrap a host-runner: the executor runs
 	// ansible-inventory locally and upserts the result via ingestion.
