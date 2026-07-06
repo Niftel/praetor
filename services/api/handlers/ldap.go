@@ -11,12 +11,21 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/auth"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
+
+// LdapStore is the LDAP sync-log read access the handler depends on.
+type LdapStore interface {
+	RecentSyncLogs(ctx context.Context, limit int) ([]store.LdapSyncLog, error)
+	SyncLog(ctx context.Context, id int64) (store.LdapSyncLog, error)
+	SyncItems(ctx context.Context, syncLogID int64) ([]store.LdapSyncItem, error)
+}
 
 // LDAPHandler handles LDAP sync and configuration endpoints.
 type LDAPHandler struct {
 	DB         *sqlx.DB
 	ConfigPath string
+	store      LdapStore
 }
 
 // NewLDAPHandler creates a new LDAP handler. configPath is resolved in main from
@@ -28,6 +37,7 @@ func NewLDAPHandler(db *sqlx.DB, configPath string) *LDAPHandler {
 	return &LDAPHandler{
 		DB:         db,
 		ConfigPath: configPath,
+		store:      store.NewLdapStore(db),
 	}
 }
 
@@ -100,34 +110,10 @@ func (h *LDAPHandler) TriggerSyncSpecific(w http.ResponseWriter, r *http.Request
 // GetSyncStatus GET /api/v1/ldap/sync/status
 // Returns the status of recent sync operations.
 func (h *LDAPHandler) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
-	type SyncLogEntry struct {
-		ID             int64   `json:"id" db:"id"`
-		SyncType       string  `json:"sync_type" db:"sync_type"`
-		StartedAt      string  `json:"started_at" db:"started_at"`
-		FinishedAt     *string `json:"finished_at,omitempty" db:"finished_at"`
-		Status         string  `json:"status" db:"status"`
-		ItemsProcessed int     `json:"items_processed" db:"items_processed"`
-		ItemsCreated   int     `json:"items_created" db:"items_created"`
-		ItemsUpdated   int     `json:"items_updated" db:"items_updated"`
-		ItemsFailed    int     `json:"items_failed" db:"items_failed"`
-		ErrorMessage   *string `json:"error_message,omitempty" db:"error_message"`
-	}
-
-	var logs []SyncLogEntry
-	err := h.DB.Select(&logs, `
-		SELECT id, sync_type, started_at, finished_at, status, 
-		       items_processed, items_created, items_updated, items_failed, error_message
-		FROM ldap_sync_log
-		ORDER BY started_at DESC
-		LIMIT 20
-	`)
+	logs, err := h.store.RecentSyncLogs(r.Context(), 20)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if logs == nil {
-		logs = []SyncLogEntry{}
 	}
 
 	render.JSON(w, r, map[string]interface{}{
@@ -147,48 +133,13 @@ func (h *LDAPHandler) GetSyncDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the sync log entry
-	type SyncLogEntry struct {
-		ID             int64   `json:"id" db:"id"`
-		SyncType       string  `json:"sync_type" db:"sync_type"`
-		StartedAt      string  `json:"started_at" db:"started_at"`
-		FinishedAt     *string `json:"finished_at,omitempty" db:"finished_at"`
-		Status         string  `json:"status" db:"status"`
-		ItemsProcessed int     `json:"items_processed" db:"items_processed"`
-		ItemsCreated   int     `json:"items_created" db:"items_created"`
-		ItemsUpdated   int     `json:"items_updated" db:"items_updated"`
-		ItemsFailed    int     `json:"items_failed" db:"items_failed"`
-		ErrorMessage   *string `json:"error_message,omitempty" db:"error_message"`
-	}
-
-	var log SyncLogEntry
-	err = h.DB.Get(&log, `
-		SELECT id, sync_type, started_at, finished_at, status,
-		       items_processed, items_created, items_updated, items_failed, error_message
-		FROM ldap_sync_log WHERE id = $1`, id)
+	log, err := h.store.SyncLog(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return
 	}
 
-	// Get the sync items - use RawMessage for JSONB field
-	type SyncItemDB struct {
-		ID             int64           `db:"id"`
-		EntityType     string          `db:"entity_type"`
-		EntityName     string          `db:"entity_name"`
-		EntityID       *int64          `db:"entity_id"`
-		LdapDN         string          `db:"ldap_dn"`
-		LdapAttributes json.RawMessage `db:"ldap_attributes"`
-		Action         string          `db:"action"`
-		ErrorMessage   *string         `db:"error_message"`
-		CreatedAt      string          `db:"created_at"`
-	}
-
-	var itemsDB []SyncItemDB
-	err = h.DB.Select(&itemsDB, `
-		SELECT id, entity_type, entity_name, entity_id, ldap_dn, ldap_attributes, action, error_message, created_at
-		FROM ldap_sync_items
-		WHERE sync_log_id = $1
-		ORDER BY entity_type, entity_name`, id)
+	itemsDB, err := h.store.SyncItems(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

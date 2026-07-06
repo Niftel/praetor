@@ -137,3 +137,39 @@ func (s *OrgStore) ListInventories(ctx context.Context, orgID int64) ([]models.I
 	err := s.db.SelectContext(ctx, &inventories, `SELECT `+InventoryCols+` FROM inventories WHERE organization_id = $1 ORDER BY id`, orgID)
 	return inventories, err
 }
+
+// OrgGalaxyCredential is a Galaxy credential attached to an organization.
+type OrgGalaxyCredential struct {
+	ID           int64  `json:"id" db:"id"`
+	CredentialID int64  `json:"credential_id" db:"credential_id"`
+	Name         string `json:"name" db:"name"`
+	Position     int    `json:"position" db:"position"`
+}
+
+// GalaxyCredentials lists an organization's Galaxy credentials, in order.
+func (s *OrgStore) GalaxyCredentials(ctx context.Context, orgID int64) ([]OrgGalaxyCredential, error) {
+	creds := []OrgGalaxyCredential{}
+	err := s.db.SelectContext(ctx, &creds, `
+		SELECT ogc.id, ogc.credential_id, c.name, ogc.position
+		FROM organization_galaxy_credentials ogc
+		JOIN credentials c ON c.id = ogc.credential_id
+		WHERE ogc.organization_id = $1
+		ORDER BY ogc.position, ogc.id`, orgID)
+	return creds, err
+}
+
+// AddGalaxyCredential attaches (or repositions) a Galaxy credential on an org.
+func (s *OrgStore) AddGalaxyCredential(ctx context.Context, orgID, credentialID int64, position int) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO organization_galaxy_credentials (organization_id, credential_id, position)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (organization_id, credential_id) DO UPDATE SET position = EXCLUDED.position`,
+		orgID, credentialID, position)
+	return err
+}
+
+// RemoveGalaxyCredential detaches a Galaxy credential from an org.
+func (s *OrgStore) RemoveGalaxyCredential(ctx context.Context, orgID, credentialID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM organization_galaxy_credentials WHERE organization_id = $1 AND credential_id = $2`, orgID, credentialID)
+	return err
+}

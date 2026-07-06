@@ -29,6 +29,17 @@ type OrgStore interface {
 	ListTeams(ctx context.Context, orgID int64) ([]models.Team, error)
 	ListProjects(ctx context.Context, orgID int64) ([]models.Project, error)
 	ListInventories(ctx context.Context, orgID int64) ([]models.Inventory, error)
+	GalaxyCredentials(ctx context.Context, orgID int64) ([]store.OrgGalaxyCredential, error)
+	AddGalaxyCredential(ctx context.Context, orgID, credentialID int64, position int) error
+	RemoveGalaxyCredential(ctx context.Context, orgID, credentialID int64) error
+}
+
+// AccessStore is the access/audit read access the content handler depends on.
+type AccessStore interface {
+	RoleUsers(ctx context.Context, roleID int64) ([]store.AccessUser, error)
+	RoleTeams(ctx context.Context, roleID int64) ([]store.AccessTeam, error)
+	UserAccessRoles(ctx context.Context, userID int64) ([]store.UserAccessRole, error)
+	ActivityStream(ctx context.Context, resourceType, action string, limit int) ([]store.ActivityEntry, error)
 }
 
 // ProjectStore is the projects-domain data access the content handler depends on.
@@ -72,6 +83,7 @@ type ContentHandler struct {
 	projects ProjectStore
 	roles    RoleStore
 	teams    TeamStore
+	access   AccessStore
 }
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
@@ -82,6 +94,7 @@ func NewContentHandler(db *sqlx.DB) *ContentHandler {
 		projects:   store.NewProjectStore(db),
 		roles:      store.NewRoleStore(db),
 		teams:      store.NewTeamStore(db),
+		access:     store.NewAccessStore(db),
 	}
 }
 

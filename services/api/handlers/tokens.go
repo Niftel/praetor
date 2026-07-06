@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -12,15 +13,24 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/services/api/middleware"
 	render "github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
+
+// TokenStore is the tokens-domain data access the handler depends on.
+type TokenStore interface {
+	ListForUser(ctx context.Context, userID int64) ([]store.APIToken, error)
+	Create(ctx context.Context, userID int64, name, tokenHash string, expiresAt *time.Time) (store.APIToken, error)
+	Revoke(ctx context.Context, id int64, restrictToUser *int64) (int64, error)
+}
 
 // TokensResource manages a user's personal access tokens (headless/CI API auth).
 type TokensResource struct {
-	DB *sqlx.DB
+	DB    *sqlx.DB
+	store TokenStore
 }
 
 func NewTokensResource(db *sqlx.DB) *TokensResource {
-	return &TokensResource{DB: db}
+	return &TokensResource{DB: db, store: store.NewTokenStore(db)}
 }
 
 func (rs *TokensResource) Routes() chi.Router {
@@ -31,21 +41,11 @@ func (rs *TokensResource) Routes() chi.Router {
 	return r
 }
 
-type apiTokenView struct {
-	ID         int64      `json:"id" db:"id"`
-	Name       string     `json:"name" db:"name"`
-	LastUsedAt *time.Time `json:"last_used_at" db:"last_used_at"`
-	ExpiresAt  *time.Time `json:"expires_at" db:"expires_at"`
-	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
-}
-
 // List returns the calling user's tokens (metadata only — never the secret).
 func (rs *TokensResource) List(w http.ResponseWriter, r *http.Request) {
 	uc := currentUser(r)
-	tokens := []apiTokenView{}
-	if err := rs.DB.SelectContext(r.Context(), &tokens,
-		`SELECT id, name, last_used_at, expires_at, created_at
-		 FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC`, uc.UserID); err != nil {
+	tokens, err := rs.store.ListForUser(r.Context(), uc.UserID)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -73,12 +73,8 @@ func (rs *TokensResource) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	plaintext := middleware.PATPrefix + base64.RawURLEncoding.EncodeToString(raw)
 
-	var out apiTokenView
-	if err := rs.DB.GetContext(r.Context(), &out,
-		`INSERT INTO api_tokens (user_id, name, token_hash, expires_at)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, name, last_used_at, expires_at, created_at`,
-		uc.UserID, body.Name, middleware.HashToken(plaintext), body.ExpiresAt); err != nil {
+	out, err := rs.store.Create(r.Context(), uc.UserID, body.Name, middleware.HashToken(plaintext), body.ExpiresAt)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -98,17 +94,16 @@ func (rs *TokensResource) Revoke(w http.ResponseWriter, r *http.Request) {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	var res interface{ RowsAffected() (int64, error) }
-	if uc.IsSuperuser {
-		res, err = rs.DB.ExecContext(r.Context(), `DELETE FROM api_tokens WHERE id = $1`, id)
-	} else {
-		res, err = rs.DB.ExecContext(r.Context(), `DELETE FROM api_tokens WHERE id = $1 AND user_id = $2`, id, uc.UserID)
+	var restrict *int64
+	if !uc.IsSuperuser {
+		restrict = &uc.UserID
 	}
+	n, err := rs.store.Revoke(r.Context(), id, restrict)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n == 0 {
 		render.ErrNotFound(nil).Render(w, r)
 		return
 	}
