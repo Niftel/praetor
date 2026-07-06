@@ -398,51 +398,60 @@ func (s *Scheduler) processPendingJobs() error {
 func (s *Scheduler) relayOutbox() error {
 	ctx := context.Background()
 
-	tx, err := s.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
+	// Recover orphaned claims: rows left 'sending' by a relay that crashed after
+	// claiming but before publishing/marking. Only stale claims are reset so a
+	// concurrent scheduler's in-flight batch isn't disturbed; the request stream's
+	// dedup window makes any resulting re-publish harmless.
+	if _, err := s.DB.ExecContext(ctx, `
+		UPDATE execution_outbox SET status = 'pending'
+		WHERE status = 'sending' AND sent_at < now() - interval '2 minutes'`); err != nil {
+		log.Printf("outbox: failed to recover stale claims: %v", err)
 	}
-	defer tx.Rollback()
 
+	// Atomically claim a batch. The single UPDATE ... RETURNING takes and releases
+	// its row locks within the statement, so the NATS publishes below run with no
+	// open transaction and no locks held — a publish can no longer be stranded
+	// inside an uncommitted tx (the previous dual-write hazard).
 	type outboxRow struct {
 		ID      int64           `db:"id"`
 		Payload json.RawMessage `db:"payload"`
 	}
 	var rows []outboxRow
-	if err := tx.SelectContext(ctx, &rows, `
-		SELECT id, payload FROM execution_outbox
-		WHERE status = 'pending'
-		ORDER BY id
-		FOR UPDATE SKIP LOCKED
-		LIMIT 50`); err != nil {
-		return fmt.Errorf("failed to select outbox rows: %w", err)
-	}
-	if len(rows) == 0 {
-		return nil
+	if err := s.DB.SelectContext(ctx, &rows, `
+		UPDATE execution_outbox SET status = 'sending', sent_at = now()
+		WHERE id IN (
+			SELECT id FROM execution_outbox
+			WHERE status = 'pending'
+			ORDER BY id
+			FOR UPDATE SKIP LOCKED
+			LIMIT 50
+		)
+		RETURNING id, payload`); err != nil {
+		return fmt.Errorf("failed to claim outbox rows: %w", err)
 	}
 
 	for _, row := range rows {
 		var req events.ExecutionRequest
 		if err := json.Unmarshal(row.Payload, &req); err != nil {
 			log.Printf("outbox: dropping unparseable row %d: %v", row.ID, err)
-			logExec(ctx, tx, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
+			logExec(ctx, s.DB, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
 		if err := s.Publisher.PublishExecutionRequest(&req); err != nil {
-			// Leave the row pending so it is retried on the next tick.
+			// Return the row to the queue for the next tick.
 			log.Printf("outbox: publish failed for row %d (will retry): %v", row.ID, err)
-			logExec(ctx, tx, `UPDATE execution_outbox SET attempts = attempts + 1 WHERE id = $1`, row.ID)
+			logExec(ctx, s.DB, `UPDATE execution_outbox SET status = 'pending', attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := s.DB.ExecContext(ctx,
 			`UPDATE execution_outbox SET status = 'sent', sent_at = now(), attempts = attempts + 1 WHERE id = $1`,
-			row.ID,
-		); err != nil {
-			return fmt.Errorf("failed to mark outbox row %d sent: %w", row.ID, err)
+			row.ID); err != nil {
+			// Published but couldn't mark sent; leaving it 'sending' means stale-claim
+			// recovery requeues it and dedup makes the re-publish harmless.
+			log.Printf("outbox: published row %d but failed to mark sent: %v", row.ID, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 func (s *Scheduler) processSchedules() error {
