@@ -60,8 +60,7 @@ func launchTarget(ctx context.Context, ex sqlExec, name string, wfID, ujtID *int
 // processEventTriggers fires enabled event triggers whose matching job has reached
 // the relevant terminal state. A trigger only sees jobs created after it (no
 // retroactive firing) and fires at most once per source job (event_trigger_fires).
-func (s *Scheduler) processEventTriggers() {
-	ctx := context.Background()
+func (s *Scheduler) processEventTriggers(ctx context.Context) {
 	type match struct {
 		TriggerID int64  `db:"trigger_id"`
 		Name      string `db:"name"`

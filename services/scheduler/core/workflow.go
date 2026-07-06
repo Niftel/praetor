@@ -15,8 +15,7 @@ import (
 // processWorkflows advances every running workflow one step per tick: it reaps
 // finished node jobs, launches newly-eligible nodes (or skips them), pauses on
 // approval gates, and finalizes the workflow when all nodes are terminal.
-func (s *Scheduler) processWorkflows() {
-	ctx := context.Background()
+func (s *Scheduler) processWorkflows(ctx context.Context) {
 	var ids []int64
 	if err := s.DB.SelectContext(ctx, &ids, `SELECT id FROM workflow_jobs WHERE status='running'`); err != nil {
 		return

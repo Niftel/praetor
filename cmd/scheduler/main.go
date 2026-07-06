@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
@@ -60,8 +61,10 @@ func main() {
 		log.Printf("retention: pruning terminal jobs finished > %d day(s) ago", days)
 	}
 
-	// 3. Start loop in background
-	go sched.Start()
+	// 3. Start loop in background; ctx cancellation is the stop signal.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sched.Start(ctx)
 
 	// 4. Wait for SIGINT/SIGTERM
 	sigs := make(chan os.Signal, 1)
@@ -70,5 +73,5 @@ func main() {
 
 	// 5. Graceful shutdown
 	log.Println("Shutting down...")
-	sched.Stop()
+	cancel()
 }

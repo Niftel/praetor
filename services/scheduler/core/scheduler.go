@@ -27,7 +27,6 @@ import (
 type Scheduler struct {
 	DB        *sqlx.DB
 	Ticker    *time.Ticker
-	Done      chan bool
 	Publisher EventPublisher
 
 	// Retention pruning (opt-in): when RetentionDays > 0, terminal jobs finished
@@ -48,48 +47,64 @@ func NewScheduler(db *sqlx.DB, interval time.Duration, publisher EventPublisher)
 	return &Scheduler{
 		DB:        db,
 		Ticker:    time.NewTicker(interval),
-		Done:      make(chan bool),
 		Publisher: publisher,
 	}
 }
 
-func (s *Scheduler) Start() {
+// tickTask is one pass of the scheduler tick. Splitting the tick into named tasks
+// keeps each pass independently testable and gives per-task error visibility
+// instead of one monolithic loop body.
+type tickTask struct {
+	name string
+	run  func(ctx context.Context) error
+}
+
+// tickTasks returns the ordered passes performed every tick. Order is
+// significant: claim → relay → schedules → timeouts → workflows → triggers →
+// prune. Passes that log internally (workflows/triggers/prune) return nil.
+func (s *Scheduler) tickTasks() []tickTask {
+	return []tickTask{
+		{"pending_jobs", s.processPendingJobs},
+		{"relay_outbox", s.relayOutbox},
+		{"schedules", s.processSchedules},
+		{"timeouts", s.processTimedOutJobs},
+		{"workflows", func(ctx context.Context) error { s.processWorkflows(ctx); return nil }},
+		{"event_triggers", func(ctx context.Context) error { s.processEventTriggers(ctx); return nil }},
+		{"prune", func(ctx context.Context) error { s.maybePrune(ctx); return nil }},
+	}
+}
+
+// Start runs the tick loop until ctx is canceled. Cancellation is the only stop
+// signal (no separate Done channel); the ticker is stopped on exit.
+func (s *Scheduler) Start(ctx context.Context) {
+	defer s.Ticker.Stop()
+	tasks := s.tickTasks()
 	log.Println("Scheduler started")
 	for {
 		select {
-		case <-s.Done:
+		case <-ctx.Done():
+			log.Println("Scheduler stopped")
 			return
 		case <-s.Ticker.C:
-			tickStart := time.Now()
-			if err := s.processPendingJobs(); err != nil {
-				log.Printf("Error processing jobs: %v", err)
-			}
-			if err := s.relayOutbox(); err != nil {
-				log.Printf("Error relaying outbox: %v", err)
-			}
-			if err := s.processSchedules(); err != nil {
-				log.Printf("Error processing schedules: %v", err)
-			}
-			if err := s.processTimedOutJobs(); err != nil {
-				log.Printf("Error processing timed out jobs: %v", err)
-			}
-			s.processWorkflows()
-			s.processEventTriggers()
-			s.maybePrune()
-			TickDuration.Observe(time.Since(tickStart).Seconds())
+			s.runTick(ctx, tasks)
 		}
 	}
 }
 
-func (s *Scheduler) Stop() {
-	s.Ticker.Stop()
-	s.Done <- true
-	log.Println("Scheduler stopped")
+// runTick executes every tick task in order, isolating each task's error so one
+// failing pass neither aborts the tick nor is silently swallowed.
+func (s *Scheduler) runTick(ctx context.Context, tasks []tickTask) {
+	tickStart := time.Now()
+	for _, t := range tasks {
+		if err := t.run(ctx); err != nil {
+			log.Printf("scheduler tick task %q: %v", t.name, err)
+			TickTaskErrors.WithLabelValues(t.name).Inc()
+		}
+	}
+	TickDuration.Observe(time.Since(tickStart).Seconds())
 }
 
-func (s *Scheduler) processPendingJobs() error {
-	ctx := context.Background()
-
+func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 	// Transaction for atomic claim-and-schedule
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -395,9 +410,7 @@ func (s *Scheduler) processPendingJobs() error {
 // stream and marks them sent. FOR UPDATE SKIP LOCKED makes it safe to run from
 // multiple schedulers; the request stream's dedup window makes a re-publish
 // after a crash (sent on the bus but not yet marked) harmless.
-func (s *Scheduler) relayOutbox() error {
-	ctx := context.Background()
-
+func (s *Scheduler) relayOutbox(ctx context.Context) error {
 	// Recover orphaned claims: rows left 'sending' by a relay that crashed after
 	// claiming but before publishing/marking. Only stale claims are reset so a
 	// concurrent scheduler's in-flight batch isn't disturbed; the request stream's
@@ -454,9 +467,7 @@ func (s *Scheduler) relayOutbox() error {
 	return nil
 }
 
-func (s *Scheduler) processSchedules() error {
-	ctx := context.Background()
-
+func (s *Scheduler) processSchedules(ctx context.Context) error {
 	// Transaction
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -525,9 +536,7 @@ func (s *Scheduler) processSchedules() error {
 
 // processTimedOutJobs marks jobs that are stuck in running/queued state as failed.
 // This catches cases where the host-runner crashes silently without sending events.
-func (s *Scheduler) processTimedOutJobs() error {
-	ctx := context.Background()
-
+func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	// Heartbeat-aware reconciliation. A long-running job is NOT failed merely for
 	// running a long time; it is declared lost only when its liveness signal
 	// disappears. The host-runner stamps execution_runs.last_heartbeat_at every
