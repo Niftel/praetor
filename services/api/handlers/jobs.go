@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,11 +25,22 @@ import (
 // services/api/store.JobStore). Declared here, consumer-side, so the handler owns
 // its data contract and stays testable with a fake.
 type JobStore interface {
+	// reads
 	ListRecent(ctx context.Context, limit int) ([]models.UnifiedJob, error)
 	ListReadable(ctx context.Context, tmplIDs []int64, limit int) ([]models.UnifiedJob, error)
 	GetRun(ctx context.Context, runID uuid.UUID) (models.ExecutionRun, error)
 	ListEvents(ctx context.Context, runID uuid.UUID) ([]models.JobEvent, error)
 	TemplateIDForRun(ctx context.Context, runID uuid.UUID) (int64, bool, error)
+	// writes
+	LaunchTemplateInfo(ctx context.Context, unifiedTemplateID int64) (store.LaunchTemplateInfo, error)
+	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) (int, error)
+	InsertPendingJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte, createdAt time.Time) (int64, error)
+	UnifiedJobIDForRun(ctx context.Context, runID uuid.UUID) (int64, error)
+	InsertJobEvent(ctx context.Context, evt *models.JobEvent) (int64, error)
+	JobCancelInfo(ctx context.Context, jobID int64) (store.JobCancelInfo, error)
+	JobTemplateIDByUnified(ctx context.Context, unifiedTemplateID int64) (int64, bool, error)
+	FlagCancelRequested(ctx context.Context, jobID int64) error
+	CancelNotYetRunning(ctx context.Context, jobID int64) error
 }
 
 type JobsResource struct {
@@ -38,10 +50,17 @@ type JobsResource struct {
 	// main from env; empty falls back to the in-cluster default.
 	IngestionURL string
 	store        JobStore
+	log          *slog.Logger
 }
 
 func NewJobsResource(db *sqlx.DB, ingestionURL string) *JobsResource {
-	return &JobsResource{DB: db, Authorizer: NewAuthorizer(db), IngestionURL: ingestionURL, store: store.NewJobStore(db)}
+	return &JobsResource{
+		DB:           db,
+		Authorizer:   NewAuthorizer(db),
+		IngestionURL: ingestionURL,
+		store:        store.NewJobStore(db),
+		log:          slog.Default().With("component", "api.jobs"),
+	}
 }
 
 // authorizeRunRead allows reading a run/its events when the user can read the
@@ -126,17 +145,8 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// Launching requires execute access on the job template. The launch payload
 	// carries the unified_job_template_id; map it to the job_templates row that
 	// owns the roles, and read its prompt-on-launch flags.
-	var jt struct {
-		ID                   int64           `db:"id"`
-		AskVariablesOnLaunch bool            `db:"ask_variables_on_launch"`
-		AskLimitOnLaunch     bool            `db:"ask_limit_on_launch"`
-		SurveyEnabled        bool            `db:"survey_enabled"`
-		SurveySpec           json.RawMessage `db:"survey_spec"`
-		AllowSimultaneous    bool            `db:"allow_simultaneous"`
-	}
-	if err := rs.DB.GetContext(r.Context(), &jt,
-		`SELECT id, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec, allow_simultaneous
-		 FROM job_templates WHERE unified_job_template_id = $1`, req.UnifiedJobTemplateID); err != nil {
+	jt, err := rs.store.LaunchTemplateInfo(r.Context(), req.UnifiedJobTemplateID)
+	if err != nil {
 		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job template")))
 		return
 	}
@@ -148,11 +158,7 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// launch while a prior run of the same template is still active. Stops
 	// accidental double-triggers from queuing a second overlapping run.
 	if !jt.AllowSimultaneous {
-		var active int
-		if err := rs.DB.GetContext(r.Context(), &active,
-			`SELECT count(*) FROM unified_jobs
-			 WHERE unified_job_template_id = $1 AND status NOT IN ('successful','failed','canceled','error')`,
-			req.UnifiedJobTemplateID); err == nil && active > 0 {
+		if active, err := rs.store.ActiveJobCount(r.Context(), req.UnifiedJobTemplateID); err == nil && active > 0 {
 			render.Render(w, r, ErrConflict(fmt.Errorf("a run of this job template is already active; wait for it to finish or enable Allow Simultaneous")))
 			return
 		}
@@ -190,14 +196,7 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// 2. Create execution_run
 	// 3. Set current_run_id and status='queued'
 	// 4. Publish to NATS for execution
-	var jobID int64
-	err := rs.DB.QueryRowContext(r.Context(), `
-		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
-		VALUES ($1, $2, 'pending', $3, $4)
-		RETURNING id`,
-		req.Name, req.UnifiedJobTemplateID, time.Now(), jobArgs,
-	).Scan(&jobID)
-
+	jobID, err := rs.store.InsertPendingJob(r.Context(), req.Name, req.UnifiedJobTemplateID, jobArgs, time.Now())
 	if err != nil {
 		// Lost the race to a concurrent launch of a non-simultaneous template.
 		if isActiveRunConflict(err) {
@@ -328,8 +327,7 @@ func (rs *JobsResource) CreateJobEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Look up UnifiedJobID from ExecutionRun
-	var unifiedJobID int64
-	err = rs.DB.QueryRowContext(r.Context(), `SELECT unified_job_id FROM execution_runs WHERE id = $1`, runID).Scan(&unifiedJobID)
+	unifiedJobID, err := rs.store.UnifiedJobIDForRun(r.Context(), runID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			render.Render(w, r, ErrNotFound)
@@ -339,38 +337,22 @@ func (rs *JobsResource) CreateJobEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Insert Event
-	query := `
-		INSERT INTO job_events (
-			unified_job_id, execution_run_id, seq, event_type, 
-			stdout_snippet, event_data, created_at
-		) VALUES (
-			$1, $2, $3, $4, 
-			$5, $6, $7
-		) RETURNING id`
-
-	// Ensure defaults
+	// 2. Insert Event (fill defaults first)
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
 	}
 	if evt.EventData == nil {
 		evt.EventData = json.RawMessage("{}")
 	}
+	evt.UnifiedJobID = unifiedJobID
+	evt.ExecutionRunID = runID
 
-	var newID int64
-	err = rs.DB.QueryRowContext(r.Context(), query,
-		unifiedJobID, runID, evt.Seq, evt.EventType,
-		evt.StdoutSnippet, evt.EventData, evt.CreatedAt,
-	).Scan(&newID)
-
+	newID, err := rs.store.InsertJobEvent(r.Context(), &evt)
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-
 	evt.ID = newID
-	evt.UnifiedJobID = unifiedJobID
-	evt.ExecutionRunID = runID
 
 	render.Status(r, http.StatusCreated)
 	render.JSON(w, r, evt)
@@ -397,20 +379,14 @@ func (rs *JobsResource) CancelJob(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, ErrInvalidRequest(err))
 		return
 	}
-	var job struct {
-		Status string `db:"status"`
-		UJTID  *int64 `db:"unified_job_template_id"`
-	}
-	if err := rs.DB.GetContext(r.Context(), &job,
-		`SELECT status, unified_job_template_id FROM unified_jobs WHERE id = $1`, id); err != nil {
+	job, err := rs.store.JobCancelInfo(r.Context(), id)
+	if err != nil {
 		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job")))
 		return
 	}
 	// Cancelling requires execute access on the governing template.
-	if job.UJTID != nil {
-		var jtID int64
-		if err := rs.DB.GetContext(r.Context(), &jtID,
-			`SELECT id FROM job_templates WHERE unified_job_template_id = $1`, *job.UJTID); err == nil {
+	if job.UnifiedJobTemplateID != nil {
+		if jtID, ok, err := rs.store.JobTemplateIDByUnified(r.Context(), *job.UnifiedJobTemplateID); err == nil && ok {
 			if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actExecute) {
 				return
 			}
@@ -423,21 +399,17 @@ func (rs *JobsResource) CancelJob(w http.ResponseWriter, r *http.Request) {
 	case "running":
 		// Executing on a host: flag it; the host-runner stops the play on its next
 		// heartbeat and reports JOB_CANCELED, which finalizes the state.
-		rs.DB.ExecContext(r.Context(), `UPDATE unified_jobs SET cancel_requested = true WHERE id = $1`, id)
+		if err := rs.store.FlagCancelRequested(r.Context(), id); err != nil {
+			rs.log.Error("flag cancel requested failed", "job_id", id, "err", err)
+			render.Render(w, r, ErrInternal(err))
+			return
+		}
 		render.JSON(w, r, map[string]string{"status": "canceling"})
 		return
 	default:
 		// pending / queued / waiting: not executing yet — cancel outright so it's
 		// never dispatched, and terminate any run row already created for it.
-		tx, err := rs.DB.Beginx()
-		if err != nil {
-			render.Render(w, r, ErrInternal(err))
-			return
-		}
-		defer tx.Rollback()
-		tx.ExecContext(r.Context(), `UPDATE unified_jobs SET cancel_requested = true, status = 'canceled', finished_at = now() WHERE id = $1`, id)
-		tx.ExecContext(r.Context(), `UPDATE execution_runs SET state = 'canceled', finished_at = now() WHERE unified_job_id = $1 AND state NOT IN ('successful','failed','canceled')`, id)
-		if err := tx.Commit(); err != nil {
+		if err := rs.store.CancelNotYetRunning(r.Context(), id); err != nil {
 			render.Render(w, r, ErrInternal(err))
 			return
 		}
