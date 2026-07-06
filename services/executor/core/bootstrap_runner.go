@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/hostconn"
+	"github.com/praetordev/praetor/pkg/ingestclient"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -40,12 +42,15 @@ type BootstrapRunner struct {
 	// differ when the target reaches ingestion by a different name than the executor.
 	IngestionURL string
 	CallbackURL  string
+	// ingest is the shared ingestion client used for the run-scoped pre-flight
+	// (runnable) and just-in-time credential resolution.
+	ingest *ingestclient.Client
 }
 
 // NewBootstrapRunner constructs the runner from resolved config values. All
 // environment resolution happens in cmd/executor/main.go (the composition root),
 // so this core type stays free of os.Getenv and testable with plain values.
-func NewBootstrapRunner(giteaURL, giteaOwner, runtimeDir, ingestionURL, callbackURL string) *BootstrapRunner {
+func NewBootstrapRunner(giteaURL, giteaOwner, runtimeDir, ingestionURL, callbackURL string, ingest *ingestclient.Client) *BootstrapRunner {
 	if runtimeDir == "" {
 		runtimeDir = "/tmp/build/runtime"
 	}
@@ -61,6 +66,7 @@ func NewBootstrapRunner(giteaURL, giteaOwner, runtimeDir, ingestionURL, callback
 		RuntimeDir:   runtimeDir,
 		IngestionURL: ingestionURL,
 		CallbackURL:  callbackURL,
+		ingest:       ingest,
 	}
 }
 
@@ -106,29 +112,6 @@ func (r *BootstrapRunner) fetchPackTarball(pack, arch string) (string, func(), e
 		pack, arch, r.GiteaURL, file, r.RuntimeDir)
 }
 
-// checkRunnable asks ingestion whether the run may still be executed. It is
-// fail-open: any transport, status, or decode error returns true so a transient
-// ingestion issue never blocks a legitimate job. Only an explicit runnable=false
-// (run already terminal/absent) suppresses the bootstrap.
-func (r *BootstrapRunner) checkRunnable(runID string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v1/runs/%s/runnable", r.IngestionURL, runID)
-	resp, err := http.Get(url)
-	if err != nil {
-		return true, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return true, fmt.Errorf("runnable check returned %d", resp.StatusCode)
-	}
-	var body struct {
-		Runnable bool `json:"runnable"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return true, err
-	}
-	return body.Runnable, nil
-}
-
 func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) (err error) {
 	// Bootstrap metrics by mode, observed on return.
 	mode := "remote"
@@ -150,13 +133,31 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	// The executor is DB-free, so it asks ingestion (which owns the DB) whether the
 	// run is still runnable. This closes the "ghost run" window where a launch was
 	// reaped by the queued-timeout (or canceled) while sitting in the work queue and
-	// is then delivered to a recovering executor. Fail-open: a check error must not
-	// block a legitimate job (checkRunnable returns true on any transport error).
-	if r.IngestionURL != "" {
-		if runnable, _ := r.checkRunnable(req.ExecutionRunID.String()); !runnable {
+	// is then delivered to a recovering executor. Fail-open: Runnable returns true
+	// on any transport error, so a transient issue never blocks a legitimate job.
+	if r.ingest != nil {
+		if runnable, _ := r.ingest.Runnable(context.Background(), req.ExecutionRunID.String()); !runnable {
 			log.Printf("BootstrapRunner: run %s is no longer runnable (already terminal); skipping bootstrap", req.ExecutionRunID)
 			return nil
 		}
+	}
+
+	// Resolve the run's Machine credential just-in-time. The scheduler put only the
+	// credential id in the manifest (no plaintext at rest in the outbox/NATS); the
+	// executor is DB-free, so ingestion decrypts server-side and returns the
+	// injectors, which we hold only in this in-memory manifest copy. A resolve
+	// failure is fatal — bootstrapping without credentials would fail on the target
+	// anyway, and failing here reports a clear cause.
+	if req.JobManifest.CredentialID != 0 {
+		if r.ingest == nil {
+			return fmt.Errorf("run %s needs credential %d but no ingestion client is configured", req.ExecutionRunID, req.JobManifest.CredentialID)
+		}
+		creds, cerr := r.ingest.ResolveCredentials(context.Background(), req.ExecutionRunID.String())
+		if cerr != nil {
+			return fmt.Errorf("resolve credential %d for run %s: %w", req.JobManifest.CredentialID, req.ExecutionRunID, cerr)
+		}
+		req.JobManifest.CredentialEnv = creds.Env
+		req.JobManifest.CredentialFiles = creds.Files
 	}
 
 	// Inventory-sync runs don't bootstrap a host-runner: the executor runs
@@ -256,7 +257,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	}
 
 	// 4. The manifest.
-	if err := pushBytes(client, manifestBytes, jobDir+"/manifest.json", "0644", sudo); err != nil {
+	if err := pushBytes(client, manifestBytes, jobDir+"/manifest.json", "0600", sudo); err != nil {
 		return fmt.Errorf("push manifest: %w", err)
 	}
 
@@ -324,7 +325,7 @@ func (r *BootstrapRunner) localBootstrap(req *events.ExecutionRequest, manifestB
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(jobDir+"/manifest.json", manifestBytes, 0644); err != nil {
+	if err := os.WriteFile(jobDir+"/manifest.json", manifestBytes, 0600); err != nil {
 		return err
 	}
 	log.Printf("BootstrapRunner: no runner host — executing locally for run %s", req.ExecutionRunID)

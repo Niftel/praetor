@@ -40,6 +40,23 @@ func (h *IngestionHandler) Runnable(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]bool{"runnable": ok})
 }
 
+// ResolveCredentials GET /internal/v1/runs/{run_id}/credentials — returns the
+// decrypted injectors for the run's snapshotted Machine credential. Authenticated
+// (internal token) and run-scoped; the response is never logged.
+func (h *IngestionHandler) ResolveCredentials(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "run_id"))
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	env, files, err := h.Service.ResolveRunCredentials(r.Context(), runID)
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, map[string]map[string]string{"env": env, "files": files})
+}
+
 // Ingest POST /api/v1/runs/{run_id}/events
 func (h *IngestionHandler) Ingest(w http.ResponseWriter, r *http.Request) {
 	runIDStr := chi.URLParam(r, "run_id")

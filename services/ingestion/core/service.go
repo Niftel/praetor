@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/credentials"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/objectstore"
@@ -45,6 +46,34 @@ func NewIngestionService(db *sqlx.DB, pub EventPublisher, store objectstore.LogS
 // rebooted and resumed) and 'reconciling' (a transient blip moved it there, but
 // the host is still heartbeating) — otherwise a reconciling run would sit stale
 // until the reconciler next SSHes in, even though it's plainly alive.
+// ResolveRunCredentials decrypts and returns the AWX-style injectors for the
+// Machine credential the scheduler snapshotted onto this run (execution_runs.
+// credential_id). Resolution is strictly run-scoped: a caller can only obtain the
+// credential that run was dispatched with, never an arbitrary one, and only while
+// the run is still live (not terminal). The plaintext is returned for the
+// executor's in-memory use — it is never persisted here or logged.
+func (s *IngestionService) ResolveRunCredentials(ctx context.Context, runID uuid.UUID) (env, files map[string]string, err error) {
+	var row struct {
+		CredentialID *int64 `db:"credential_id"`
+		State        string `db:"state"`
+	}
+	if e := s.DB.GetContext(ctx, &row,
+		`SELECT credential_id, state FROM execution_runs WHERE id = $1`, runID); e != nil {
+		if errors.Is(e, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("run not found")
+		}
+		return nil, nil, e
+	}
+	switch row.State {
+	case "successful", "failed", "canceled", "lost":
+		return nil, nil, fmt.Errorf("run is not live (%s)", row.State)
+	}
+	if row.CredentialID == nil {
+		return nil, nil, fmt.Errorf("run has no credential")
+	}
+	return credentials.ResolveInjectors(ctx, s.DB, *row.CredentialID)
+}
+
 // IsRunnable reports whether a run may still be bootstrapped/executed — it exists
 // and has not reached a terminal or reconciler-owned state. The executor calls
 // this before bootstrapping so a launch that was reaped (queued-timeout) or

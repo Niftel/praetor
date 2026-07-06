@@ -176,15 +176,14 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 				SyncInventoryID:     src.InventoryID,
 				APIURL:              s.APIURL,
 			}
-			// Resolve the source's cloud credential (if any) into injector env/files
-			// so the inventory plugin can authenticate.
+			// Reference only: the executor resolves the source's cloud credential at
+			// dispatch from ingestion (no plaintext at rest). Snapshot the id on the
+			// run so resolution is run-scoped.
 			if src.CredentialID != nil {
-				env, files, cerr := resolveCredentialInjectors(ctx, tx, *src.CredentialID)
-				if cerr != nil {
-					log.Printf("sync job %d: credential %d resolve failed: %v", job.ID, *src.CredentialID, cerr)
-				} else {
-					syncManifest.CredentialEnv = env
-					syncManifest.CredentialFiles = files
+				syncManifest.CredentialID = *src.CredentialID
+				if _, uerr := tx.ExecContext(ctx,
+					`UPDATE execution_runs SET credential_id = $1 WHERE id = $2`, *src.CredentialID, runID); uerr != nil {
+					log.Printf("sync job %d: snapshot credential id on run %s failed: %v", job.ID, runID, uerr)
 				}
 			}
 			req := &events.ExecutionRequest{ExecutionRunID: runID, UnifiedJobID: job.ID, JobManifest: syncManifest, CreatedAt: time.Now()}
@@ -353,12 +352,14 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		// no shared platform key. A remote job with no Machine credential (and no
 		// per-host ansible_user/key) fails at bootstrap with a clear error.
 		if template.CredentialID != nil {
-			env, files, cerr := resolveCredentialInjectors(ctx, tx, *template.CredentialID)
-			if cerr != nil {
-				log.Printf("job %d: machine credential %d resolve failed: %v", job.ID, *template.CredentialID, cerr)
-			} else {
-				manifest.CredentialEnv = env
-				manifest.CredentialFiles = files
+			// Reference only: the manifest carries the credential id and we snapshot
+			// it on the run; the executor resolves the injectors at dispatch from
+			// ingestion, so no plaintext key is persisted in the outbox or NATS (#11).
+			// Snapshotting on the run keeps resolution strictly run-scoped (000045).
+			manifest.CredentialID = *template.CredentialID
+			if _, uerr := tx.ExecContext(ctx,
+				`UPDATE execution_runs SET credential_id = $1 WHERE id = $2`, *template.CredentialID, runID); uerr != nil {
+				log.Printf("job %d: snapshot credential id on run %s failed: %v", job.ID, runID, uerr)
 			}
 		}
 

@@ -104,6 +104,13 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       INGESTION_PORT: 8081
       NATS_URL: nats://nats:4222
+      # Ingestion now decrypts Machine credentials server-side for the executor's
+      # run-scoped resolve endpoint, so it needs the encryption key + the shared
+      # internal token that authenticates that endpoint.
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
+      PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
+      PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
+      PRAETOR_INTERNAL_TOKEN: "${PRAETOR_INTERNAL_TOKEN:-dev-internal-token}"
     ports:
       - "8090:8081"
     healthcheck:
@@ -226,6 +233,9 @@ services:
     environment:
       NATS_URL: nats://nats:4222
       INGESTION_URL: http://ingestion:8081
+      # Authenticates the executor to ingestion's run-scoped credential-resolve
+      # endpoint; must match ingestion's PRAETOR_INTERNAL_TOKEN.
+      PRAETOR_INTERNAL_TOKEN: "${PRAETOR_INTERNAL_TOKEN:-dev-internal-token}"
       # Address managed hosts use to call back to the control plane. Must be
       # reachable FROM the target: internal service DNS only works for hosts on
       # praetor-net, so point it at the ingestion service's published address

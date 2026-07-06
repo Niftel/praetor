@@ -1,64 +1,29 @@
 package core
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
+	"context"
 
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/ingestclient"
 )
 
+// HttpEventPublisher publishes executor-side events to ingestion over HTTP via
+// the shared ingestclient (auth, timeouts, and retries live there).
 type HttpEventPublisher struct {
-	IngestionURL string
-	Client       *http.Client
+	client *ingestclient.Client
 }
 
-func NewHttpEventPublisher(ingestionURL string) *HttpEventPublisher {
-	return &HttpEventPublisher{
-		IngestionURL: ingestionURL,
-		Client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-	}
+func NewHttpEventPublisher(client *ingestclient.Client) *HttpEventPublisher {
+	return &HttpEventPublisher{client: client}
 }
 
 func (p *HttpEventPublisher) PublishJobEvent(event *events.JobEvent) error {
-	// API endpoint: POST /api/v1/runs/{run_id}/events
-	url := fmt.Sprintf("%s/api/v1/runs/%s/events", p.IngestionURL, event.ExecutionRunID.String())
-
-	// Wrap in array as the API expects a batch
-	payload := []events.JobEvent{*event}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.Client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send event to %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("ingestion service returned error: %d", resp.StatusCode)
-	}
-
-	return nil
+	return p.client.PostEvents(context.Background(), event.ExecutionRunID.String(), []events.JobEvent{*event})
 }
 
-// PublishLogChunk is intentionally a no-op for the executor: bulk stdout is
-// streamed to the object store by the host-runner's log syncer (POST
-// /runs/{id}/logs), not the executor. The method only satisfies the
-// EventPublisher interface.
+// PublishLogChunk is a no-op for the executor: bulk stdout is streamed to the
+// object store by the host-runner's log syncer, not the executor. The method only
+// satisfies the EventPublisher interface.
 func (p *HttpEventPublisher) PublishLogChunk(chunk *events.LogChunk) error {
 	return nil
 }

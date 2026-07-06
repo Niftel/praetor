@@ -9,6 +9,7 @@ import (
 
 	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/ingestclient"
 	"github.com/praetordev/praetor/pkg/metrics"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/executor/core"
@@ -24,12 +25,16 @@ func main() {
 	}
 	defer bus.Close()
 
-	// Determine Publisher (HTTP or NATS)
+	// Shared ingestion client (base URL + internal token, retries) used for the
+	// run-scoped runnable pre-flight and just-in-time credential resolution.
 	ingestionURL := env.String("INGESTION_URL", "")
+	ingest := ingestclient.New(ingestionURL, env.String("PRAETOR_INTERNAL_TOKEN", ""))
+
+	// Determine Publisher (HTTP or NATS)
 	var publisher core.EventPublisher = bus
 	if ingestionURL != "" {
 		log.Printf("Using HTTP Ingestion Publisher at %s", ingestionURL)
-		publisher = core.NewHttpEventPublisher(ingestionURL)
+		publisher = core.NewHttpEventPublisher(ingest)
 	} else {
 		log.Println("Using NATS Event Publisher")
 	}
@@ -41,6 +46,7 @@ func main() {
 		env.String("RUNTIME_DIR", ""),
 		ingestionURL,
 		env.String("HOST_RUNNER_CALLBACK_URL", ""),
+		ingest,
 	)
 
 	// Check for One-Shot Mode

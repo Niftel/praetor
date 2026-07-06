@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"log"
 	"net/http"
 
@@ -14,6 +15,23 @@ import (
 	"github.com/praetordev/praetor/services/ingestion/core"
 	"github.com/praetordev/praetor/services/ingestion/handler"
 )
+
+// internalAuth guards the internal endpoints (credential resolution) with a
+// shared bearer token, compared in constant time. An unset token disables the
+// route entirely (fail closed) rather than allowing unauthenticated access.
+func internalAuth(token string) func(http.Handler) http.Handler {
+	want := []byte("Bearer " + token)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got := []byte(r.Header.Get("Authorization"))
+			if token == "" || subtle.ConstantTimeCompare(got, want) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 func main() {
 	port := env.String("INGESTION_PORT", "8081") // Distinct port from API (8080)
@@ -58,6 +76,10 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+
+	// Internal, authenticated: just-in-time credential resolution for the executor.
+	internalToken := env.String("PRAETOR_INTERNAL_TOKEN", "")
+	r.With(internalAuth(internalToken)).Get("/internal/v1/runs/{run_id}/credentials", h.ResolveCredentials)
 
 	r.Get("/api/v1/runs/{run_id}/runnable", h.Runnable)
 	r.Post("/api/v1/runs/{run_id}/events", h.Ingest)
