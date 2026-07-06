@@ -50,9 +50,16 @@ RUN set -eux; \
 # Bundle the host-runner daemon (Praetor comms + WAL) from its Gitea release into
 # the pack, so the pack is one self-contained bootstrapping unit.
 RUN set -eux; \
-    url="${GITEA_URL}/${GITEA_OWNER}/host-runner/releases/download/${HOST_RUNNER_VERSION}/praetor-host-runner-linux-${TARGETARCH}"; \
-    echo "Downloading $url"; \
-    curl -fsSL "$url" -o "$PREFIX/bin/praetor-host-runner"; \
+    base="${GITEA_URL}/${GITEA_OWNER}/host-runner/releases/download/${HOST_RUNNER_VERSION}"; \
+    file="praetor-host-runner-linux-${TARGETARCH}"; \
+    echo "Downloading $base/$file"; \
+    curl -fsSL "$base/$file" -o "$PREFIX/bin/praetor-host-runner"; \
+    # Verify against the release's published SHA256SUMS — this binary runs on every
+    # managed host, so an unverified download is a supply-chain risk.
+    curl -fsSL "$base/SHA256SUMS" -o /tmp/host-runner.sha256sums; \
+    expected="$(awk -v f="$file" '$2==f {print $1}' /tmp/host-runner.sha256sums)"; \
+    test -n "$expected" || { echo "no SHA256SUMS entry for $file" >&2; exit 1; }; \
+    echo "${expected}  ${PREFIX}/bin/praetor-host-runner" | sha256sum -c -; \
     chmod 0755 "$PREFIX/bin/praetor-host-runner"; \
     test -s "$PREFIX/bin/praetor-host-runner"
 

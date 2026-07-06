@@ -79,12 +79,20 @@ type JobManifest struct {
 	SSHUser       string `json:"ssh_user,omitempty"`
 	SSHPrivateKey string `json:"ssh_private_key,omitempty"`
 
-	// CredentialEnv / CredentialFiles are resolved from a credential's
-	// AWX-style injectors by the scheduler. CredentialEnv maps an environment
-	// variable name to its (already-decrypted) value. CredentialFiles maps an
-	// environment variable name to file content; the executor writes the content
-	// to a temp file and points the env var at that path. Used to authenticate
-	// cloud dynamic-inventory plugins (e.g. AWS_ACCESS_KEY_ID for aws_ec2).
+	// CredentialID is the Machine credential the scheduler selected for this run.
+	// The scheduler writes ONLY this reference into the manifest (and snapshots it
+	// onto execution_runs) — never the decrypted secret. The executor resolves the
+	// injectors at dispatch from ingestion's authenticated run-scoped endpoint and
+	// fills CredentialEnv/CredentialFiles in its in-memory copy before pushing to
+	// the host-runner, so no plaintext key is persisted in the outbox or NATS.
+	CredentialID int64 `json:"credential_id,omitempty"`
+
+	// CredentialEnv / CredentialFiles are the resolved AWX-style injectors.
+	// CredentialEnv maps an env var name to its (decrypted) value; CredentialFiles
+	// maps an env var name to file content the executor writes to a temp file and
+	// points the var at (e.g. ANSIBLE_PRIVATE_KEY_FILE, AWS_ACCESS_KEY_ID). These
+	// are populated by the executor after resolving CredentialID — they are NOT set
+	// by the scheduler and are absent from the persisted/wire manifest.
 	CredentialEnv   map[string]string `json:"credential_env,omitempty"`
 	CredentialFiles map[string]string `json:"credential_files,omitempty"`
 

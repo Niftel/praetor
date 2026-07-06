@@ -21,26 +21,18 @@ fi
 # Ensure ownership is correct
 chown -R praetor:praetor /home/praetor/.ssh
 
-# Configure SSH to be permissive (Fixes invalid host key prompts)
+# SSH host-key policy: trust-on-first-use. accept-new records an unknown host's
+# key on first connect but REJECTS a changed key thereafter (MITM protection),
+# and known_hosts lives on the persisted praetor-ssh volume so trust survives
+# restarts. (Previously StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null
+# disabled verification entirely, defeating that volume.)
 cat <<EOF > /home/praetor/.ssh/config
 Host *
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
+    StrictHostKeyChecking accept-new
     LogLevel ERROR
 EOF
 chmod 600 /home/praetor/.ssh/config
 chown praetor:praetor /home/praetor/.ssh/config
-
-# DEBUGGING SUPPORT: Enable root to use the keys too
-# This fixes "docker compose exec executor ssh ..." running as root
-mkdir -p /root/.ssh
-cp /home/praetor/.ssh/id_rsa /root/.ssh/id_rsa
-cp /home/praetor/.ssh/id_rsa.pub /root/.ssh/id_rsa.pub
-cp /home/praetor/.ssh/config /root/.ssh/config
-chmod 700 /root/.ssh
-chmod 600 /root/.ssh/id_rsa
-chmod 644 /root/.ssh/id_rsa.pub
-chmod 600 /root/.ssh/config
 
 # Localhost jobs run the host-runner on the executor itself: it writes job dirs
 # under /var/lib/praetor and extracts the Execution Pack under /opt/praetor. Make

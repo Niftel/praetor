@@ -78,7 +78,11 @@ services:
       # Use service name 'db'
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       # Needed to encrypt the automation identity's private key at seed time.
-      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
+      # DEV DEFAULT: allow the built-in insecure key when PRAETOR_SECRET_KEY/JWT_SECRET
+      # are unset. Production MUST set real secrets (then this is irrelevant) and
+      # should set PRAETOR_ALLOW_INSECURE_DEFAULTS=false so a missing secret fails hard.
+      PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
     volumes:
       # One-time import of any existing keypair into the DB-managed automation
       # identity (read-only; generated fresh if absent).
@@ -100,6 +104,13 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       INGESTION_PORT: 8081
       NATS_URL: nats://nats:4222
+      # Ingestion now decrypts Machine credentials server-side for the executor's
+      # run-scoped resolve endpoint, so it needs the encryption key + the shared
+      # internal token that authenticates that endpoint.
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
+      PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
+      PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
+      PRAETOR_INTERNAL_TOKEN: "${PRAETOR_INTERNAL_TOKEN:-dev-internal-token}"
     ports:
       - "8090:8081"
     healthcheck:
@@ -126,8 +137,12 @@ services:
       # Secrets are now required (no built-in fallback). Override both via .env in any
       # real deployment. PRAETOR_SECRET_KEY must be exactly 32 bytes; rotate by setting
       # PRAETOR_SECRET_KEY to the new key and PRAETOR_SECRET_KEY_OLD to the previous one.
-      JWT_SECRET: "${JWT_SECRET:-praetor-prod-secret-2025-secure-key-9Xv2}"
-      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
+      # DEV DEFAULT: allow the built-in insecure key when PRAETOR_SECRET_KEY/JWT_SECRET
+      # are unset. Production MUST set real secrets (then this is irrelevant) and
+      # should set PRAETOR_ALLOW_INSECURE_DEFAULTS=false so a missing secret fails hard.
+      PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
       PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
       PORT: 8080
       INGESTION_URL: http://ingestion:8081 # for proxying run logs from the object store
@@ -163,7 +178,11 @@ services:
       dockerfile: build/package/Dockerfile.reconciler
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
-      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
+      # DEV DEFAULT: allow the built-in insecure key when PRAETOR_SECRET_KEY/JWT_SECRET
+      # are unset. Production MUST set real secrets (then this is irrelevant) and
+      # should set PRAETOR_ALLOW_INSECURE_DEFAULTS=false so a missing secret fails hard.
+      PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
       PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
       # Run event/log endpoints live on the ingestion service.
       INGESTION_URL: http://ingestion:8081
@@ -188,15 +207,16 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       NATS_URL: nats://nats:4222
-      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
+      # DEV DEFAULT: allow the built-in insecure key when PRAETOR_SECRET_KEY/JWT_SECRET
+      # are unset. Production MUST set real secrets (then this is irrelevant) and
+      # should set PRAETOR_ALLOW_INSECURE_DEFAULTS=false so a missing secret fails hard.
+      PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
       PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
-      PRAETOR_PROJECT_DIR: /tmp/project
       API_URL: http://api:8080
       # Retention pruning: 0 (default) keeps job history forever; a positive value
       # deletes terminal jobs (rows + events + log blobs) finished that many days ago.
       JOB_RETENTION_DAYS: "${JOB_RETENTION_DAYS:-0}"
-    volumes:
-      - ./:/tmp/project:ro
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -213,6 +233,9 @@ services:
     environment:
       NATS_URL: nats://nats:4222
       INGESTION_URL: http://ingestion:8081
+      # Authenticates the executor to ingestion's run-scoped credential-resolve
+      # endpoint; must match ingestion's PRAETOR_INTERNAL_TOKEN.
+      PRAETOR_INTERNAL_TOKEN: "${PRAETOR_INTERNAL_TOKEN:-dev-internal-token}"
       # Address managed hosts use to call back to the control plane. Must be
       # reachable FROM the target: internal service DNS only works for hosts on
       # praetor-net, so point it at the ingestion service's published address
@@ -308,7 +331,11 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       NATS_URL: nats://nats:4222
-      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-12345678901234567890123456789012}"
+      PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
+      # DEV DEFAULT: allow the built-in insecure key when PRAETOR_SECRET_KEY/JWT_SECRET
+      # are unset. Production MUST set real secrets (then this is irrelevant) and
+      # should set PRAETOR_ALLOW_INSECURE_DEFAULTS=false so a missing secret fails hard.
+      PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
       PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
     depends_on:
       migrator:
