@@ -158,7 +158,7 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 			finished_at = COALESCE($3, finished_at),
 			last_event_seq = GREATEST(last_event_seq, $4)
 		WHERE id = $5
-		  AND state NOT IN ('successful', 'failed', 'canceled')`,
+		  AND NOT run_is_terminal(state)`,
 		newState, evt.Timestamp, finishedAt, evt.Seq, evt.ExecutionRunID,
 	); err != nil {
 		log.Printf("Failed to update execution_run %s: %v", evt.ExecutionRunID, err)
@@ -171,7 +171,7 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 			started_at = COALESCE(started_at, $2),
 			finished_at = COALESCE($3, finished_at)
 		WHERE id = $4
-		  AND status NOT IN ('successful', 'failed', 'canceled')`,
+		  AND NOT job_is_terminal(status)`,
 		newStatus, evt.Timestamp, finishedAt, evt.UnifiedJobID,
 	); err != nil {
 		log.Printf("Failed to update unified_job %d: %v", evt.UnifiedJobID, err)

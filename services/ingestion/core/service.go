@@ -72,7 +72,7 @@ func (s *IngestionService) RecordHeartbeat(ctx context.Context, runID uuid.UUID)
 		SET last_heartbeat_at = now(),
 		    state = CASE WHEN state IN ('lost', 'reconciling') THEN 'running' ELSE state END,
 		    finished_at = CASE WHEN state IN ('lost', 'reconciling') THEN NULL ELSE finished_at END
-		WHERE id = $1 AND state NOT IN ('successful', 'failed', 'canceled')`, runID)
+		WHERE id = $1 AND NOT run_is_terminal(state)`, runID)
 	if err != nil {
 		return false, fmt.Errorf("record heartbeat: %w", err)
 	}

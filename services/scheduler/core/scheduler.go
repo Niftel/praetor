@@ -607,7 +607,7 @@ func (s *Scheduler) processTimedOutJobs() error {
 		SET state = 'failed', finished_at = now()
 		FROM stuck
 		WHERE er.id = stuck.current_run_id
-		  AND er.state NOT IN ('successful', 'failed', 'canceled', 'lost')`,
+		  AND NOT run_is_terminal(er.state) AND er.state <> 'lost'`,
 		fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())),
 	)
 	if err != nil {
