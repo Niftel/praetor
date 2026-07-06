@@ -2,10 +2,10 @@ package main
 
 import (
 	"log"
-	"os"
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/consumer/core"
@@ -21,17 +21,13 @@ func main() {
 	}
 
 	// 1. Connect to DB
-	database, err := db.InitDB()
+	database, err := db.Connect(env.String("DATABASE_URL", db.DefaultDSN))
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 
 	// 2. Setup Infrastructure
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
-	}
-	bus, err := natsTransport.NewNatsBus(natsURL)
+	bus, err := natsTransport.NewNatsBus(env.String("NATS_URL", natsTransport.DefaultURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}

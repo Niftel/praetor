@@ -1,0 +1,46 @@
+# Build context excludes for the Go service images (build/package/Dockerfile.*,
+# context: .). Keep source the builds need (go.mod/go.sum, cmd/, services/, pkg/,
+# db/); drop secrets, build artifacts, and anything those builds never COPY.
+
+# Secrets / keys — MUST never enter an image layer
+keys/
+.env
+.env.*
+!.env.example
+*.pem
+inventory/gitea_ed25519
+
+# Frontend + docs (built from their own contexts: web/, docs-site/)
+web/
+docs-site/
+
+# Local backups (recoverable from git history)
+web_backup_v1/
+web_config_backup/
+
+# Compiled binaries / build artifacts (rebuilt inside the image)
+bin/
+build/runtime/
+build/linux/
+build/praetor-host-runner
+/api
+/consumer
+/executor
+/ingestion
+/scheduler
+/migrator
+/packbuilder
+/execpack
+/host-runner
+/controller
+/temp_controller
+/praetor-host-runner-linux
+praetor-ui.zip
+*.zip
+
+# VCS / editor / logs / OS cruft
+.git/
+.gitignore
+*.log
+.DS_Store
+node_modules/

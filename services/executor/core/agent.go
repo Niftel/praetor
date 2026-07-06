@@ -3,8 +3,6 @@ package core
 import (
 	"fmt"
 	"log"
-	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -19,14 +17,10 @@ type Agent struct {
 	wg         sync.WaitGroup
 }
 
-func NewAgent(sub EventSubscriber, pub EventPublisher, runner Runner) *Agent {
-	workers := 2
-	if val := os.Getenv("EXECUTOR_WORKERS"); val != "" {
-		if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			workers = n
-		}
+func NewAgent(sub EventSubscriber, pub EventPublisher, runner Runner, workers int) *Agent {
+	if workers <= 0 {
+		workers = 2
 	}
-
 	return &Agent{
 		Subscriber: sub,
 		Publisher:  pub,

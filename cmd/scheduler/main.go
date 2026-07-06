@@ -4,12 +4,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
@@ -26,18 +26,13 @@ func main() {
 	}
 
 	// 1. Connect to DB
-	database, err := db.InitDB()
+	database, err := db.Connect(env.String("DATABASE_URL", db.DefaultDSN))
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 
 	// 2. Init NATS
-	// Default URL is nats://127.0.0.1:4222
-	natsURL := os.Getenv("NATS_URL")
-	if natsURL == "" {
-		natsURL = "nats://127.0.0.1:4222"
-	}
-	bus, err := natsTransport.NewNatsBus(natsURL)
+	bus, err := natsTransport.NewNatsBus(env.String("NATS_URL", natsTransport.DefaultURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
@@ -49,20 +44,20 @@ func main() {
 	// 3. Init Scheduler
 	// Poll every 5 seconds
 	sched := core.NewScheduler(database, 5*time.Second, bus)
+	// Base URL embedded in the manifest for the pushed host-runner to report back.
+	sched.APIURL = env.String("API_URL", "")
 
 	// Retention pruning (opt-in). JOB_RETENTION_DAYS=0 (default) keeps everything;
 	// a positive value deletes terminal jobs finished longer ago than that, along
 	// with their events and log blobs.
-	if v := os.Getenv("JOB_RETENTION_DAYS"); v != "" {
-		if days, err := strconv.Atoi(v); err == nil && days > 0 {
-			sched.RetentionDays = days
-			if ls, err := objectstore.NewJetStreamLogStore(bus.JS, ""); err == nil {
-				sched.Logs = ls
-			} else {
-				log.Printf("retention: object store unavailable, blobs won't be pruned: %v", err)
-			}
-			log.Printf("retention: pruning terminal jobs finished > %d day(s) ago", days)
+	if days := env.Int("JOB_RETENTION_DAYS", 0); days > 0 {
+		sched.RetentionDays = days
+		if ls, err := objectstore.NewJetStreamLogStore(bus.JS, ""); err == nil {
+			sched.Logs = ls
+		} else {
+			log.Printf("retention: object store unavailable, blobs won't be pruned: %v", err)
 		}
+		log.Printf("retention: pruning terminal jobs finished > %d day(s) ago", days)
 	}
 
 	// 3. Start loop in background

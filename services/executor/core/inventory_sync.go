@@ -60,7 +60,7 @@ func (r *BootstrapRunner) syncInventory(req *events.ExecutionRequest, eventChan 
 		return r.syncFail(req, eventChan, fmt.Errorf("ansible-inventory failed: %v: %s", err, out))
 	}
 
-	ingestion := os.Getenv("INGESTION_URL")
+	ingestion := r.IngestionURL
 	if ingestion == "" {
 		ingestion = "http://ingestion:8081"
 	}

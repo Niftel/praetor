@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 
@@ -22,10 +21,13 @@ import (
 type JobsResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	// IngestionURL is the base URL the API proxies run-log reads to. Resolved in
+	// main from env; empty falls back to the in-cluster default.
+	IngestionURL string
 }
 
-func NewJobsResource(db *sqlx.DB) *JobsResource {
-	return &JobsResource{DB: db, Authorizer: NewAuthorizer(db)}
+func NewJobsResource(db *sqlx.DB, ingestionURL string) *JobsResource {
+	return &JobsResource{DB: db, Authorizer: NewAuthorizer(db), IngestionURL: ingestionURL}
 }
 
 // templateIDForRun resolves the job_templates.id that owns a given execution
@@ -272,7 +274,7 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := os.Getenv("INGESTION_URL")
+	base := rs.IngestionURL
 	if base == "" {
 		base = "http://ingestion:8081"
 	}

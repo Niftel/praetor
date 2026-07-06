@@ -23,7 +23,7 @@ func TestCreateInventoryRepro(t *testing.T) {
 	defer db.Close()
 
 	// Use full router to test middleware + routing
-	router := api.NewRouter(db)
+	router := api.NewRouter(db, api.Config{})
 
 	// Payload mimicking App.tsx
 	payload := map[string]interface{}{

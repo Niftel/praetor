@@ -1,12 +1,23 @@
 services:
   nats:
-    image: nats:latest
+    # Pinned + alpine variant (has a shell/wget for the healthcheck below).
+    image: nats:2.10-alpine
+    restart: unless-stopped
     # Enable JetStream with file-based persistence so job events survive a
-    # consumer/DB outage (and a NATS restart) and can be replayed.
-    command: ["-js", "-sd", "/data"]
+    # consumer/DB outage (and a NATS restart) and can be replayed; -m 8222 turns
+    # on the monitoring endpoint used by the healthcheck.
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    # Bound to localhost: no auth on the client/monitor ports, so don't expose them
+    # to the LAN. In-cluster services reach NATS by service name, not host port.
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
     volumes:
       - nats-data:/data
     networks:
@@ -14,12 +25,20 @@ services:
 
   db:
     image: postgres:15
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: praetor
+    # Persist platform state (jobs, credentials, RBAC, identities) on a named
+    # volume so it survives container recreation. Back up with:
+    #   docker compose exec db pg_dump -U postgres praetor > praetor.sql
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Bound to localhost: the DB should never be reachable from the LAN. Services
+    # connect in-cluster as db:5432; the host port is for local psql/tooling only.
     ports:
-      - "${PRAETOR_DB_PORT:-5432}:5432"
+      - "127.0.0.1:${PRAETOR_DB_PORT:-5432}:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
@@ -31,6 +50,7 @@ services:
   # Mock LDAP server for testing
   ldap:
     image: osixia/openldap:1.5.0
+    restart: unless-stopped
     environment:
       LDAP_ORGANISATION: "Praetor Demo"
       LDAP_DOMAIN: "praetor.local"
@@ -41,9 +61,10 @@ services:
       LDAP_READONLY_USER_USERNAME: "readonly"
       LDAP_READONLY_USER_PASSWORD: "readonly"
       LDAP_SEED_INTERNAL_LDIF_PATH: "/tmp/ldif"
+    # Bound to localhost: api reaches LDAP in-cluster as ldap:389.
     ports:
-      - "389:389"
-      - "636:636"
+      - "127.0.0.1:389:389"
+      - "127.0.0.1:636:636"
     volumes:
       - ./deployments/ldap/bootstrap.ldif:/tmp/ldif/bootstrap.ldif:ro
     networks:
@@ -74,12 +95,19 @@ services:
     build:
       context: .
       dockerfile: build/package/Dockerfile.ingestion
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       INGESTION_PORT: 8081
       NATS_URL: nats://nats:4222
     ports:
       - "8090:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8081/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -92,6 +120,7 @@ services:
     build:
       context: .
       dockerfile: build/package/Dockerfile.api
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       # Secrets are now required (no built-in fallback). Override both via .env in any
@@ -146,7 +175,7 @@ services:
       migrator:
         condition: service_completed_successfully
       ingestion:
-        condition: service_started
+        condition: service_healthy
     networks:
       - praetor-net
     restart: unless-stopped
@@ -155,6 +184,7 @@ services:
     build:
       context: .
       dockerfile: build/package/Dockerfile.scheduler
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       NATS_URL: nats://nats:4222
@@ -171,7 +201,7 @@ services:
       migrator:
         condition: service_completed_successfully
       nats:
-        condition: service_started
+        condition: service_healthy
     networks:
       - praetor-net
 
@@ -179,6 +209,7 @@ services:
     build:
       context: .
       dockerfile: build/package/Dockerfile.executor
+    restart: unless-stopped
     environment:
       NATS_URL: nats://nats:4222
       INGESTION_URL: http://ingestion:8081
@@ -213,7 +244,7 @@ services:
       - praetor-ssh:/home/praetor/.ssh
     depends_on:
       nats:
-        condition: service_started
+        condition: service_healthy
     networks:
       - praetor-net
 
@@ -273,6 +304,7 @@ services:
     build:
       context: .
       dockerfile: build/package/Dockerfile.consumer
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       NATS_URL: nats://nats:4222
@@ -282,7 +314,7 @@ services:
       migrator:
         condition: service_completed_successfully
       nats:
-        condition: service_started
+        condition: service_healthy
     networks:
       - praetor-net
 
@@ -316,6 +348,7 @@ services:
     restart: unless-stopped
 
   ui:
+    restart: unless-stopped
     build:
       context: web
       dockerfile: Dockerfile
@@ -459,6 +492,7 @@ networks:
     driver: bridge
 
 volumes:
+  pgdata:
   nats-data:
   praetor-ssh:
   prometheus-data:

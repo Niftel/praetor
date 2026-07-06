@@ -114,7 +114,7 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 	tmplRes := handlers.NewTemplatesResource(db)
-	jobsRes := handlers.NewJobsResource(db)
+	jobsRes := handlers.NewJobsResource(db, "")
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()
