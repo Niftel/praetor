@@ -17,42 +17,26 @@ import (
 	"github.com/teambition/rrule-go"
 )
 
+// ScheduleStore is the schedules-domain data access the handler depends on.
+type ScheduleStore interface {
+	ListAll(ctx context.Context) ([]models.Schedule, error)
+	ListByTargetOrgIDs(ctx context.Context, orgIDs []int64) ([]models.Schedule, error)
+	Get(ctx context.Context, id int64) (models.Schedule, error)
+	Create(ctx context.Context, sched models.Schedule) (int64, error)
+	Update(ctx context.Context, sched models.Schedule) error
+	Delete(ctx context.Context, id int64) error
+	TargetOrg(ctx context.Context, wfID, ujtID *int64) (int64, bool)
+	ScheduleOrg(ctx context.Context, id int64) (int64, bool)
+}
+
 type SchedulesResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	store ScheduleStore
 }
 
 func NewSchedulesResource(db *sqlx.DB) *SchedulesResource {
-	return &SchedulesResource{DB: db, Authorizer: NewAuthorizer(db)}
-}
-
-// A schedule has no org column; it inherits its target's org. These helpers
-// resolve that org so schedule access can be gated on the target's organization.
-func (rs *SchedulesResource) targetOrg(ctx context.Context, wfID, ujtID *int64) (int64, bool) {
-	var org int64
-	switch {
-	case wfID != nil:
-		err := rs.DB.GetContext(ctx, &org, `SELECT organization_id FROM workflow_templates WHERE id=$1`, *wfID)
-		return org, err == nil
-	case ujtID != nil:
-		err := rs.DB.GetContext(ctx, &org, `SELECT organization_id FROM job_templates WHERE unified_job_template_id=$1`, *ujtID)
-		return org, err == nil
-	}
-	return 0, false
-}
-
-func (rs *SchedulesResource) scheduleOrg(ctx context.Context, id int64) (int64, bool) {
-	var org sql.NullInt64
-	err := rs.DB.GetContext(ctx, &org, `
-		SELECT COALESCE(wt.organization_id, jt.organization_id)
-		FROM schedules s
-		LEFT JOIN workflow_templates wt ON wt.id = s.workflow_template_id
-		LEFT JOIN job_templates jt ON jt.unified_job_template_id = s.unified_job_template_id
-		WHERE s.id=$1`, id)
-	if err != nil || !org.Valid {
-		return 0, false
-	}
-	return org.Int64, true
+	return &SchedulesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewScheduleStore(db)}
 }
 
 func (rs *SchedulesResource) Routes() chi.Router {
@@ -69,9 +53,10 @@ func (rs *SchedulesResource) Routes() chi.Router {
 
 func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	uc := currentUser(r)
-	schedules := []models.Schedule{}
+	var schedules []models.Schedule
+	var err error
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &schedules, "SELECT "+store.ScheduleCols+" FROM schedules ORDER BY id ASC"); err != nil {
+		if schedules, err = rs.store.ListAll(r.Context()); err != nil {
 			render.Render(w, r, ErrInternal(err))
 			return
 		}
@@ -84,18 +69,9 @@ func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Reques
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	if len(ids) > 0 {
-		q, args, _ := sqlx.In(`
-			SELECT s.* FROM schedules s
-			LEFT JOIN workflow_templates wt ON wt.id = s.workflow_template_id
-			LEFT JOIN job_templates jt ON jt.unified_job_template_id = s.unified_job_template_id
-			WHERE COALESCE(wt.organization_id, jt.organization_id) IN (?)
-			ORDER BY s.id ASC`, ids)
-		q = rs.DB.Rebind(q)
-		if err := rs.DB.SelectContext(r.Context(), &schedules, q, args...); err != nil {
-			render.Render(w, r, ErrInternal(err))
-			return
-		}
+	if schedules, err = rs.store.ListByTargetOrgIDs(r.Context(), ids); err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
 	}
 	render.JSON(w, r, schedules)
 }
@@ -103,14 +79,13 @@ func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Reques
 func (rs *SchedulesResource) GetSchedule(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
-	if org, ok := rs.scheduleOrg(r.Context(), id); !ok {
+	if org, ok := rs.store.ScheduleOrg(r.Context(), id); !ok {
 		render.Render(w, r, ErrNotFound)
 		return
 	} else if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actRead) {
 		return
 	}
-	var sched models.Schedule
-	err := rs.DB.GetContext(r.Context(), &sched, "SELECT "+store.ScheduleCols+" FROM schedules WHERE id = $1", id)
+	sched, err := rs.store.Get(r.Context(), id)
 	if err == sql.ErrNoRows {
 		render.Render(w, r, ErrNotFound)
 		return
@@ -138,7 +113,7 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// Only an admin of the target's organization may schedule it.
-	org, ok := rs.targetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID)
+	org, ok := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID)
 	if !ok {
 		render.Render(w, r, ErrInvalidRequest(nil))
 		return
@@ -163,20 +138,12 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 		sched.ExtraVars = json.RawMessage("{}") // jsonb column rejects an empty value
 	}
 
-	query := `
-		INSERT INTO schedules (name, description, unified_job_template_id, workflow_template_id, rrule, next_run, enabled, extra_vars, created_at, modified_at)
-		VALUES (:name, :description, :unified_job_template_id, :workflow_template_id, :rrule, :next_run, :enabled, :extra_vars, :created_at, :modified_at)
-		RETURNING id`
-
-	rows, err := rs.DB.NamedQuery(query, sched)
+	newID, err := rs.store.Create(r.Context(), sched)
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	if rows.Next() {
-		rows.Scan(&sched.ID)
-	}
-	rows.Close()
+	sched.ID = newID
 
 	render.Status(r, http.StatusCreated)
 	render.JSON(w, r, sched)
@@ -191,7 +158,7 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Must admin the schedule's current org.
-	curOrg, ok := rs.scheduleOrg(r.Context(), id)
+	curOrg, ok := rs.store.ScheduleOrg(r.Context(), id)
 	if !ok {
 		render.Render(w, r, ErrNotFound)
 		return
@@ -207,7 +174,7 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 	}
 	sched.ID = id
 	// If the target changed, the caller must also admin the new target's org.
-	if newOrg, ok := rs.targetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); ok && newOrg != curOrg {
+	if newOrg, ok := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); ok && newOrg != curOrg {
 		if !rs.authorize(w, r, rbac.ContentTypeOrganization, newOrg, actAdmin) {
 			return
 		}
@@ -227,15 +194,7 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 		sched.ExtraVars = json.RawMessage("{}")
 	}
 
-	query := `
-		UPDATE schedules
-		SET name=:name, description=:description, rrule=:rrule, next_run=:next_run,
-		    enabled=:enabled, extra_vars=:extra_vars, modified_at=:modified_at,
-		    unified_job_template_id=:unified_job_template_id,
-		    workflow_template_id=:workflow_template_id
-		WHERE id = :id`
-
-	if _, err := rs.DB.NamedExecContext(r.Context(), query, sched); err != nil {
+	if err := rs.store.Update(r.Context(), sched); err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
@@ -245,7 +204,7 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 
 func (rs *SchedulesResource) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	org, ok := rs.scheduleOrg(r.Context(), id)
+	org, ok := rs.store.ScheduleOrg(r.Context(), id)
 	if !ok {
 		render.Render(w, r, ErrNotFound)
 		return
@@ -253,8 +212,7 @@ func (rs *SchedulesResource) DeleteSchedule(w http.ResponseWriter, r *http.Reque
 	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
 		return
 	}
-	_, err := rs.DB.ExecContext(r.Context(), "DELETE FROM schedules WHERE id = $1", id)
-	if err != nil {
+	if err := rs.store.Delete(r.Context(), id); err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
