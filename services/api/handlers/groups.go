@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -13,22 +14,36 @@ import (
 	"github.com/praetordev/praetor/services/api/store"
 )
 
+// GroupStore is the groups-domain data access the handler depends on.
+type GroupStore interface {
+	InventoryIDForGroup(ctx context.Context, groupID int64) (int64, error)
+	ListByInventory(ctx context.Context, inventoryID int64) ([]models.Group, error)
+	Get(ctx context.Context, id int64) (models.Group, error)
+	Create(ctx context.Context, input models.Group) (models.Group, error)
+	Update(ctx context.Context, id int64, input models.Group) (models.Group, error)
+	Delete(ctx context.Context, id int64) error
+	AddHost(ctx context.Context, groupID, hostID int64) error
+	RemoveHost(ctx context.Context, groupID, hostID int64) error
+	HostsInGroup(ctx context.Context, groupID int64) ([]models.Host, error)
+}
+
 // GroupsResource handles group operations within inventories
 type GroupsResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	store GroupStore
 }
 
 // NewGroupsResource creates a new groups resource handler
 func NewGroupsResource(db *sqlx.DB) *GroupsResource {
-	return &GroupsResource{DB: db, Authorizer: NewAuthorizer(db)}
+	return &GroupsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewGroupStore(db)}
 }
 
 // authorizeGroup enforces access on a group via its parent inventory's roles
 // (groups have no object-roles of their own).
 func (rs *GroupsResource) authorizeGroup(w http.ResponseWriter, r *http.Request, groupID int64, action permAction) bool {
-	var invID int64
-	if err := rs.DB.GetContext(r.Context(), &invID, `SELECT inventory_id FROM groups WHERE id = $1`, groupID); err != nil {
+	invID, err := rs.store.InventoryIDForGroup(r.Context(), groupID)
+	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return false
 	}
@@ -68,16 +83,10 @@ func (rs *GroupsResource) ListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var groups []models.Group
-	query := `SELECT ` + store.GroupCols + ` FROM groups WHERE inventory_id = $1 ORDER BY name`
-	err = rs.DB.SelectContext(r.Context(), &groups, query, inventoryId)
+	groups, err := rs.store.ListByInventory(r.Context(), inventoryId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if groups == nil {
-		groups = []models.Group{}
 	}
 
 	render.JSON(w, r, groups)
@@ -113,16 +122,7 @@ func (rs *GroupsResource) CreateGroup(w http.ResponseWriter, r *http.Request) {
 		input.Variables = json.RawMessage("{}")
 	}
 
-	query := `
-		INSERT INTO groups (inventory_id, name, description, variables) 
-		VALUES ($1, $2, $3, $4) 
-		RETURNING ` + store.GroupCols
-
-	var created models.Group
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		input.InventoryID, input.Name, input.Description, input.Variables,
-	).StructScan(&created)
-
+	created, err := rs.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -144,9 +144,7 @@ func (rs *GroupsResource) GetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var group models.Group
-	query := `SELECT ` + store.GroupCols + ` FROM groups WHERE id = $1`
-	err = rs.DB.GetContext(r.Context(), &group, query, groupId)
+	group, err := rs.store.Get(r.Context(), groupId)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return
@@ -174,17 +172,7 @@ func (rs *GroupsResource) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `
-		UPDATE groups
-		SET name = $2, description = $3, variables = $4, modified_at = now()
-		WHERE id = $1 
-		RETURNING ` + store.GroupCols
-
-	var updated models.Group
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		groupId, input.Name, input.Description, input.Variables,
-	).StructScan(&updated)
-
+	updated, err := rs.store.Update(r.Context(), groupId, input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -206,9 +194,7 @@ func (rs *GroupsResource) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `DELETE FROM groups WHERE id = $1`
-	_, err = rs.DB.ExecContext(r.Context(), query, groupId)
-	if err != nil {
+	if err := rs.store.Delete(r.Context(), groupId); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -237,9 +223,7 @@ func (rs *GroupsResource) AddHostToGroup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	query := `INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
-	_, err = rs.DB.ExecContext(r.Context(), query, input.HostID, groupId)
-	if err != nil {
+	if err := rs.store.AddHost(r.Context(), groupId, input.HostID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -267,9 +251,7 @@ func (rs *GroupsResource) RemoveHostFromGroup(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	query := `DELETE FROM host_groups WHERE host_id = $1 AND group_id = $2`
-	_, err = rs.DB.ExecContext(r.Context(), query, hostId, groupId)
-	if err != nil {
+	if err := rs.store.RemoveHost(r.Context(), groupId, hostId); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -290,20 +272,10 @@ func (rs *GroupsResource) ListGroupHosts(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var hosts []models.Host
-	query := `
-		SELECT h.* FROM hosts h
-		JOIN host_groups hg ON h.id = hg.host_id
-		WHERE hg.group_id = $1
-		ORDER BY h.name`
-	err = rs.DB.SelectContext(r.Context(), &hosts, query, groupId)
+	hosts, err := rs.store.HostsInGroup(r.Context(), groupId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if hosts == nil {
-		hosts = []models.Host{}
 	}
 
 	render.JSON(w, r, hosts)
