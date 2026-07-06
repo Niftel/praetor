@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -14,23 +15,38 @@ import (
 	"github.com/praetordev/praetor/services/api/store"
 )
 
+// HostStore is the hosts-domain data access the handler depends on.
+type HostStore interface {
+	InventoryIDForHost(ctx context.Context, hostID int64) (int64, error)
+	Facts(ctx context.Context, hostID int64) json.RawMessage
+	ListByInventory(ctx context.Context, inventoryID int64) ([]models.Host, error)
+	Get(ctx context.Context, id int64) (models.Host, error)
+	Create(ctx context.Context, input models.Host) (models.Host, error)
+	Update(ctx context.Context, id int64, host models.Host) (models.Host, error)
+	Delete(ctx context.Context, id int64) error
+	GroupsForHost(ctx context.Context, hostID int64) ([]models.Group, error)
+	SetRunner(ctx context.Context, hostID int64) (models.Host, error)
+	RunnerHeartbeat(ctx context.Context, hostID int64) error
+}
+
 // HostsResource handles host operations within inventories
 type HostsResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	store HostStore
 }
 
 // NewHostsResource creates a new hosts resource handler
 func NewHostsResource(db *sqlx.DB) *HostsResource {
-	return &HostsResource{DB: db, Authorizer: NewAuthorizer(db)}
+	return &HostsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewHostStore(db)}
 }
 
 // authorizeHost enforces access on a host via its parent inventory's roles
 // (hosts have no object-roles of their own). Returns false (and writes the
 // response) when denied or the host does not exist.
 func (rs *HostsResource) authorizeHost(w http.ResponseWriter, r *http.Request, hostID int64, action permAction) bool {
-	var invID int64
-	if err := rs.DB.GetContext(r.Context(), &invID, `SELECT inventory_id FROM hosts WHERE id = $1`, hostID); err != nil {
+	invID, err := rs.store.InventoryIDForHost(r.Context(), hostID)
+	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return false
 	}
@@ -68,11 +84,7 @@ func (rs *HostsResource) GetHostFacts(w http.ResponseWriter, r *http.Request) {
 	if !rs.authorizeHost(w, r, hostId, actRead) {
 		return
 	}
-	var facts json.RawMessage
-	if err := rs.DB.Get(&facts, `SELECT facts FROM host_facts WHERE host_id = $1`, hostId); err != nil {
-		facts = json.RawMessage("{}")
-	}
-	render.JSON(w, r, facts)
+	render.JSON(w, r, rs.store.Facts(r.Context(), hostId))
 }
 
 // ListHosts GET /api/v1/inventories/{inventoryId}/hosts
@@ -88,16 +100,10 @@ func (rs *HostsResource) ListHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var hosts []models.Host
-	query := `SELECT ` + store.HostCols + ` FROM hosts WHERE inventory_id = $1 ORDER BY name`
-	err = rs.DB.SelectContext(r.Context(), &hosts, query, inventoryId)
+	hosts, err := rs.store.ListByInventory(r.Context(), inventoryId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if hosts == nil {
-		hosts = []models.Host{}
 	}
 
 	render.JSON(w, r, hosts)
@@ -134,17 +140,7 @@ func (rs *HostsResource) CreateHost(w http.ResponseWriter, r *http.Request) {
 		input.Variables = json.RawMessage("{}")
 	}
 
-	query := `
-		INSERT INTO hosts (inventory_id, name, description, variables, enabled, is_control_node) 
-		VALUES ($1, $2, $3, $4, $5, $6) 
-		RETURNING ` + store.HostCols
-
-	var created models.Host
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		input.InventoryID, input.Name, input.Description,
-		input.Variables, true, input.IsControlNode,
-	).StructScan(&created)
-
+	created, err := rs.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -166,9 +162,7 @@ func (rs *HostsResource) GetHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var host models.Host
-	query := `SELECT `+store.HostCols+` FROM hosts WHERE id = $1`
-	err = rs.DB.GetContext(r.Context(), &host, query, hostId)
+	host, err := rs.store.Get(r.Context(), hostId)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return
@@ -192,9 +186,7 @@ func (rs *HostsResource) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch existing host
-	var host models.Host
-	query := `SELECT `+store.HostCols+` FROM hosts WHERE id = $1`
-	err = rs.DB.GetContext(r.Context(), &host, query, hostId)
+	host, err := rs.store.Get(r.Context(), hostId)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return
@@ -206,17 +198,7 @@ func (rs *HostsResource) UpdateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query = `
-		UPDATE hosts 
-		SET name = $2, description = $3, variables = $4, enabled = $5, is_control_node = $6, modified_at = now()
-		WHERE id = $1 
-		RETURNING ` + store.HostCols
-
-	var updated models.Host
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		hostId, host.Name, host.Description, host.Variables, host.Enabled, host.IsControlNode,
-	).StructScan(&updated)
-
+	updated, err := rs.store.Update(r.Context(), hostId, host)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -238,9 +220,7 @@ func (rs *HostsResource) DeleteHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `DELETE FROM hosts WHERE id = $1`
-	_, err = rs.DB.ExecContext(r.Context(), query, hostId)
-	if err != nil {
+	if err := rs.store.Delete(r.Context(), hostId); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -261,20 +241,10 @@ func (rs *HostsResource) GetHostGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var groups []models.Group
-	query := `
-		SELECT g.* FROM groups g
-		JOIN host_groups hg ON g.id = hg.group_id
-		WHERE hg.host_id = $1
-		ORDER BY g.name`
-	err = rs.DB.SelectContext(r.Context(), &groups, query, hostId)
+	groups, err := rs.store.GroupsForHost(r.Context(), hostId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if groups == nil {
-		groups = []models.Group{}
 	}
 
 	render.JSON(w, r, groups)
@@ -293,31 +263,7 @@ func (rs *HostsResource) SetRunnerHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the host's inventory_id
-	var inventoryId int64
-	err = rs.DB.GetContext(r.Context(), &inventoryId, `SELECT inventory_id FROM hosts WHERE id = $1`, hostId)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
-	// Clear previous runner host in this inventory
-	_, err = rs.DB.ExecContext(r.Context(), `UPDATE hosts SET is_runner_host = FALSE WHERE inventory_id = $1`, inventoryId)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
-	// Set this host as runner
-	_, err = rs.DB.ExecContext(r.Context(), `UPDATE hosts SET is_runner_host = TRUE WHERE id = $1`, hostId)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
-	// Return the updated host
-	var host models.Host
-	err = rs.DB.GetContext(r.Context(), &host, `SELECT `+store.HostCols+` FROM hosts WHERE id = $1`, hostId)
+	host, err := rs.store.SetRunner(r.Context(), hostId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -336,12 +282,7 @@ func (rs *HostsResource) RunnerHeartbeat(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Update runner health status
-	_, err = rs.DB.ExecContext(r.Context(), `
-		UPDATE hosts 
-		SET runner_last_seen = NOW(), runner_healthy = TRUE 
-		WHERE id = $1 AND is_runner_host = TRUE
-	`, hostId)
-	if err != nil {
+	if err := rs.store.RunnerHeartbeat(r.Context(), hostId); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
