@@ -21,20 +21,13 @@ type userInput struct {
 func (h *ContentHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
 
-	var users []models.User
-	query := `SELECT id, username, first_name, last_name, email, is_superuser, is_active, created_at, modified_at FROM users ORDER BY id LIMIT $1 OFFSET $2`
-	err := h.DB.Select(&users, query, pg.Limit, pg.Offset)
+	users, err := h.users.List(r.Context(), pg.Limit, pg.Offset)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	var total int64
-	_ = h.DB.Get(&total, "SELECT count(*) FROM users")
-
-	if users == nil {
-		users = []models.User{}
-	}
+	total, _ := h.users.Count(r.Context())
 
 	render.JSON(w, r, &render.PaginatedResponse{
 		Items:  users,
@@ -68,35 +61,18 @@ func (h *ContentHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	input.PasswordHash = string(hash)
 
-	query := `
-		INSERT INTO users (username, password_hash, email, first_name, last_name, is_superuser)
-		VALUES (:username, :password_hash, :email, :first_name, :last_name, :is_superuser)
-		RETURNING id, username, email, first_name, last_name, is_superuser, is_active, created_at, modified_at`
-
-	rows, err := h.DB.NamedQuery(query, input.User)
+	created, err := h.users.Create(r.Context(), input.User)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var created models.User
-		if err := rows.StructScan(&created); err != nil {
-			render.ErrInternal(err).Render(w, r)
-			return
-		}
-		render.Created(w, r, created)
-	} else {
-		render.ErrInternal(nil).Render(w, r)
-	}
+	render.Created(w, r, created)
 }
 
 // GetUser GET /api/v1/users/{id}
 func (h *ContentHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
-	var user models.User
-	err := h.DB.Get(&user, "SELECT id, username, first_name, last_name, email, is_superuser, is_active, created_at, modified_at FROM users WHERE id = $1", id)
+	user, err := h.users.Get(r.Context(), id)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -132,33 +108,16 @@ func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		input.PasswordHash = string(hash)
 	}
 
-	query := `
-		UPDATE users
-		SET email=:email, first_name=:first_name, last_name=:last_name, is_superuser=:is_superuser, is_active=:is_active, modified_at=NOW()`
-	if setPassword {
-		query += `, password_hash=:password_hash`
-	}
-	query += `
-		WHERE id=:id
-		RETURNING id, username, email, first_name, last_name, is_superuser, is_active, created_at, modified_at`
-
-	rows, err := h.DB.NamedQuery(query, input.User)
+	updated, err := h.users.Update(r.Context(), input.User, setPassword)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var updated models.User
-		if err := rows.StructScan(&updated); err != nil {
-			render.ErrInternal(err).Render(w, r)
-			return
-		}
-		render.JSON(w, r, updated)
-	} else {
+	if updated.ID == 0 {
 		render.Render(w, r, render.ErrNotFound(nil))
+		return
 	}
+	render.JSON(w, r, updated)
 }
 
 // DeleteUser DELETE /api/v1/users/{id}
@@ -169,12 +128,11 @@ func (h *ContentHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := render.GetIDParam(r)
-	res, err := h.DB.Exec("DELETE FROM users WHERE id = $1", id)
+	count, err := h.users.Delete(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	count, _ := res.RowsAffected()
 	if count == 0 {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -187,22 +145,10 @@ func (h *ContentHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 func (h *ContentHandler) ListUserOrganizations(w http.ResponseWriter, r *http.Request) {
 	userID := render.GetIDParam(r)
 
-	var orgs []models.Organization
-	err := h.DB.Select(&orgs, `
-		SELECT DISTINCT o.id, o.name, o.description, o.created_at, o.modified_at
-		FROM organizations o
-		JOIN roles r ON r.content_type = 'organization' AND r.object_id = o.id
-		JOIN role_members rm ON rm.role_id = r.id
-		WHERE rm.user_id = $1
-		ORDER BY o.id
-	`, userID)
+	orgs, err := h.users.Organizations(r.Context(), userID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if orgs == nil {
-		orgs = []models.Organization{}
 	}
 	render.JSON(w, r, orgs)
 }
@@ -212,27 +158,10 @@ func (h *ContentHandler) ListUserOrganizations(w http.ResponseWriter, r *http.Re
 func (h *ContentHandler) ListUserTeams(w http.ResponseWriter, r *http.Request) {
 	userID := render.GetIDParam(r)
 
-	var teams []models.Team
-	err := h.DB.Select(&teams, `
-		SELECT DISTINCT t.id, t.organization_id, t.name, t.description, t.created_at, t.modified_at
-		FROM teams t
-		JOIN roles r ON r.content_type = 'team' AND r.object_id = t.id
-		JOIN role_members rm ON rm.role_id = r.id
-		WHERE rm.user_id = $1
-		UNION
-		SELECT DISTINCT t.id, t.organization_id, t.name, t.description, t.created_at, t.modified_at
-		FROM teams t
-		JOIN team_members tm ON tm.team_id = t.id
-		WHERE tm.user_id = $1
-		ORDER BY id
-	`, userID)
+	teams, err := h.users.Teams(r.Context(), userID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
-	}
-
-	if teams == nil {
-		teams = []models.Team{}
 	}
 	render.JSON(w, r, teams)
 }

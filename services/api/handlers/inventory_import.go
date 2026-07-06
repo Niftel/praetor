@@ -9,10 +9,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -71,20 +69,13 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 	hostIDs := make(map[string]int64)
 	for _, hostname := range hosts {
 		// Check if host already exists
-		var existingHost models.Host
-		err := rs.DB.GetContext(r.Context(), &existingHost,
-			`SELECT `+store.HostCols+` FROM hosts WHERE inventory_id = $1 AND name = $2`, inventoryId, hostname)
-		if err == nil {
+		if existingHost, err := rs.store.HostByName(r.Context(), inventoryId, hostname); err == nil {
 			hostIDs[hostname] = existingHost.ID
 			continue
 		}
 
 		// Create new host
-		var createdHost models.Host
-		err = rs.DB.QueryRowxContext(r.Context(),
-			`INSERT INTO hosts (inventory_id, name, enabled) VALUES ($1, $2, true) RETURNING `+store.HostCols,
-			inventoryId, hostname,
-		).StructScan(&createdHost)
+		createdHost, err := rs.store.CreateImportHost(r.Context(), inventoryId, hostname)
 		if err != nil {
 			response.Errors = append(response.Errors, "Failed to create host: "+hostname)
 			continue
@@ -96,20 +87,12 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 	// Create groups and assign hosts
 	for groupName, groupHosts := range groups {
 		// Check if group already exists
-		var existingGroup models.Group
-		err := rs.DB.GetContext(r.Context(), &existingGroup,
-			`SELECT `+store.GroupCols+` FROM groups WHERE inventory_id = $1 AND name = $2`, inventoryId, groupName)
-
 		var groupID int64
-		if err == nil {
+		if existingGroup, err := rs.store.GroupByName(r.Context(), inventoryId, groupName); err == nil {
 			groupID = existingGroup.ID
 		} else {
 			// Create new group
-			var createdGroup models.Group
-			err = rs.DB.QueryRowxContext(r.Context(),
-				`INSERT INTO groups (inventory_id, name) VALUES ($1, $2) RETURNING `+store.GroupCols,
-				inventoryId, groupName,
-			).StructScan(&createdGroup)
+			createdGroup, err := rs.store.CreateImportGroup(r.Context(), inventoryId, groupName)
 			if err != nil {
 				response.Errors = append(response.Errors, "Failed to create group: "+groupName)
 				continue
@@ -124,9 +107,7 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 			if !ok {
 				continue
 			}
-			rs.DB.ExecContext(r.Context(),
-				`INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-				hostID, groupID)
+			_ = rs.store.LinkHostGroup(r.Context(), hostID, groupID)
 		}
 	}
 

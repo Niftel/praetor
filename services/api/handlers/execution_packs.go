@@ -1,16 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/packspec"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 // validatePackSpec rejects a malformed or unsafe inline pack spec before it's
@@ -32,27 +33,26 @@ func validatePackSpec(spec *string) error {
 // self-contained Python+Ansible runtimes Praetor pushes onto hosts. Packs are
 // built from a YAML spec via `make execpack`; this registry lets templates pick
 // which pack a job runs in.
-type ExecutionPacksResource struct{ DB *sqlx.DB }
+// ExecutionPackStore is the execution-packs data access the handler depends on.
+type ExecutionPackStore interface {
+	List(ctx context.Context) ([]store.ExecutionPack, error)
+	Create(ctx context.Context, in store.ExecutionPack, status string) (store.ExecutionPack, error)
+	Update(ctx context.Context, id int64, in store.ExecutionPack, status string) (store.ExecutionPack, error)
+	Rebuild(ctx context.Context, id int64) (int64, error)
+	Delete(ctx context.Context, id int64) error
+}
+
+type ExecutionPacksResource struct {
+	DB    *sqlx.DB
+	store ExecutionPackStore
+}
 
 func NewExecutionPacksResource(db *sqlx.DB) *ExecutionPacksResource {
-	return &ExecutionPacksResource{DB: db}
+	return &ExecutionPacksResource{DB: db, store: store.NewExecutionPackStore(db)}
 }
 
-type executionPack struct {
-	ID          int64     `json:"id" db:"id"`
-	Name        string    `json:"name" db:"name"`
-	Description *string   `json:"description,omitempty" db:"description"`
-	Spec        *string   `json:"spec,omitempty" db:"spec"`
-	Status      string    `json:"status" db:"status"`
-	BuildLog    *string   `json:"build_log,omitempty" db:"build_log"`
-	// Git source: when set, the packbuilder pulls the spec from the repo and a push
-	// webhook rebuilds it. WebhookKey is write-only (accepted, never returned).
-	SCMURL     *string `json:"scm_url,omitempty" db:"scm_url"`
-	SCMBranch  *string `json:"scm_branch,omitempty" db:"scm_branch"`
-	SpecPath   *string `json:"spec_path,omitempty" db:"spec_path"`
-	WebhookKey *string `json:"webhook_key,omitempty" db:"webhook_key"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at"`
-}
+// executionPack aliases the store DTO so existing handler code reads unchanged.
+type executionPack = store.ExecutionPack
 
 func (rs *ExecutionPacksResource) Routes() chi.Router {
 	r := chi.NewRouter()
@@ -65,9 +65,8 @@ func (rs *ExecutionPacksResource) Routes() chi.Router {
 }
 
 func (rs *ExecutionPacksResource) List(w http.ResponseWriter, r *http.Request) {
-	packs := []executionPack{}
-	if err := rs.DB.SelectContext(r.Context(), &packs,
-		`SELECT id, name, description, spec, status, build_log, scm_url, scm_branch, spec_path, created_at FROM execution_packs ORDER BY name`); err != nil {
+	packs, err := rs.store.List(r.Context())
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -94,12 +93,8 @@ func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request)
 	if hasGit || (in.Spec != nil && strings.TrimSpace(*in.Spec) != "") {
 		status = "pending"
 	}
-	var created executionPack
-	if err := rs.DB.QueryRowxContext(r.Context(),
-		`INSERT INTO execution_packs (name, description, spec, status, scm_url, scm_branch, spec_path, webhook_key)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		 RETURNING id, name, description, spec, status, build_log, scm_url, scm_branch, spec_path, created_at`,
-		in.Name, in.Description, in.Spec, status, in.SCMURL, in.SCMBranch, in.SpecPath, in.WebhookKey).StructScan(&created); err != nil {
+	created, err := rs.store.Create(r.Context(), in, status)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -133,16 +128,8 @@ func (rs *ExecutionPacksResource) Update(w http.ResponseWriter, r *http.Request)
 	if hasGit || (in.Spec != nil && strings.TrimSpace(*in.Spec) != "") {
 		status = "pending"
 	}
-	var updated executionPack
-	if err := rs.DB.QueryRowxContext(r.Context(),
-		`UPDATE execution_packs SET
-		   name=$2, description=$3, spec=$4, scm_url=$5, scm_branch=$6, spec_path=$7,
-		   webhook_key=COALESCE(NULLIF($8,''), webhook_key),
-		   status=$9, build_log=NULL
-		 WHERE id=$1
-		 RETURNING id, name, description, spec, status, build_log, scm_url, scm_branch, spec_path, created_at`,
-		id, in.Name, in.Description, in.Spec, in.SCMURL, in.SCMBranch, in.SpecPath, in.WebhookKey, status,
-	).StructScan(&updated); err != nil {
+	updated, err := rs.store.Update(r.Context(), id, in, status)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -160,14 +147,12 @@ func (rs *ExecutionPacksResource) Rebuild(w http.ResponseWriter, r *http.Request
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	res, err := rs.DB.ExecContext(r.Context(),
-		`UPDATE execution_packs SET status='pending', build_log=NULL
-		 WHERE id=$1 AND (spec IS NOT NULL OR scm_url IS NOT NULL)`, id)
+	n, err := rs.store.Rebuild(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n == 0 {
 		render.ErrInvalidRequest(nil).Render(w, r) // nothing buildable (no spec/git source)
 		return
 	}
@@ -184,7 +169,7 @@ func (rs *ExecutionPacksResource) Delete(w http.ResponseWriter, r *http.Request)
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	if _, err := rs.DB.ExecContext(r.Context(), `DELETE FROM execution_packs WHERE id = $1`, id); err != nil {
+	if err := rs.store.Delete(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

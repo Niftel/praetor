@@ -24,6 +24,18 @@ type InventoryStore interface {
 	UpdateContent(ctx context.Context, id int64, input models.Inventory) (models.Inventory, error)
 	UpdateKind(ctx context.Context, id int64, input models.Inventory) (models.Inventory, error)
 	Delete(ctx context.Context, id int64) error
+	// inventory sources
+	ListSources(ctx context.Context, inventoryID int64) ([]store.InventorySource, error)
+	CreateSource(ctx context.Context, inventoryID int64, name, kind, source string, credentialID *int64, updateOnLaunch bool) (int64, error)
+	DeleteSource(ctx context.Context, sourceID, inventoryID int64) error
+	SourceName(ctx context.Context, sourceID, inventoryID int64) (string, error)
+	EnqueueSourceSync(ctx context.Context, jobName string, jobArgs []byte) (int64, error)
+	// inventory import
+	HostByName(ctx context.Context, inventoryID int64, name string) (models.Host, error)
+	CreateImportHost(ctx context.Context, inventoryID int64, name string) (models.Host, error)
+	GroupByName(ctx context.Context, inventoryID int64, name string) (models.Group, error)
+	CreateImportGroup(ctx context.Context, inventoryID int64, name string) (models.Group, error)
+	LinkHostGroup(ctx context.Context, hostID, groupID int64) error
 }
 
 // InventoriesResource handles inventory operations

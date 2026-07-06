@@ -42,6 +42,18 @@ type AccessStore interface {
 	ActivityStream(ctx context.Context, resourceType, action string, limit int) ([]store.ActivityEntry, error)
 }
 
+// UserStore is the users-domain data access the content handler depends on.
+type UserStore interface {
+	List(ctx context.Context, limit, offset int) ([]models.User, error)
+	Count(ctx context.Context) (int64, error)
+	Get(ctx context.Context, id int64) (models.User, error)
+	Create(ctx context.Context, u models.User) (models.User, error)
+	Update(ctx context.Context, u models.User, setPassword bool) (models.User, error)
+	Delete(ctx context.Context, id int64) (int64, error)
+	Organizations(ctx context.Context, userID int64) ([]models.Organization, error)
+	Teams(ctx context.Context, userID int64) ([]models.Team, error)
+}
+
 // ProjectStore is the projects-domain data access the content handler depends on.
 type ProjectStore interface {
 	ListAll(ctx context.Context, limit, offset int) ([]models.Project, error)
@@ -84,6 +96,7 @@ type ContentHandler struct {
 	roles    RoleStore
 	teams    TeamStore
 	access   AccessStore
+	users    UserStore
 }
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
@@ -95,6 +108,7 @@ func NewContentHandler(db *sqlx.DB) *ContentHandler {
 		roles:      store.NewRoleStore(db),
 		teams:      store.NewTeamStore(db),
 		access:     store.NewAccessStore(db),
+		users:      store.NewUserStore(db),
 	}
 }
 
