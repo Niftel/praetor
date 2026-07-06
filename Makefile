@@ -1,4 +1,4 @@
-.PHONY: build host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api run-scheduler run-ingestion migrate-up migrate-down
+.PHONY: build host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api run-scheduler run-ingestion up up-demo down restart
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -69,13 +69,12 @@ clean:
 
 # Database
 DB_URL ?= postgres://postgres:postgres@localhost:5432/praetor?sslmode=disable
-MIGRATE ?= migrate
 
-migrate-up:
-	$(MIGRATE) -path db/migrations -database "$(DB_URL)" up
-
-migrate-down:
-	$(MIGRATE) -path db/migrations -database "$(DB_URL)" down
+# Migrations run via the `migrator` service (cmd/migrator), a build dependency of
+# every service in docker-compose. There is deliberately no golang-migrate CLI
+# target: the numbered schema reuses some version prefixes (two 000008_*, two
+# 000009_*), which cmd/migrator tolerates (it keys schema_migrations by filename)
+# but the golang-migrate CLI rejects.
 
 # Runners (Use separate terminals)
 run-api:
@@ -105,8 +104,15 @@ gen-keys:
 	@chmod 644 $(SSH_KEY).pub
 
 up: gen-keys
-	@echo "Starting full stack with Docker Compose..."
+	@echo "Starting the control plane (lean: no demo targets / metrics / docs)..."
 	docker compose up --build -d
+
+# Full local demo: control plane + demo SSH targets (web1/web2/db1/target-host),
+# metrics (prometheus/grafana), and the docs site. Opt-in via compose profiles so
+# a plain `make up` stays lean.
+up-demo: gen-keys
+	@echo "Starting full demo stack (control plane + demo targets + observability + docs)..."
+	docker compose --profile demo --profile observability --profile docs up --build -d
 
 down:
 	@echo "Stopping Docker Compose stack..."

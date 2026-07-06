@@ -224,6 +224,7 @@ services:
   # + sudo — Ansible/httpd travel in the pushed pack / playbook, NOT pre-installed
   # here (that's the whole point of Praetor).
   web1:
+    profiles: ["demo"]
     image: &target_image rockylinux:9
     hostname: web1
     command: &target_cmd >
@@ -236,6 +237,7 @@ services:
       - "${PRAETOR_WEB1_PORT:-8081}:80"
 
   web2:
+    profiles: ["demo"]
     image: *target_image
     hostname: web2
     command: *target_cmd
@@ -247,6 +249,7 @@ services:
       - "8082:80"
 
   db1:
+    profiles: ["demo"]
     image: *target_image
     hostname: db1
     command: *target_cmd
@@ -257,6 +260,7 @@ services:
 
   # Keep backward compatibility
   target-host:
+    profiles: ["demo"]
     image: *target_image
     hostname: target-host
     command: *target_cmd
@@ -398,6 +402,7 @@ services:
   # Documentation site (Docusaurus, built to static HTML + nginx). Reachable at
   # https://docs.localhost via Traefik, or http://localhost:3006.
   docs:
+    profiles: ["docs"]
     build:
       context: ./docs-site
       dockerfile: Dockerfile
@@ -419,6 +424,7 @@ services:
   # service name); Grafana renders them with a pre-provisioned datasource +
   # starter dashboard. Both are dev conveniences reachable on published ports.
   prometheus:
+    profiles: ["observability"]
     image: prom/prometheus:v3.1.0
     volumes:
       - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -430,6 +436,7 @@ services:
     restart: unless-stopped
 
   grafana:
+    profiles: ["observability"]
     image: grafana/grafana:11.5.0
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:-admin}"
