@@ -72,9 +72,16 @@ func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
 		newlyInserted = true
 	}
 
-	// 2. Update execution_run state
-	if err := w.updateRunState(ctx, tx, evt); err != nil {
-		return fmt.Errorf("update run state failed: %w", err)
+	// 2. Update execution_run state — only for a newly-projected event. A
+	// redelivered event is deduped at the INSERT above (ON CONFLICT DO NOTHING);
+	// its state transition was already applied on first delivery. Re-running it
+	// here would let a duplicate JOB_STARTED regress a reconciler-set 'lost'/'error'
+	// run back to 'running' (those states are intentionally non-terminal so a real
+	// recovering terminal event can win — but a stale duplicate must not).
+	if newlyInserted {
+		if err := w.updateRunState(ctx, tx, evt); err != nil {
+			return fmt.Errorf("update run state failed: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

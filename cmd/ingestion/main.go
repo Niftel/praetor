@@ -58,6 +58,14 @@ func main() {
 
 	r.Handle("/metrics", metrics.Handler())
 
+	// Liveness probe for the container healthcheck (compose depends_on:
+	// service_healthy). Intentionally cheap — it does not touch Postgres or NATS,
+	// so it reports process liveness, not downstream readiness.
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
 	r.Post("/api/v1/runs/{run_id}/events", h.Ingest)
 	r.Post("/api/v1/runs/{run_id}/logs", h.IngestLog)
 	r.Get("/api/v1/runs/{run_id}/logs", h.StreamLog)

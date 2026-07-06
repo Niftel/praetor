@@ -199,7 +199,14 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	// Install the daemon from the pack to the stable path the launch command and
 	// resume unit use — the pack is the source of the binary, not a separate push.
 	hrSrc := fmt.Sprintf("/opt/praetor/packs/%s/bin/praetor-host-runner", pack)
-	if out, err := runSSH(client, fmt.Sprintf("%scp %s /usr/local/bin/praetor-host-runner && %schmod 0755 /usr/local/bin/praetor-host-runner", sudo, hrSrc, sudo)); err != nil {
+	// Install atomically: copy to a temp path, chmod, then rename into place. A
+	// plain `cp` truncates the destination in place, which fails with ETXTBSY if
+	// another job's daemon is currently executing that inode; `mv` within the same
+	// directory is a rename that swaps the directory entry without touching the
+	// running process's inode.
+	hrDst := "/usr/local/bin/praetor-host-runner"
+	hrTmp := "/usr/local/bin/.praetor-host-runner.new"
+	if out, err := runSSH(client, fmt.Sprintf("%scp %s %s && %schmod 0755 %s && %smv -f %s %s", sudo, hrSrc, hrTmp, sudo, hrTmp, sudo, hrTmp, hrDst)); err != nil {
 		return fmt.Errorf("install host-runner from pack %q: %w: %s", pack, err, out)
 	}
 
