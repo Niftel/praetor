@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -14,13 +15,25 @@ import (
 	"github.com/praetordev/praetor/services/api/store"
 )
 
+// CredentialStore is the credentials-domain data access the handler depends on.
+type CredentialStore interface {
+	ListAll(ctx context.Context) ([]models.Credential, error)
+	ListByIDs(ctx context.Context, ids []int64) ([]models.Credential, error)
+	Get(ctx context.Context, id int64) (models.Credential, error)
+	Create(ctx context.Context, input models.Credential) (models.Credential, error)
+	Update(ctx context.Context, id int64, input models.Credential) (models.Credential, error)
+	Delete(ctx context.Context, id int64) error
+	CredentialTypeInputs(ctx context.Context, typeID int64) (json.RawMessage, error)
+}
+
 type CredentialsResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	store CredentialStore
 }
 
 func NewCredentialsResource(db *sqlx.DB) *CredentialsResource {
-	return &CredentialsResource{DB: db, Authorizer: NewAuthorizer(db)}
+	return &CredentialsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewCredentialStore(db)}
 }
 
 func (rs *CredentialsResource) Routes() chi.Router {
@@ -38,7 +51,8 @@ func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Re
 
 	var creds []models.Credential
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &creds, "SELECT "+store.CredentialCols+" FROM credentials ORDER BY id ASC"); err != nil {
+		var err error
+		if creds, err = rs.store.ListAll(r.Context()); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -48,13 +62,9 @@ func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Re
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		if len(ids) > 0 {
-			q, args, _ := sqlx.In("SELECT "+store.CredentialCols+" FROM credentials WHERE id IN (?) ORDER BY id ASC", ids)
-			q = rs.DB.Rebind(q)
-			if err := rs.DB.SelectContext(r.Context(), &creds, q, args...); err != nil {
-				render.ErrInternal(err).Render(w, r)
-				return
-			}
+		if creds, err = rs.store.ListByIDs(r.Context(), ids); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
 		}
 	}
 
@@ -68,7 +78,7 @@ func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Re
 	// But UI expects masked. Let's iterate and mask.
 
 	for i := range creds {
-		rs.maskCredentialSecrets(&creds[i])
+		rs.maskCredentialSecrets(r.Context(), &creds[i])
 	}
 
 	render.JSON(w, r, creds)
@@ -86,14 +96,13 @@ func (rs *CredentialsResource) GetCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var cred models.Credential
-	err = rs.DB.GetContext(r.Context(), &cred, "SELECT "+store.CredentialCols+" FROM credentials WHERE id = $1", id)
+	cred, err := rs.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(err).Render(w, r)
 		return
 	}
 
-	rs.maskCredentialSecrets(&cred)
+	rs.maskCredentialSecrets(r.Context(), &cred)
 	render.JSON(w, r, cred)
 }
 
@@ -119,28 +128,19 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := rs.processSecrets(&input, nil); err != nil {
+	if err := rs.processSecrets(r.Context(), &input, nil); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	query := `
-		INSERT INTO credentials (organization_id, credential_type_id, name, description, inputs)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING ` + store.CredentialCols
-
-	var created models.Credential
-	err := rs.DB.QueryRowxContext(r.Context(), query,
-		input.OrganizationID, input.CredentialTypeID, input.Name, input.Description, input.Inputs,
-	).StructScan(&created)
-
+	created, err := rs.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
 	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeCredential, created.ID, currentUser(r))
-	rs.maskCredentialSecrets(&created)
+	rs.maskCredentialSecrets(r.Context(), &created)
 	render.Created(w, r, created)
 }
 
@@ -156,8 +156,7 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var existing models.Credential
-	err = rs.DB.GetContext(r.Context(), &existing, "SELECT "+store.CredentialCols+" FROM credentials WHERE id = $1", id)
+	existing, err := rs.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(err).Render(w, r)
 		return
@@ -171,28 +170,18 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 	input.ID = id
 	input.CredentialTypeID = existing.CredentialTypeID // Cannot change type
 
-	if err := rs.processSecrets(&input, &existing); err != nil {
+	if err := rs.processSecrets(r.Context(), &input, &existing); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	query := `
-		UPDATE credentials 
-		SET name = $1, description = $2, inputs = $3, modified_at = NOW()
-		WHERE id = $4
-		RETURNING ` + store.CredentialCols
-
-	var updated models.Credential
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		input.Name, input.Description, input.Inputs, id,
-	).StructScan(&updated)
-
+	updated, err := rs.store.Update(r.Context(), id, input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	rs.maskCredentialSecrets(&updated)
+	rs.maskCredentialSecrets(r.Context(), &updated)
 	render.JSON(w, r, updated)
 }
 
@@ -208,8 +197,7 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	_, err = rs.DB.ExecContext(r.Context(), "DELETE FROM credentials WHERE id = $1", id)
-	if err != nil {
+	if err := rs.store.Delete(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -218,10 +206,9 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 
 // Helpers
 
-func (rs *CredentialsResource) processSecrets(input *models.Credential, existing *models.Credential) error {
+func (rs *CredentialsResource) processSecrets(ctx context.Context, input *models.Credential, existing *models.Credential) error {
 	// Fetch Type Definition
-	var ct models.CredentialType
-	err := rs.DB.Get(&ct, "SELECT "+store.CredentialTypeCols+" FROM credential_types WHERE id = $1", input.CredentialTypeID)
+	typeInputs, err := rs.store.CredentialTypeInputs(ctx, input.CredentialTypeID)
 	if err != nil {
 		return err
 	}
@@ -234,7 +221,7 @@ func (rs *CredentialsResource) processSecrets(input *models.Credential, existing
 	var schema struct {
 		Fields []SchemaField `json:"fields"`
 	}
-	if err := json.Unmarshal(ct.Inputs, &schema); err != nil {
+	if err := json.Unmarshal(typeInputs, &schema); err != nil {
 		return err
 	}
 	secrets := make(map[string]bool)
@@ -288,11 +275,10 @@ func (rs *CredentialsResource) processSecrets(input *models.Credential, existing
 	return nil
 }
 
-func (rs *CredentialsResource) maskCredentialSecrets(cred *models.Credential) {
+func (rs *CredentialsResource) maskCredentialSecrets(ctx context.Context, cred *models.Credential) {
 	// Fetch Type Definition (Optimization: Could assume all inputs are opaque or fetch cache)
 	// For correctness we fetch type.
-	var ct models.CredentialType
-	err := rs.DB.Get(&ct, "SELECT "+store.CredentialTypeCols+" FROM credential_types WHERE id = $1", cred.CredentialTypeID)
+	typeInputs, err := rs.store.CredentialTypeInputs(ctx, cred.CredentialTypeID)
 	if err != nil {
 		return // Cannot mask if can't find type
 	}
@@ -304,7 +290,7 @@ func (rs *CredentialsResource) maskCredentialSecrets(cred *models.Credential) {
 	var schema struct {
 		Fields []SchemaField `json:"fields"`
 	}
-	if err := json.Unmarshal(ct.Inputs, &schema); err != nil {
+	if err := json.Unmarshal(typeInputs, &schema); err != nil {
 		return
 	}
 
