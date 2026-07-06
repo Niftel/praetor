@@ -59,12 +59,13 @@ type TemplateStore interface {
 type TemplatesResource struct {
 	DB *sqlx.DB
 	*Authorizer
-	store TemplateStore
+	store         TemplateStore
+	notifications NotificationStore
 }
 
 // NewTemplatesResource creates a new templates resource handler
 func NewTemplatesResource(db *sqlx.DB) *TemplatesResource {
-	return &TemplatesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTemplateStore(db)}
+	return &TemplatesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTemplateStore(db), notifications: store.NewNotificationStore(db)}
 }
 
 // Routes creates a REST router for the Templates resource

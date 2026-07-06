@@ -1,17 +1,31 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
+
+// TriggerStore is the triggers-domain data access the handler depends on.
+type TriggerStore interface {
+	TriggerOrg(ctx context.Context, id int64) (int64, bool)
+	ListEventAll(ctx context.Context) ([]store.EventTrigger, error)
+	ListEventByOrgs(ctx context.Context, orgIDs []int64) ([]store.EventTrigger, error)
+	CreateEvent(ctx context.Context, in store.EventTrigger) (store.EventTrigger, error)
+	UpdateEvent(ctx context.Context, id int64, in store.EventTrigger) (store.EventTrigger, error)
+	DeleteEvent(ctx context.Context, id int64) error
+	WebhookWorkflows(ctx context.Context, all bool, orgIDs []int64) ([]store.WebhookSourceRow, error)
+	WebhookJobTemplates(ctx context.Context, all bool, orgIDs []int64) ([]store.WebhookSourceRow, error)
+	WebhookPacks(ctx context.Context) ([]store.WebhookSourceRow, error)
+}
 
 // TriggersResource manages event triggers (launch a target when a job reaches a
 // terminal state) and exposes a read-only view of inbound webhook triggers. It
@@ -19,20 +33,15 @@ import (
 type TriggersResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	store TriggerStore
 }
 
 func NewTriggersResource(db *sqlx.DB) *TriggersResource {
-	return &TriggersResource{DB: db, Authorizer: NewAuthorizer(db)}
+	return &TriggersResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTriggerStore(db)}
 }
 
-const eventTriggerCols = `id, organization_id, name, enabled, event_type, source_ujt_id, workflow_template_id, unified_job_template_id, created_at`
-
-// triggerOrg returns the organization that owns an event trigger.
-func (rs *TriggersResource) triggerOrg(r *http.Request, id int64) (int64, bool) {
-	var org int64
-	err := rs.DB.GetContext(r.Context(), &org, `SELECT organization_id FROM event_triggers WHERE id=$1`, id)
-	return org, err == nil
-}
+// eventTrigger aliases the store DTO so handler code reads unchanged.
+type eventTrigger = store.EventTrigger
 
 func (rs *TriggersResource) Routes() chi.Router {
 	r := chi.NewRouter()
@@ -44,26 +53,13 @@ func (rs *TriggersResource) Routes() chi.Router {
 	return r
 }
 
-type eventTrigger struct {
-	ID                   int64     `json:"id" db:"id"`
-	OrganizationID       int64     `json:"organization_id" db:"organization_id"`
-	Name                 string    `json:"name" db:"name"`
-	Enabled              bool      `json:"enabled" db:"enabled"`
-	EventType            string    `json:"event_type" db:"event_type"`
-	SourceUJTID          *int64    `json:"source_ujt_id,omitempty" db:"source_ujt_id"`
-	WorkflowTemplateID   *int64    `json:"workflow_template_id,omitempty" db:"workflow_template_id"`
-	UnifiedJobTemplateID *int64    `json:"unified_job_template_id,omitempty" db:"unified_job_template_id"`
-	CreatedAt            time.Time `json:"created_at" db:"created_at"`
-}
-
 var validEventTypes = map[string]bool{"job_succeeded": true, "job_failed": true, "job_finished": true}
 
 func (rs *TriggersResource) ListEvent(w http.ResponseWriter, r *http.Request) {
-	rows := []eventTrigger{}
 	uc := currentUser(r)
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &rows,
-			`SELECT `+eventTriggerCols+` FROM event_triggers ORDER BY id`); err != nil {
+		rows, err := rs.store.ListEventAll(r.Context())
+		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -75,13 +71,10 @@ func (rs *TriggersResource) ListEvent(w http.ResponseWriter, r *http.Request) {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	if len(ids) > 0 {
-		q, args, _ := sqlx.In(`SELECT `+eventTriggerCols+` FROM event_triggers WHERE organization_id IN (?) ORDER BY id`, ids)
-		q = rs.DB.Rebind(q)
-		if err := rs.DB.SelectContext(r.Context(), &rows, q, args...); err != nil {
-			render.ErrInternal(err).Render(w, r)
-			return
-		}
+	rows, err := rs.store.ListEventByOrgs(r.Context(), ids)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
 	}
 	render.JSON(w, r, rows)
 }
@@ -102,13 +95,8 @@ func (rs *TriggersResource) CreateEvent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Enabled by default (an absent JSON bool is false, which we don't want here).
-	var created eventTrigger
-	if err := rs.DB.QueryRowxContext(r.Context(),
-		`INSERT INTO event_triggers (organization_id, name, enabled, event_type, source_ujt_id, workflow_template_id, unified_job_template_id)
-		 VALUES ($1,$2,true,$3,$4,$5,$6)
-		 RETURNING id, organization_id, name, enabled, event_type, source_ujt_id, workflow_template_id, unified_job_template_id, created_at`,
-		in.OrganizationID, in.Name, in.EventType, in.SourceUJTID, in.WorkflowTemplateID, in.UnifiedJobTemplateID,
-	).StructScan(&created); err != nil {
+	created, err := rs.store.CreateEvent(r.Context(), in)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -124,7 +112,7 @@ func (rs *TriggersResource) UpdateEvent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Gate on the trigger's current organization.
-	org, ok := rs.triggerOrg(r, id)
+	org, ok := rs.store.TriggerOrg(r.Context(), id)
 	if !ok {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
@@ -141,13 +129,8 @@ func (rs *TriggersResource) UpdateEvent(w http.ResponseWriter, r *http.Request) 
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	var updated eventTrigger
-	if err := rs.DB.QueryRowxContext(r.Context(),
-		`UPDATE event_triggers SET name=$2, enabled=$3, event_type=$4, source_ujt_id=$5, workflow_template_id=$6, unified_job_template_id=$7
-		 WHERE id=$1
-		 RETURNING id, organization_id, name, enabled, event_type, source_ujt_id, workflow_template_id, unified_job_template_id, created_at`,
-		id, in.Name, in.Enabled, in.EventType, in.SourceUJTID, in.WorkflowTemplateID, in.UnifiedJobTemplateID,
-	).StructScan(&updated); err != nil {
+	updated, err := rs.store.UpdateEvent(r.Context(), id, in)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -160,7 +143,7 @@ func (rs *TriggersResource) DeleteEvent(w http.ResponseWriter, r *http.Request) 
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	org, ok := rs.triggerOrg(r, id)
+	org, ok := rs.store.TriggerOrg(r.Context(), id)
 	if !ok {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
@@ -168,7 +151,7 @@ func (rs *TriggersResource) DeleteEvent(w http.ResponseWriter, r *http.Request) 
 	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
 		return
 	}
-	if _, err := rs.DB.ExecContext(r.Context(), `DELETE FROM event_triggers WHERE id=$1`, id); err != nil {
+	if err := rs.store.DeleteEvent(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -187,11 +170,6 @@ type webhookTrigger struct {
 // enabled, with the URL to POST to — the secret is never returned.
 func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) {
 	out := []webhookTrigger{}
-	type row struct {
-		ID      int64  `db:"id"`
-		Name    string `db:"name"`
-		Service string `db:"service"`
-	}
 	uc := currentUser(r)
 	all := uc.IsSuperuser || uc.IsSystemAuditor
 	var orgIDs []int64
@@ -207,25 +185,12 @@ func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// selectScoped runs a webhook query, org-filtered for non-privileged users.
-	selectScoped := func(dst *[]row, base string) {
-		if all {
-			_ = rs.DB.SelectContext(r.Context(), dst, base+" ORDER BY name")
-			return
-		}
-		q, args, _ := sqlx.In(base+" AND organization_id IN (?) ORDER BY name", orgIDs)
-		q = rs.DB.Rebind(q)
-		_ = rs.DB.SelectContext(r.Context(), dst, q, args...)
-	}
-
-	wf := []row{}
-	selectScoped(&wf, `SELECT id, name, COALESCE(webhook_service,'generic') AS service FROM workflow_templates WHERE webhook_enabled`)
+	wf, _ := rs.store.WebhookWorkflows(r.Context(), all, orgIDs)
 	for _, x := range wf {
 		out = append(out, webhookTrigger{Kind: "workflow", ID: x.ID, Name: x.Name, Service: x.Service,
 			URL: fmt.Sprintf("/api/v1/webhooks/workflow-templates/%d/%s", x.ID, x.Service)})
 	}
-	jt := []row{}
-	selectScoped(&jt, `SELECT id, name, COALESCE(webhook_service,'generic') AS service FROM job_templates WHERE webhook_enabled`)
+	jt, _ := rs.store.WebhookJobTemplates(r.Context(), all, orgIDs)
 	for _, x := range jt {
 		out = append(out, webhookTrigger{Kind: "job_template", ID: x.ID, Name: x.Name, Service: x.Service,
 			URL: fmt.Sprintf("/api/v1/webhooks/job-templates/%d/%s", x.ID, x.Service)})
@@ -233,9 +198,7 @@ func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) 
 	// Execution packs are shared infrastructure managed by superusers, so only they
 	// see pack build triggers. Packs have no service; the URL takes it as a param.
 	if uc.IsSuperuser {
-		ep := []row{}
-		_ = rs.DB.SelectContext(r.Context(), &ep,
-			`SELECT id, name, 'generic' AS service FROM execution_packs WHERE webhook_key IS NOT NULL AND webhook_key <> '' ORDER BY name`)
+		ep, _ := rs.store.WebhookPacks(r.Context())
 		for _, x := range ep {
 			out = append(out, webhookTrigger{Kind: "execution_pack", ID: x.ID, Name: x.Name, Service: x.Service,
 				URL: fmt.Sprintf("/api/v1/webhooks/execution-packs/%d/%s", x.ID, x.Service)})

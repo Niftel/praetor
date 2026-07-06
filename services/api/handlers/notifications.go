@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,15 +11,19 @@ import (
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
-// notificationTemplate is an org-scoped notification target. The config secret
-// (the target URL) is stored encrypted and never returned to clients.
-type notificationTemplate struct {
-	ID               int64  `json:"id" db:"id"`
-	OrganizationID   int64  `json:"organization_id" db:"organization_id"`
-	Name             string `json:"name" db:"name"`
-	NotificationType string `json:"notification_type" db:"notification_type"`
+// NotificationStore is the notifications data access shared by the content and
+// templates handlers.
+type NotificationStore interface {
+	ListTemplates(ctx context.Context, orgID int64) ([]store.NotificationTemplate, error)
+	CreateTemplate(ctx context.Context, orgID int64, name, notificationType string, config []byte) (int64, error)
+	TemplateOrg(ctx context.Context, id int64) (int64, error)
+	DeleteTemplate(ctx context.Context, id int64) error
+	JobTemplateAttachments(ctx context.Context, jobTemplateID int64) ([]store.JobTemplateNotification, error)
+	AttachToJobTemplate(ctx context.Context, jobTemplateID, notificationTemplateID int64, event string) error
+	DetachFromJobTemplate(ctx context.Context, jobTemplateID, notificationTemplateID int64, event string) error
 }
 
 // ListNotificationTemplates GET /api/v1/notification-templates?organization_id=N
@@ -31,10 +36,8 @@ func (h *ContentHandler) ListNotificationTemplates(w http.ResponseWriter, r *htt
 	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actRead) {
 		return
 	}
-	nts := []notificationTemplate{}
-	if err := h.DB.Select(&nts,
-		`SELECT id, organization_id, name, notification_type FROM notification_templates
-		 WHERE organization_id = $1 ORDER BY name`, orgID); err != nil {
+	nts, err := h.notifications.ListTemplates(r.Context(), orgID)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -67,11 +70,8 @@ func (h *ContentHandler) CreateNotificationTemplate(w http.ResponseWriter, r *ht
 	}
 	cfg, _ := json.Marshal(map[string]string{"url": enc})
 
-	var id int64
-	if err := h.DB.QueryRowx(
-		`INSERT INTO notification_templates (organization_id, name, notification_type, config)
-		 VALUES ($1, $2, $3, $4) RETURNING id`,
-		body.OrganizationID, body.Name, body.NotificationType, cfg).Scan(&id); err != nil {
+	id, err := h.notifications.CreateTemplate(r.Context(), body.OrganizationID, body.Name, body.NotificationType, cfg)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -85,27 +85,19 @@ func (h *ContentHandler) DeleteNotificationTemplate(w http.ResponseWriter, r *ht
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	var orgID int64
-	if err := h.DB.Get(&orgID, `SELECT organization_id FROM notification_templates WHERE id = $1`, id); err != nil {
+	orgID, err := h.notifications.TemplateOrg(r.Context(), id)
+	if err != nil {
 		render.ErrInvalidRequest(fmt.Errorf("unknown notification template")).Render(w, r)
 		return
 	}
 	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
 		return
 	}
-	if _, err := h.DB.Exec(`DELETE FROM notification_templates WHERE id = $1`, id); err != nil {
+	if err := h.notifications.DeleteTemplate(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// jobTemplateNotification is one attachment row (which notification fires on which event).
-type jobTemplateNotification struct {
-	NotificationTemplateID int64  `json:"notification_template_id" db:"notification_template_id"`
-	Name                   string `json:"name" db:"name"`
-	NotificationType       string `json:"notification_type" db:"notification_type"`
-	Event                  string `json:"event" db:"event"`
 }
 
 // ListJobTemplateNotifications GET /api/v1/job-templates/{id}/notifications
@@ -114,13 +106,8 @@ func (rs *TemplatesResource) ListJobTemplateNotifications(w http.ResponseWriter,
 	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actRead) {
 		return
 	}
-	rows := []jobTemplateNotification{}
-	if err := rs.DB.Select(&rows, `
-		SELECT jtn.notification_template_id, nt.name, nt.notification_type, jtn.event
-		FROM job_template_notifications jtn
-		JOIN notification_templates nt ON nt.id = jtn.notification_template_id
-		WHERE jtn.job_template_id = $1
-		ORDER BY jtn.event, nt.name`, jtID); err != nil {
+	rows, err := rs.notifications.JobTemplateAttachments(r.Context(), jtID)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -147,10 +134,7 @@ func (rs *TemplatesResource) AttachJobTemplateNotification(w http.ResponseWriter
 		render.ErrInvalidRequest(fmt.Errorf("event must be started|success|error")).Render(w, r)
 		return
 	}
-	if _, err := rs.DB.Exec(`
-		INSERT INTO job_template_notifications (job_template_id, notification_template_id, event)
-		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-		jtID, body.NotificationTemplateID, body.Event); err != nil {
+	if err := rs.notifications.AttachToJobTemplate(r.Context(), jtID, body.NotificationTemplateID, body.Event); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -169,9 +153,7 @@ func (rs *TemplatesResource) DetachJobTemplateNotification(w http.ResponseWriter
 		return
 	}
 	event := chi.URLParam(r, "event")
-	if _, err := rs.DB.Exec(
-		`DELETE FROM job_template_notifications WHERE job_template_id=$1 AND notification_template_id=$2 AND event=$3`,
-		jtID, ntID, event); err != nil {
+	if err := rs.notifications.DetachFromJobTemplate(r.Context(), jtID, ntID, event); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

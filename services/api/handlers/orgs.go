@@ -94,21 +94,23 @@ type ContentHandler struct {
 	orgs     OrgStore
 	projects ProjectStore
 	roles    RoleStore
-	teams    TeamStore
-	access   AccessStore
-	users    UserStore
+	teams         TeamStore
+	access        AccessStore
+	users         UserStore
+	notifications NotificationStore
 }
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
 	return &ContentHandler{
-		DB:         db,
-		Authorizer: NewAuthorizer(db),
-		orgs:       store.NewOrgStore(db),
-		projects:   store.NewProjectStore(db),
-		roles:      store.NewRoleStore(db),
-		teams:      store.NewTeamStore(db),
-		access:     store.NewAccessStore(db),
-		users:      store.NewUserStore(db),
+		DB:            db,
+		Authorizer:    NewAuthorizer(db),
+		orgs:          store.NewOrgStore(db),
+		projects:      store.NewProjectStore(db),
+		roles:         store.NewRoleStore(db),
+		teams:         store.NewTeamStore(db),
+		access:        store.NewAccessStore(db),
+		users:         store.NewUserStore(db),
+		notifications: store.NewNotificationStore(db),
 	}
 }
 
