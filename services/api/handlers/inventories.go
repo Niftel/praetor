@@ -10,6 +10,7 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 // InventoriesResource handles inventory operations
@@ -43,7 +44,7 @@ func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Re
 	var total int64
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &inventories, `SELECT * FROM inventories ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+		if err := rs.DB.SelectContext(r.Context(), &inventories, `SELECT `+store.InventoryCols+` FROM inventories ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -55,7 +56,7 @@ func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Re
 			return
 		}
 		if len(ids) > 0 {
-			q, args, _ := sqlx.In(`SELECT * FROM inventories WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
+			q, args, _ := sqlx.In(`SELECT `+store.InventoryCols+` FROM inventories WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
 			q = rs.DB.Rebind(q)
 			if err := rs.DB.SelectContext(r.Context(), &inventories, q, args...); err != nil {
 				render.ErrInternal(err).Render(w, r)
@@ -110,7 +111,7 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 	query := `
 		INSERT INTO inventories (organization_id, name, description, kind, content) 
 		VALUES ($1, $2, $3, $4, $5) 
-		RETURNING *`
+		RETURNING ` + store.InventoryCols
 
 	var created models.Inventory
 	err := rs.DB.QueryRowxContext(r.Context(), query,
@@ -141,7 +142,7 @@ func (rs *InventoriesResource) GetInventory(w http.ResponseWriter, r *http.Reque
 	}
 
 	var inventory models.Inventory
-	query := `SELECT * FROM inventories WHERE id = $1`
+	query := `SELECT ` + store.InventoryCols + ` FROM inventories WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &inventory, query, id)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
@@ -174,7 +175,7 @@ func (rs *InventoriesResource) UpdateInventory(w http.ResponseWriter, r *http.Re
 		UPDATE inventories
 		SET name = $2, description = $3, content = $4, modified_at = now()
 		WHERE id = $1 
-		RETURNING *`
+		RETURNING ` + store.InventoryCols
 
 	var updated models.Inventory
 	err = rs.DB.QueryRowxContext(r.Context(), query,
@@ -226,7 +227,7 @@ func (rs *InventoriesResource) GetInventoryByParam(w http.ResponseWriter, r *htt
 	}
 
 	var inventory models.Inventory
-	query := `SELECT * FROM inventories WHERE id = $1`
+	query := `SELECT ` + store.InventoryCols + ` FROM inventories WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &inventory, query, id)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
@@ -259,7 +260,7 @@ func (rs *InventoriesResource) UpdateInventoryByParam(w http.ResponseWriter, r *
 		UPDATE inventories 
 		SET name = $2, description = $3, kind = $4, modified_at = now() 
 		WHERE id = $1 
-		RETURNING *`
+		RETURNING ` + store.InventoryCols
 
 	var updated models.Inventory
 	err = rs.DB.QueryRowxContext(r.Context(), query,

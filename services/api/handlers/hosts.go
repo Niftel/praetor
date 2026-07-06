@@ -11,6 +11,7 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 // HostsResource handles host operations within inventories
@@ -88,7 +89,7 @@ func (rs *HostsResource) ListHosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var hosts []models.Host
-	query := `SELECT * FROM hosts WHERE inventory_id = $1 ORDER BY name`
+	query := `SELECT ` + store.HostCols + ` FROM hosts WHERE inventory_id = $1 ORDER BY name`
 	err = rs.DB.SelectContext(r.Context(), &hosts, query, inventoryId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -136,7 +137,7 @@ func (rs *HostsResource) CreateHost(w http.ResponseWriter, r *http.Request) {
 	query := `
 		INSERT INTO hosts (inventory_id, name, description, variables, enabled, is_control_node) 
 		VALUES ($1, $2, $3, $4, $5, $6) 
-		RETURNING *`
+		RETURNING ` + store.HostCols
 
 	var created models.Host
 	err = rs.DB.QueryRowxContext(r.Context(), query,
@@ -166,7 +167,7 @@ func (rs *HostsResource) GetHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var host models.Host
-	query := `SELECT * FROM hosts WHERE id = $1`
+	query := `SELECT `+store.HostCols+` FROM hosts WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &host, query, hostId)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
@@ -192,7 +193,7 @@ func (rs *HostsResource) UpdateHost(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch existing host
 	var host models.Host
-	query := `SELECT * FROM hosts WHERE id = $1`
+	query := `SELECT `+store.HostCols+` FROM hosts WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &host, query, hostId)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
@@ -209,7 +210,7 @@ func (rs *HostsResource) UpdateHost(w http.ResponseWriter, r *http.Request) {
 		UPDATE hosts 
 		SET name = $2, description = $3, variables = $4, enabled = $5, is_control_node = $6, modified_at = now()
 		WHERE id = $1 
-		RETURNING *`
+		RETURNING ` + store.HostCols
 
 	var updated models.Host
 	err = rs.DB.QueryRowxContext(r.Context(), query,
@@ -316,7 +317,7 @@ func (rs *HostsResource) SetRunnerHost(w http.ResponseWriter, r *http.Request) {
 
 	// Return the updated host
 	var host models.Host
-	err = rs.DB.GetContext(r.Context(), &host, `SELECT * FROM hosts WHERE id = $1`, hostId)
+	err = rs.DB.GetContext(r.Context(), &host, `SELECT `+store.HostCols+` FROM hosts WHERE id = $1`, hostId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

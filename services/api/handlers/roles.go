@@ -10,6 +10,7 @@ import (
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 // ListRoles GET /api/v1/roles
@@ -22,10 +23,8 @@ func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 
 	if userCtx.IsSuperuser {
 		// Superusers see all roles
-		err = h.DB.Select(&roles, `
-			SELECT id, role_field, singleton_name, content_type, object_id, name, description, created_at, modified_at
-			FROM roles ORDER BY content_type, object_id, role_field
-		`)
+		err = h.DB.Select(&roles, `SELECT `+store.RoleCols+`
+			FROM roles ORDER BY content_type, object_id, role_field`)
 	} else {
 		// Regular users see system roles + roles on objects they can access
 		roles, err = h.Access.GetUserRoles(r.Context(), userCtx.UserID)
@@ -38,10 +37,8 @@ func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 
 	// Also include system singleton roles
 	var singletons []rbac.Role
-	h.DB.Select(&singletons, `
-		SELECT id, role_field, singleton_name, content_type, object_id, name, description, created_at, modified_at
-		FROM roles WHERE singleton_name IS NOT NULL
-	`)
+	h.DB.Select(&singletons, `SELECT `+store.RoleCols+`
+		FROM roles WHERE singleton_name IS NOT NULL`)
 
 	// Merge (avoiding duplicates)
 	roleSet := make(map[int64]rbac.Role)
@@ -108,7 +105,7 @@ func (h *ContentHandler) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
 
 	// Get role to check permissions
 	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT * FROM roles WHERE id = $1`, roleID)
+	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -153,7 +150,7 @@ func (h *ContentHandler) AddRoleUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT * FROM roles WHERE id = $1`, roleID)
+	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -210,7 +207,7 @@ func (h *ContentHandler) RemoveRoleUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT * FROM roles WHERE id = $1`, roleID)
+	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -250,7 +247,7 @@ func (h *ContentHandler) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT * FROM roles WHERE id = $1`, roleID)
+	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -293,7 +290,7 @@ func (h *ContentHandler) AddRoleTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT * FROM roles WHERE id = $1`, roleID)
+	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -348,7 +345,7 @@ func (h *ContentHandler) RemoveRoleTeam(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var role rbac.Role
-	err = h.DB.Get(&role, `SELECT * FROM roles WHERE id = $1`, roleID)
+	err = h.DB.Get(&role, `SELECT `+store.RoleCols+` FROM roles WHERE id = $1`, roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return

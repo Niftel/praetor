@@ -10,6 +10,7 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 // GroupsResource handles group operations within inventories
@@ -68,7 +69,7 @@ func (rs *GroupsResource) ListGroups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var groups []models.Group
-	query := `SELECT * FROM groups WHERE inventory_id = $1 ORDER BY name`
+	query := `SELECT ` + store.GroupCols + ` FROM groups WHERE inventory_id = $1 ORDER BY name`
 	err = rs.DB.SelectContext(r.Context(), &groups, query, inventoryId)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -115,7 +116,7 @@ func (rs *GroupsResource) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	query := `
 		INSERT INTO groups (inventory_id, name, description, variables) 
 		VALUES ($1, $2, $3, $4) 
-		RETURNING *`
+		RETURNING ` + store.GroupCols
 
 	var created models.Group
 	err = rs.DB.QueryRowxContext(r.Context(), query,
@@ -144,7 +145,7 @@ func (rs *GroupsResource) GetGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var group models.Group
-	query := `SELECT * FROM groups WHERE id = $1`
+	query := `SELECT ` + store.GroupCols + ` FROM groups WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &group, query, groupId)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
@@ -177,7 +178,7 @@ func (rs *GroupsResource) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		UPDATE groups
 		SET name = $2, description = $3, variables = $4, modified_at = now()
 		WHERE id = $1 
-		RETURNING *`
+		RETURNING ` + store.GroupCols
 
 	var updated models.Group
 	err = rs.DB.QueryRowxContext(r.Context(), query,

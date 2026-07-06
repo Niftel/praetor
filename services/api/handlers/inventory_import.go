@@ -12,6 +12,7 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -72,7 +73,7 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 		// Check if host already exists
 		var existingHost models.Host
 		err := rs.DB.GetContext(r.Context(), &existingHost,
-			`SELECT * FROM hosts WHERE inventory_id = $1 AND name = $2`, inventoryId, hostname)
+			`SELECT `+store.HostCols+` FROM hosts WHERE inventory_id = $1 AND name = $2`, inventoryId, hostname)
 		if err == nil {
 			hostIDs[hostname] = existingHost.ID
 			continue
@@ -81,7 +82,7 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 		// Create new host
 		var createdHost models.Host
 		err = rs.DB.QueryRowxContext(r.Context(),
-			`INSERT INTO hosts (inventory_id, name, enabled) VALUES ($1, $2, true) RETURNING *`,
+			`INSERT INTO hosts (inventory_id, name, enabled) VALUES ($1, $2, true) RETURNING `+store.HostCols,
 			inventoryId, hostname,
 		).StructScan(&createdHost)
 		if err != nil {
@@ -97,7 +98,7 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 		// Check if group already exists
 		var existingGroup models.Group
 		err := rs.DB.GetContext(r.Context(), &existingGroup,
-			`SELECT * FROM groups WHERE inventory_id = $1 AND name = $2`, inventoryId, groupName)
+			`SELECT `+store.GroupCols+` FROM groups WHERE inventory_id = $1 AND name = $2`, inventoryId, groupName)
 
 		var groupID int64
 		if err == nil {
@@ -106,7 +107,7 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 			// Create new group
 			var createdGroup models.Group
 			err = rs.DB.QueryRowxContext(r.Context(),
-				`INSERT INTO groups (inventory_id, name) VALUES ($1, $2) RETURNING *`,
+				`INSERT INTO groups (inventory_id, name) VALUES ($1, $2) RETURNING `+store.GroupCols,
 				inventoryId, groupName,
 			).StructScan(&createdGroup)
 			if err != nil {

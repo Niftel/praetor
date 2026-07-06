@@ -7,22 +7,36 @@ import (
 	"testing"
 
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 )
 
-// The store's column consts are hand-written and must stay in lockstep with the
-// scanned struct's db tags: SELECTing a column the struct lacks (or vice versa)
-// is exactly the "missing destination name" 500 the store exists to prevent.
-// This asserts the invariant per domain so drift is caught at test time, not in
-// production. Copy this table when adding a new domain's column const.
+// Every column const must stay in lockstep with the db tags of the struct it is
+// scanned into: SELECTing a column the struct lacks (or omitting one it has) is
+// exactly the "missing destination name" 500 the explicit lists exist to prevent.
+// This asserts the invariant for every domain so drift is caught at test time,
+// not in production. Add a row here whenever a new column const is introduced.
 func TestColumnConstsMatchStructTags(t *testing.T) {
 	cases := []struct {
 		name string
 		cols string
 		typ  any
 	}{
+		// jobs domain
 		{"unifiedJobCols", unifiedJobCols, models.UnifiedJob{}},
 		{"executionRunCols", executionRunCols, models.ExecutionRun{}},
 		{"jobEventCols", jobEventCols, models.JobEvent{}},
+		// resource domains
+		{"CredentialCols", CredentialCols, models.Credential{}},
+		{"CredentialTypeCols", CredentialTypeCols, models.CredentialType{}},
+		{"HostCols", HostCols, models.Host{}},
+		{"InventoryCols", InventoryCols, models.Inventory{}},
+		{"GroupCols", GroupCols, models.Group{}},
+		{"RoleCols", RoleCols, rbac.Role{}},
+		{"JobTemplateCols", JobTemplateCols, models.JobTemplate{}},
+		{"ProjectCols", ProjectCols, models.Project{}},
+		{"OrganizationCols", OrganizationCols, models.Organization{}},
+		{"TeamCols", TeamCols, models.Team{}},
+		{"ScheduleCols", ScheduleCols, models.Schedule{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

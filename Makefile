@@ -61,6 +61,8 @@ execpack:
 test:
 	@echo "Running tests..."
 	go test -v ./tests/...
+	@echo "Running unit tests (incl. #39 no-wildcard-SELECT gate + column-drift checks)..."
+	go test ./services/... ./pkg/...
 	@echo "Tests passed."
 
 clean:

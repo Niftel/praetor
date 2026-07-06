@@ -13,6 +13,7 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 // ListProjects GET /api/v1/projects
@@ -25,7 +26,7 @@ func (h *ContentHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	var total int64
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := h.DB.Select(&projects, `SELECT * FROM projects ORDER BY id LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+		if err := h.DB.Select(&projects, `SELECT `+store.ProjectCols+` FROM projects ORDER BY id LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -37,7 +38,7 @@ func (h *ContentHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(ids) > 0 {
-			q, args, _ := sqlx.In(`SELECT * FROM projects WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
+			q, args, _ := sqlx.In(`SELECT `+store.ProjectCols+` FROM projects WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
 			q = h.DB.Rebind(q)
 			if err := h.DB.Select(&projects, q, args...); err != nil {
 				render.ErrInternal(err).Render(w, r)
@@ -86,7 +87,7 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	query := `
 		INSERT INTO projects (organization_id, name, description, scm_type, scm_url, scm_branch) 
 		VALUES (:organization_id, :name, :description, :scm_type, :scm_url, :scm_branch) 
-		RETURNING *`
+		RETURNING ` + store.ProjectCols
 
 	rows, err := h.DB.NamedQuery(query, input)
 	if err != nil {
@@ -125,7 +126,7 @@ func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var project models.Project
-	if err := h.DB.Get(&project, "SELECT * FROM projects WHERE id = $1", id); err != nil {
+	if err := h.DB.Get(&project, "SELECT "+store.ProjectCols+" FROM projects WHERE id = $1", id); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}

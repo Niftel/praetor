@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/services/api/store"
 	"github.com/teambition/rrule-go"
 )
 
@@ -70,7 +71,7 @@ func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Reques
 	uc := currentUser(r)
 	schedules := []models.Schedule{}
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &schedules, "SELECT * FROM schedules ORDER BY id ASC"); err != nil {
+		if err := rs.DB.SelectContext(r.Context(), &schedules, "SELECT "+store.ScheduleCols+" FROM schedules ORDER BY id ASC"); err != nil {
 			render.Render(w, r, ErrInternal(err))
 			return
 		}
@@ -109,7 +110,7 @@ func (rs *SchedulesResource) GetSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var sched models.Schedule
-	err := rs.DB.GetContext(r.Context(), &sched, "SELECT * FROM schedules WHERE id = $1", id)
+	err := rs.DB.GetContext(r.Context(), &sched, "SELECT "+store.ScheduleCols+" FROM schedules WHERE id = $1", id)
 	if err == sql.ErrNoRows {
 		render.Render(w, r, ErrNotFound)
 		return
