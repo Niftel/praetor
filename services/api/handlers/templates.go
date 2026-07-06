@@ -14,6 +14,7 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 // requireSCMPlaybook enforces that a job template's playbook comes from source
@@ -76,7 +77,7 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 	var total int64
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &templates, `SELECT * FROM job_templates ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+		if err := rs.DB.SelectContext(r.Context(), &templates, `SELECT `+store.JobTemplateCols+` FROM job_templates ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -88,7 +89,7 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if len(ids) > 0 {
-			q, args, _ := sqlx.In(`SELECT * FROM job_templates WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
+			q, args, _ := sqlx.In(`SELECT `+store.JobTemplateCols+` FROM job_templates WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
 			q = rs.DB.Rebind(q)
 			if err := rs.DB.SelectContext(r.Context(), &templates, q, args...); err != nil {
 				render.ErrInternal(err).Render(w, r)
@@ -186,7 +187,7 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 	query := `
 		INSERT INTO job_templates (organization_id, name, description, playbook, playbook_content, project_id, inventory_id, job_type, verbosity, unified_job_template_id, credential_id, extra_vars, job_limit, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec, webhook_enabled, webhook_service, webhook_key, use_fact_cache, execution_pack_id, allow_simultaneous)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-		RETURNING *`
+		RETURNING ` + store.JobTemplateCols
 
 	var created models.JobTemplate
 	err = tx.QueryRowxContext(r.Context(), query,
@@ -227,7 +228,7 @@ func (rs *TemplatesResource) GetTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	var template models.JobTemplate
-	query := `SELECT * FROM job_templates WHERE id = $1`
+	query := `SELECT ` + store.JobTemplateCols + ` FROM job_templates WHERE id = $1`
 	err = rs.DB.GetContext(r.Context(), &template, query, id)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
@@ -282,7 +283,7 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		    execution_pack_id = $20, allow_simultaneous = $21,
 		    modified_at = now()
 		WHERE id = $1
-		RETURNING *`
+		RETURNING ` + store.JobTemplateCols
 
 	var updated models.JobTemplate
 	err = rs.DB.QueryRowxContext(r.Context(), query,

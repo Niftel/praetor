@@ -12,6 +12,7 @@ import (
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 type ContentHandler struct {
@@ -37,7 +38,7 @@ func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Reques
 
 	// Superusers and system auditors see all
 	if userCtx.IsSuperuser {
-		query := `SELECT * FROM organizations ORDER BY id LIMIT $1 OFFSET $2`
+		query := `SELECT ` + store.OrganizationCols + ` FROM organizations ORDER BY id LIMIT $1 OFFSET $2`
 		err := h.DB.Select(&orgs, query, pg.Limit, pg.Offset)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
@@ -56,7 +57,7 @@ func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Reques
 			orgs = []models.Organization{}
 			total = 0
 		} else {
-			query, args, _ := sqlx.In(`SELECT * FROM organizations WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, accessibleIDs, pg.Limit, pg.Offset)
+			query, args, _ := sqlx.In(`SELECT `+store.OrganizationCols+` FROM organizations WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, accessibleIDs, pg.Limit, pg.Offset)
 			query = h.DB.Rebind(query)
 			err = h.DB.Select(&orgs, query, args...)
 			if err != nil {
@@ -99,7 +100,7 @@ func (h *ContentHandler) CreateOrganization(w http.ResponseWriter, r *http.Reque
 	query := `
 		INSERT INTO organizations (name, description) 
 		VALUES (:name, :description) 
-		RETURNING *`
+		RETURNING ` + store.OrganizationCols
 
 	rows, err := h.DB.NamedQuery(query, input)
 	if err != nil {
@@ -137,7 +138,7 @@ func (h *ContentHandler) GetOrganization(w http.ResponseWriter, r *http.Request)
 	}
 
 	var org models.Organization
-	err = h.DB.Get(&org, "SELECT * FROM organizations WHERE id = $1", id)
+	err = h.DB.Get(&org, "SELECT "+store.OrganizationCols+" FROM organizations WHERE id = $1", id)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -172,7 +173,7 @@ func (h *ContentHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 		UPDATE organizations 
 		SET name=:name, description=:description, modified_at=NOW()
 		WHERE id=:id
-		RETURNING *`
+		RETURNING ` + store.OrganizationCols
 
 	rows, err := h.DB.NamedQuery(query, input)
 	if err != nil {
@@ -429,7 +430,7 @@ func (h *ContentHandler) ListOrganizationTeams(w http.ResponseWriter, r *http.Re
 	}
 
 	var teams []models.Team
-	err = h.DB.Select(&teams, `SELECT * FROM teams WHERE organization_id = $1 ORDER BY id`, id)
+	err = h.DB.Select(&teams, `SELECT `+store.TeamCols+` FROM teams WHERE organization_id = $1 ORDER BY id`, id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -481,7 +482,7 @@ func (h *ContentHandler) ListOrganizationProjects(w http.ResponseWriter, r *http
 	}
 
 	var projects []models.Project
-	err = h.DB.Select(&projects, `SELECT * FROM projects WHERE organization_id = $1 ORDER BY id`, id)
+	err = h.DB.Select(&projects, `SELECT `+store.ProjectCols+` FROM projects WHERE organization_id = $1 ORDER BY id`, id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -508,7 +509,7 @@ func (h *ContentHandler) ListOrganizationInventories(w http.ResponseWriter, r *h
 	}
 
 	var inventories []models.Inventory
-	err = h.DB.Select(&inventories, `SELECT * FROM inventories WHERE organization_id = $1 ORDER BY id`, id)
+	err = h.DB.Select(&inventories, `SELECT `+store.InventoryCols+` FROM inventories WHERE organization_id = $1 ORDER BY id`, id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

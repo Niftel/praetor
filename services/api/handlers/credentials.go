@@ -11,6 +11,7 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 type CredentialsResource struct {
@@ -37,7 +38,7 @@ func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Re
 
 	var creds []models.Credential
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &creds, "SELECT * FROM credentials ORDER BY id ASC"); err != nil {
+		if err := rs.DB.SelectContext(r.Context(), &creds, "SELECT "+store.CredentialCols+" FROM credentials ORDER BY id ASC"); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -48,7 +49,7 @@ func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Re
 			return
 		}
 		if len(ids) > 0 {
-			q, args, _ := sqlx.In("SELECT * FROM credentials WHERE id IN (?) ORDER BY id ASC", ids)
+			q, args, _ := sqlx.In("SELECT "+store.CredentialCols+" FROM credentials WHERE id IN (?) ORDER BY id ASC", ids)
 			q = rs.DB.Rebind(q)
 			if err := rs.DB.SelectContext(r.Context(), &creds, q, args...); err != nil {
 				render.ErrInternal(err).Render(w, r)
@@ -86,7 +87,7 @@ func (rs *CredentialsResource) GetCredential(w http.ResponseWriter, r *http.Requ
 	}
 
 	var cred models.Credential
-	err = rs.DB.GetContext(r.Context(), &cred, "SELECT * FROM credentials WHERE id = $1", id)
+	err = rs.DB.GetContext(r.Context(), &cred, "SELECT "+store.CredentialCols+" FROM credentials WHERE id = $1", id)
 	if err != nil {
 		render.ErrNotFound(err).Render(w, r)
 		return
@@ -126,7 +127,7 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 	query := `
 		INSERT INTO credentials (organization_id, credential_type_id, name, description, inputs)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING *`
+		RETURNING ` + store.CredentialCols
 
 	var created models.Credential
 	err := rs.DB.QueryRowxContext(r.Context(), query,
@@ -156,7 +157,7 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 	}
 
 	var existing models.Credential
-	err = rs.DB.GetContext(r.Context(), &existing, "SELECT * FROM credentials WHERE id = $1", id)
+	err = rs.DB.GetContext(r.Context(), &existing, "SELECT "+store.CredentialCols+" FROM credentials WHERE id = $1", id)
 	if err != nil {
 		render.ErrNotFound(err).Render(w, r)
 		return
@@ -179,7 +180,7 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 		UPDATE credentials 
 		SET name = $1, description = $2, inputs = $3, modified_at = NOW()
 		WHERE id = $4
-		RETURNING *`
+		RETURNING ` + store.CredentialCols
 
 	var updated models.Credential
 	err = rs.DB.QueryRowxContext(r.Context(), query,
@@ -220,7 +221,7 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 func (rs *CredentialsResource) processSecrets(input *models.Credential, existing *models.Credential) error {
 	// Fetch Type Definition
 	var ct models.CredentialType
-	err := rs.DB.Get(&ct, "SELECT * FROM credential_types WHERE id = $1", input.CredentialTypeID)
+	err := rs.DB.Get(&ct, "SELECT "+store.CredentialTypeCols+" FROM credential_types WHERE id = $1", input.CredentialTypeID)
 	if err != nil {
 		return err
 	}
@@ -291,7 +292,7 @@ func (rs *CredentialsResource) maskCredentialSecrets(cred *models.Credential) {
 	// Fetch Type Definition (Optimization: Could assume all inputs are opaque or fetch cache)
 	// For correctness we fetch type.
 	var ct models.CredentialType
-	err := rs.DB.Get(&ct, "SELECT * FROM credential_types WHERE id = $1", cred.CredentialTypeID)
+	err := rs.DB.Get(&ct, "SELECT "+store.CredentialTypeCols+" FROM credential_types WHERE id = $1", cred.CredentialTypeID)
 	if err != nil {
 		return // Cannot mask if can't find type
 	}

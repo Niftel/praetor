@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 type CredentialTypesResource struct {
@@ -28,7 +29,7 @@ func (rs *CredentialTypesResource) Routes() chi.Router {
 
 func (rs *CredentialTypesResource) ListCredentialTypes(w http.ResponseWriter, r *http.Request) {
 	var types []models.CredentialType
-	err := rs.DB.SelectContext(r.Context(), &types, "SELECT * FROM credential_types ORDER BY id ASC")
+	err := rs.DB.SelectContext(r.Context(), &types, "SELECT "+store.CredentialTypeCols+" FROM credential_types ORDER BY id ASC")
 	if err != nil {
 		log.Printf("Failed to list credential types: %v", err)
 		render.ErrInternal(err).Render(w, r)
@@ -46,7 +47,7 @@ func (rs *CredentialTypesResource) GetCredentialType(w http.ResponseWriter, r *h
 	}
 
 	var ct models.CredentialType
-	err = rs.DB.GetContext(r.Context(), &ct, "SELECT * FROM credential_types WHERE id = $1", id)
+	err = rs.DB.GetContext(r.Context(), &ct, "SELECT "+store.CredentialTypeCols+" FROM credential_types WHERE id = $1", id)
 	if err != nil {
 		render.ErrNotFound(err).Render(w, r)
 		return
