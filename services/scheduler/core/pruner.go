@@ -18,7 +18,7 @@ const pruneBatch = 500
 
 // maybePrune runs the retention pruner when it's enabled (RetentionDays > 0) and
 // at least pruneInterval has elapsed since the last run.
-func (s *Scheduler) maybePrune() {
+func (s *Scheduler) maybePrune(ctx context.Context) {
 	if s.RetentionDays <= 0 {
 		return // retention disabled — keep everything
 	}
@@ -26,7 +26,7 @@ func (s *Scheduler) maybePrune() {
 		return
 	}
 	s.lastPrune = time.Now()
-	if err := s.pruneOldJobs(context.Background()); err != nil {
+	if err := s.pruneOldJobs(ctx); err != nil {
 		log.Printf("retention: prune failed: %v", err)
 	}
 }

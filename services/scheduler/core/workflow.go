@@ -15,16 +15,51 @@ import (
 // processWorkflows advances every running workflow one step per tick: it reaps
 // finished node jobs, launches newly-eligible nodes (or skips them), pauses on
 // approval gates, and finalizes the workflow when all nodes are terminal.
-func (s *Scheduler) processWorkflows() {
-	ctx := context.Background()
+func (s *Scheduler) processWorkflows(ctx context.Context) {
 	var ids []int64
 	if err := s.DB.SelectContext(ctx, &ids, `SELECT id FROM workflow_jobs WHERE status='running'`); err != nil {
 		return
 	}
 	for _, id := range ids {
-		if err := s.advanceWorkflow(ctx, id); err != nil {
-			log.Printf("workflow %d: %v", id, err)
+		s.advanceWorkflowLocked(ctx, id)
+	}
+}
+
+// wfLockNamespace scopes the workflow advisory locks so their keys can't collide
+// with any other pg_advisory_lock user (arbitrary constant, "PW").
+const wfLockNamespace = 0x5057
+
+// advanceWorkflowLocked advances one workflow while holding a Postgres advisory
+// lock keyed by its id, so multiple schedulers (HA) never advance the same
+// workflow concurrently — which would double-launch nodes, since per-node status
+// writes are not transactional. The lock is a global named lock (not tied to the
+// connection the node writes go through), so it provides mutual exclusion even
+// though advanceWorkflow uses the pool. A scheduler that can't acquire it skips
+// this workflow; another instance holds it and will advance it.
+func (s *Scheduler) advanceWorkflowLocked(ctx context.Context, id int64) {
+	conn, err := s.DB.Connx(ctx)
+	if err != nil {
+		log.Printf("workflow %d: acquire conn: %v", id, err)
+		return
+	}
+	defer conn.Close()
+
+	var got bool
+	if err := conn.GetContext(ctx, &got, `SELECT pg_try_advisory_lock($1::int, $2::int)`, wfLockNamespace, id); err != nil {
+		log.Printf("workflow %d: advisory lock: %v", id, err)
+		return
+	}
+	if !got {
+		return // another scheduler is advancing this workflow
+	}
+	defer func() {
+		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock($1::int, $2::int)`, wfLockNamespace, id); err != nil {
+			log.Printf("workflow %d: advisory unlock: %v", id, err)
 		}
+	}()
+
+	if err := s.advanceWorkflow(ctx, id); err != nil {
+		log.Printf("workflow %d: %v", id, err)
 	}
 }
 

@@ -199,6 +199,11 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	).Scan(&jobID)
 
 	if err != nil {
+		// Lost the race to a concurrent launch of a non-simultaneous template.
+		if isActiveRunConflict(err) {
+			render.Render(w, r, ErrConflict(fmt.Errorf("a run of this job template is already active; wait for it to finish or enable Allow Simultaneous")))
+			return
+		}
 		render.Render(w, r, ErrInternal(err))
 		return
 	}

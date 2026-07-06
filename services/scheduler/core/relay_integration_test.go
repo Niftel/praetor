@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -66,7 +67,7 @@ func TestOutboxRelayDeliversDurably(t *testing.T) {
 	}
 
 	// --- Relay ---
-	if err := sched.relayOutbox(); err != nil {
+	if err := sched.relayOutbox(context.Background()); err != nil {
 		t.Fatalf("relayOutbox: %v", err)
 	}
 

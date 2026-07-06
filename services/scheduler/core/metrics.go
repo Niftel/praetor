@@ -19,6 +19,13 @@ var (
 		Buckets: prometheus.DefBuckets,
 	})
 
+	// TickTaskErrors counts errors per tick task, so a single failing pass is
+	// visible instead of being lost in the log.
+	TickTaskErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "praetor_scheduler_tick_task_errors_total",
+		Help: "Errors returned by a scheduler tick task, labeled by task name.",
+	}, []string{"task"})
+
 	// RunsReconciling counts stale remote runs handed to the reconciler.
 	RunsReconciling = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "praetor_scheduler_runs_reconciling_total",

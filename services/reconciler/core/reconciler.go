@@ -270,7 +270,7 @@ func (r *Reconciler) finalize(ctx context.Context, c candidate, state string, ma
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE execution_runs SET
 			persisted_event_seq = $2,
-			state = CASE WHEN state NOT IN ('successful','failed','canceled') THEN $3 ELSE state END,
+			state = CASE WHEN NOT run_is_terminal(state) THEN $3 ELSE state END,
 			finished_at = COALESCE(finished_at, $4)
 		WHERE id = $1`, c.RunID, maxSeq, state, fin); err != nil {
 		log.Printf("Reconciler: finalize run %s failed: %v", c.RunID, err)
@@ -278,7 +278,7 @@ func (r *Reconciler) finalize(ctx context.Context, c candidate, state string, ma
 	}
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE unified_jobs SET status = $2, finished_at = COALESCE(finished_at, $3)
-		WHERE id = $1 AND status NOT IN ('successful','failed','canceled','error')`,
+		WHERE id = $1 AND NOT job_is_terminal(status) AND status <> 'error'`,
 		c.UnifiedJobID, state, fin); err != nil {
 		log.Printf("Reconciler: finalize job %d failed: %v", c.UnifiedJobID, err)
 	}

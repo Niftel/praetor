@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -57,7 +58,7 @@ func TestReconcilerHeartbeatAware(t *testing.T) {
 	staleJob, staleRun := newRun(time.Hour, 10*time.Minute)    // heartbeat went stale
 	neverJob, neverRun := newRun(10*time.Minute, -1)           // started, never heartbeated
 
-	if err := sched.processTimedOutJobs(); err != nil {
+	if err := sched.processTimedOutJobs(context.Background()); err != nil {
 		t.Fatalf("processTimedOutJobs: %v", err)
 	}
 

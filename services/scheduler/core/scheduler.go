@@ -27,7 +27,6 @@ import (
 type Scheduler struct {
 	DB        *sqlx.DB
 	Ticker    *time.Ticker
-	Done      chan bool
 	Publisher EventPublisher
 
 	// Retention pruning (opt-in): when RetentionDays > 0, terminal jobs finished
@@ -48,48 +47,64 @@ func NewScheduler(db *sqlx.DB, interval time.Duration, publisher EventPublisher)
 	return &Scheduler{
 		DB:        db,
 		Ticker:    time.NewTicker(interval),
-		Done:      make(chan bool),
 		Publisher: publisher,
 	}
 }
 
-func (s *Scheduler) Start() {
+// tickTask is one pass of the scheduler tick. Splitting the tick into named tasks
+// keeps each pass independently testable and gives per-task error visibility
+// instead of one monolithic loop body.
+type tickTask struct {
+	name string
+	run  func(ctx context.Context) error
+}
+
+// tickTasks returns the ordered passes performed every tick. Order is
+// significant: claim → relay → schedules → timeouts → workflows → triggers →
+// prune. Passes that log internally (workflows/triggers/prune) return nil.
+func (s *Scheduler) tickTasks() []tickTask {
+	return []tickTask{
+		{"pending_jobs", s.processPendingJobs},
+		{"relay_outbox", s.relayOutbox},
+		{"schedules", s.processSchedules},
+		{"timeouts", s.processTimedOutJobs},
+		{"workflows", func(ctx context.Context) error { s.processWorkflows(ctx); return nil }},
+		{"event_triggers", func(ctx context.Context) error { s.processEventTriggers(ctx); return nil }},
+		{"prune", func(ctx context.Context) error { s.maybePrune(ctx); return nil }},
+	}
+}
+
+// Start runs the tick loop until ctx is canceled. Cancellation is the only stop
+// signal (no separate Done channel); the ticker is stopped on exit.
+func (s *Scheduler) Start(ctx context.Context) {
+	defer s.Ticker.Stop()
+	tasks := s.tickTasks()
 	log.Println("Scheduler started")
 	for {
 		select {
-		case <-s.Done:
+		case <-ctx.Done():
+			log.Println("Scheduler stopped")
 			return
 		case <-s.Ticker.C:
-			tickStart := time.Now()
-			if err := s.processPendingJobs(); err != nil {
-				log.Printf("Error processing jobs: %v", err)
-			}
-			if err := s.relayOutbox(); err != nil {
-				log.Printf("Error relaying outbox: %v", err)
-			}
-			if err := s.processSchedules(); err != nil {
-				log.Printf("Error processing schedules: %v", err)
-			}
-			if err := s.processTimedOutJobs(); err != nil {
-				log.Printf("Error processing timed out jobs: %v", err)
-			}
-			s.processWorkflows()
-			s.processEventTriggers()
-			s.maybePrune()
-			TickDuration.Observe(time.Since(tickStart).Seconds())
+			s.runTick(ctx, tasks)
 		}
 	}
 }
 
-func (s *Scheduler) Stop() {
-	s.Ticker.Stop()
-	s.Done <- true
-	log.Println("Scheduler stopped")
+// runTick executes every tick task in order, isolating each task's error so one
+// failing pass neither aborts the tick nor is silently swallowed.
+func (s *Scheduler) runTick(ctx context.Context, tasks []tickTask) {
+	tickStart := time.Now()
+	for _, t := range tasks {
+		if err := t.run(ctx); err != nil {
+			log.Printf("scheduler tick task %q: %v", t.name, err)
+			TickTaskErrors.WithLabelValues(t.name).Inc()
+		}
+	}
+	TickDuration.Observe(time.Since(tickStart).Seconds())
 }
 
-func (s *Scheduler) processPendingJobs() error {
-	ctx := context.Background()
-
+func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 	// Transaction for atomic claim-and-schedule
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -395,59 +410,64 @@ func (s *Scheduler) processPendingJobs() error {
 // stream and marks them sent. FOR UPDATE SKIP LOCKED makes it safe to run from
 // multiple schedulers; the request stream's dedup window makes a re-publish
 // after a crash (sent on the bus but not yet marked) harmless.
-func (s *Scheduler) relayOutbox() error {
-	ctx := context.Background()
-
-	tx, err := s.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
+func (s *Scheduler) relayOutbox(ctx context.Context) error {
+	// Recover orphaned claims: rows left 'sending' by a relay that crashed after
+	// claiming but before publishing/marking. Only stale claims are reset so a
+	// concurrent scheduler's in-flight batch isn't disturbed; the request stream's
+	// dedup window makes any resulting re-publish harmless.
+	if _, err := s.DB.ExecContext(ctx, `
+		UPDATE execution_outbox SET status = 'pending'
+		WHERE status = 'sending' AND sent_at < now() - interval '2 minutes'`); err != nil {
+		log.Printf("outbox: failed to recover stale claims: %v", err)
 	}
-	defer tx.Rollback()
 
+	// Atomically claim a batch. The single UPDATE ... RETURNING takes and releases
+	// its row locks within the statement, so the NATS publishes below run with no
+	// open transaction and no locks held — a publish can no longer be stranded
+	// inside an uncommitted tx (the previous dual-write hazard).
 	type outboxRow struct {
 		ID      int64           `db:"id"`
 		Payload json.RawMessage `db:"payload"`
 	}
 	var rows []outboxRow
-	if err := tx.SelectContext(ctx, &rows, `
-		SELECT id, payload FROM execution_outbox
-		WHERE status = 'pending'
-		ORDER BY id
-		FOR UPDATE SKIP LOCKED
-		LIMIT 50`); err != nil {
-		return fmt.Errorf("failed to select outbox rows: %w", err)
-	}
-	if len(rows) == 0 {
-		return nil
+	if err := s.DB.SelectContext(ctx, &rows, `
+		UPDATE execution_outbox SET status = 'sending', sent_at = now()
+		WHERE id IN (
+			SELECT id FROM execution_outbox
+			WHERE status = 'pending'
+			ORDER BY id
+			FOR UPDATE SKIP LOCKED
+			LIMIT 50
+		)
+		RETURNING id, payload`); err != nil {
+		return fmt.Errorf("failed to claim outbox rows: %w", err)
 	}
 
 	for _, row := range rows {
 		var req events.ExecutionRequest
 		if err := json.Unmarshal(row.Payload, &req); err != nil {
 			log.Printf("outbox: dropping unparseable row %d: %v", row.ID, err)
-			logExec(ctx, tx, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
+			logExec(ctx, s.DB, `UPDATE execution_outbox SET status = 'failed', attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
 		if err := s.Publisher.PublishExecutionRequest(&req); err != nil {
-			// Leave the row pending so it is retried on the next tick.
+			// Return the row to the queue for the next tick.
 			log.Printf("outbox: publish failed for row %d (will retry): %v", row.ID, err)
-			logExec(ctx, tx, `UPDATE execution_outbox SET attempts = attempts + 1 WHERE id = $1`, row.ID)
+			logExec(ctx, s.DB, `UPDATE execution_outbox SET status = 'pending', attempts = attempts + 1 WHERE id = $1`, row.ID)
 			continue
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := s.DB.ExecContext(ctx,
 			`UPDATE execution_outbox SET status = 'sent', sent_at = now(), attempts = attempts + 1 WHERE id = $1`,
-			row.ID,
-		); err != nil {
-			return fmt.Errorf("failed to mark outbox row %d sent: %w", row.ID, err)
+			row.ID); err != nil {
+			// Published but couldn't mark sent; leaving it 'sending' means stale-claim
+			// recovery requeues it and dedup makes the re-publish harmless.
+			log.Printf("outbox: published row %d but failed to mark sent: %v", row.ID, err)
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
-func (s *Scheduler) processSchedules() error {
-	ctx := context.Background()
-
+func (s *Scheduler) processSchedules(ctx context.Context) error {
 	// Transaction
 	tx, err := s.DB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -516,9 +536,7 @@ func (s *Scheduler) processSchedules() error {
 
 // processTimedOutJobs marks jobs that are stuck in running/queued state as failed.
 // This catches cases where the host-runner crashes silently without sending events.
-func (s *Scheduler) processTimedOutJobs() error {
-	ctx := context.Background()
-
+func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	// Heartbeat-aware reconciliation. A long-running job is NOT failed merely for
 	// running a long time; it is declared lost only when its liveness signal
 	// disappears. The host-runner stamps execution_runs.last_heartbeat_at every
@@ -598,13 +616,30 @@ func (s *Scheduler) processTimedOutJobs() error {
 		SET state = 'failed', finished_at = now()
 		FROM stuck
 		WHERE er.id = stuck.current_run_id
-		  AND er.state NOT IN ('successful', 'failed', 'canceled', 'lost')`,
+		  AND NOT run_is_terminal(er.state) AND er.state <> 'lost'`,
 		fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())),
 	)
 	if err != nil {
 		log.Printf("Error reconciling stuck queued jobs: %v", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
 		log.Printf("Marked %d queued jobs as failed (never started)", rows)
+	}
+
+	// Void any still-pending outbox row whose run is already terminal. Without
+	// this, a launch that was reaped above (or canceled) while its outbox row was
+	// unsent — e.g. NATS was down so the relay never published — would be published
+	// on recovery and bootstrap a "ghost run" the DB already calls failed. The
+	// relay only picks status='pending', so flipping it to 'failed' retires it.
+	if vr, verr := s.DB.ExecContext(ctx, `
+		UPDATE execution_outbox o
+		SET status = 'failed', attempts = attempts + 1
+		FROM execution_runs er
+		WHERE o.execution_run_id = er.id
+		  AND o.status = 'pending'
+		  AND er.state IN ('failed', 'canceled')`); verr != nil {
+		log.Printf("Error voiding outbox for terminal runs: %v", verr)
+	} else if n, _ := vr.RowsAffected(); n > 0 {
+		log.Printf("Voided %d pending outbox launch(es) for already-terminal runs", n)
 	}
 
 	return nil
