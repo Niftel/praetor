@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -42,15 +43,28 @@ func genWebhookKey() string {
 	return hex.EncodeToString(b)
 }
 
+// TemplateStore is the templates-domain data access the handler depends on
+// (implemented by services/api/store.TemplateStore). Declared consumer-side.
+type TemplateStore interface {
+	ListAll(ctx context.Context, limit, offset int) ([]models.JobTemplate, error)
+	CountAll(ctx context.Context) (int64, error)
+	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.JobTemplate, error)
+	Get(ctx context.Context, id int64) (models.JobTemplate, error)
+	Create(ctx context.Context, input models.JobTemplate) (models.JobTemplate, error)
+	Update(ctx context.Context, id int64, input models.JobTemplate) (models.JobTemplate, error)
+	Delete(ctx context.Context, id int64) error
+}
+
 // TemplatesResource handles job template operations
 type TemplatesResource struct {
 	DB *sqlx.DB
 	*Authorizer
+	store TemplateStore
 }
 
 // NewTemplatesResource creates a new templates resource handler
 func NewTemplatesResource(db *sqlx.DB) *TemplatesResource {
-	return &TemplatesResource{DB: db, Authorizer: NewAuthorizer(db)}
+	return &TemplatesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTemplateStore(db)}
 }
 
 // Routes creates a REST router for the Templates resource
@@ -77,11 +91,12 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 	var total int64
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
-		if err := rs.DB.SelectContext(r.Context(), &templates, `SELECT `+store.JobTemplateCols+` FROM job_templates ORDER BY id DESC LIMIT $1 OFFSET $2`, pg.Limit, pg.Offset); err != nil {
+		var err error
+		if templates, err = rs.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		_ = rs.DB.Get(&total, "SELECT count(*) FROM job_templates")
+		total, _ = rs.store.CountAll(r.Context())
 	} else {
 		ids, err := rs.readableIDs(r, rbac.ContentTypeJobTemplate)
 		if err != nil {
@@ -89,9 +104,7 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if len(ids) > 0 {
-			q, args, _ := sqlx.In(`SELECT `+store.JobTemplateCols+` FROM job_templates WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, pg.Limit, pg.Offset)
-			q = rs.DB.Rebind(q)
-			if err := rs.DB.SelectContext(r.Context(), &templates, q, args...); err != nil {
+			if templates, err = rs.store.ListByIDs(r.Context(), ids, pg.Limit, pg.Offset); err != nil {
 				render.ErrInternal(err).Render(w, r)
 				return
 			}
@@ -167,45 +180,8 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	tx, err := rs.DB.Beginx()
+	created, err := rs.store.Create(r.Context(), input)
 	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	defer tx.Rollback()
-
-	// 1. Insert into unified_job_templates to get ID
-	var ujtID int64
-	err = tx.QueryRowxContext(r.Context(), "INSERT INTO unified_job_templates (name) VALUES ($1) RETURNING id", input.Name).Scan(&ujtID)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	input.UnifiedJobTemplateID = &ujtID
-
-	// 2. Insert into job_templates
-	query := `
-		INSERT INTO job_templates (organization_id, name, description, playbook, playbook_content, project_id, inventory_id, job_type, verbosity, unified_job_template_id, credential_id, extra_vars, job_limit, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec, webhook_enabled, webhook_service, webhook_key, use_fact_cache, execution_pack_id, allow_simultaneous)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-		RETURNING ` + store.JobTemplateCols
-
-	var created models.JobTemplate
-	err = tx.QueryRowxContext(r.Context(), query,
-		input.OrganizationID, input.Name, input.Description,
-		input.Playbook, input.PlaybookContent, input.ProjectID, input.InventoryID,
-		input.JobType, input.Verbosity, ujtID, input.CredentialID,
-		input.ExtraVars, input.JobLimit, input.AskVariablesOnLaunch, input.AskLimitOnLaunch,
-		input.SurveyEnabled, input.SurveySpec,
-		input.WebhookEnabled, input.WebhookService, input.WebhookKey, input.UseFactCache,
-		input.ExecutionPackID, input.AllowSimultaneous,
-	).StructScan(&created)
-
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -227,9 +203,7 @@ func (rs *TemplatesResource) GetTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var template models.JobTemplate
-	query := `SELECT ` + store.JobTemplateCols + ` FROM job_templates WHERE id = $1`
-	err = rs.DB.GetContext(r.Context(), &template, query, id)
+	template, err := rs.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(nil).Render(w, r)
 		return
@@ -273,28 +247,7 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		input.WebhookKey = genWebhookKey()
 	}
 
-	query := `
-		UPDATE job_templates
-		SET name = $2, description = $3, playbook = $4, playbook_content = $5,
-		    project_id = $6, verbosity = $7, inventory_id = $8, credential_id = $9,
-		    extra_vars = $10, job_limit = $11, ask_variables_on_launch = $12, ask_limit_on_launch = $13,
-		    survey_enabled = $14, survey_spec = $15,
-		    webhook_enabled = $16, webhook_service = $17, webhook_key = $18, use_fact_cache = $19,
-		    execution_pack_id = $20, allow_simultaneous = $21,
-		    modified_at = now()
-		WHERE id = $1
-		RETURNING ` + store.JobTemplateCols
-
-	var updated models.JobTemplate
-	err = rs.DB.QueryRowxContext(r.Context(), query,
-		id, input.Name, input.Description, input.Playbook,
-		input.PlaybookContent, input.ProjectID, input.Verbosity, input.InventoryID, input.CredentialID,
-		input.ExtraVars, input.JobLimit, input.AskVariablesOnLaunch, input.AskLimitOnLaunch,
-		input.SurveyEnabled, input.SurveySpec,
-		input.WebhookEnabled, input.WebhookService, input.WebhookKey, input.UseFactCache,
-		input.ExecutionPackID, input.AllowSimultaneous,
-	).StructScan(&updated)
-
+	updated, err := rs.store.Update(r.Context(), id, input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -316,9 +269,7 @@ func (rs *TemplatesResource) DeleteTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	query := `DELETE FROM job_templates WHERE id = $1`
-	_, err = rs.DB.ExecContext(r.Context(), query, id)
-	if err != nil {
+	if err := rs.store.Delete(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
