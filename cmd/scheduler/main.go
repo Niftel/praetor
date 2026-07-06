@@ -13,11 +13,13 @@ import (
 	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"
+	"github.com/praetordev/praetor/pkg/plog"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	core "github.com/praetordev/praetor/services/scheduler/core"
 )
 
 func main() {
+	plog.Configure("scheduler")
 	log.Println("Starting Scheduler Service...")
 
 	// Fail fast on a missing/invalid encryption key (used to decrypt Galaxy

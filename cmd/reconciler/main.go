@@ -16,10 +16,12 @@ import (
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
+	"github.com/praetordev/praetor/pkg/plog"
 	core "github.com/praetordev/praetor/services/reconciler/core"
 )
 
 func main() {
+	plog.Configure("reconciler")
 	log.Println("Starting Reconciler Service...")
 
 	// Credentials are decrypted to reconstruct the SSH identity for a past run.

@@ -7,11 +7,13 @@ import (
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
+	"github.com/praetordev/praetor/pkg/plog"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/consumer/core"
 )
 
 func main() {
+	plog.Configure("consumer")
 	log.Println("Starting Event Consumer Service...")
 
 	// Fail fast on a missing/invalid encryption key (used to decrypt

@@ -11,11 +11,13 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/ingestclient"
 	"github.com/praetordev/praetor/pkg/metrics"
+	"github.com/praetordev/praetor/pkg/plog"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/executor/core"
 )
 
 func main() {
+	plog.Configure("executor")
 	log.Println("Starting Executor Agent...")
 
 	// 1. Setup Infrastructure

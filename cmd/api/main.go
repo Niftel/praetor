@@ -8,10 +8,12 @@ import (
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/praetor/pkg/env"
+	"github.com/praetordev/praetor/pkg/plog"
 	"github.com/praetordev/praetor/services/api"
 )
 
 func main() {
+	plog.Configure("api") // structured logging seam; stdlib log routes through it
 	// Fail fast on a missing/invalid encryption or JWT secret rather than
 	// booting with a known-insecure built-in key.
 	if err := crypto.ValidateSecrets(true); err != nil {

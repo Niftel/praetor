@@ -11,6 +11,7 @@ import (
 	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"
+	"github.com/praetordev/praetor/pkg/plog"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/ingestion/core"
 	"github.com/praetordev/praetor/services/ingestion/handler"
@@ -34,6 +35,7 @@ func internalAuth(token string) func(http.Handler) http.Handler {
 }
 
 func main() {
+	plog.Configure("ingestion")
 	port := env.String("INGESTION_PORT", "8081") // Distinct port from API (8080)
 
 	log.Println("Starting Ingestion Service...")
