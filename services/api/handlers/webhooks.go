@@ -1,10 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -14,17 +14,32 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
+
+// WebhookStore is the inbound-webhook data access the handler depends on.
+type WebhookStore interface {
+	JobTemplateWebhook(ctx context.Context, id int64) (store.JobTemplateWebhook, error)
+	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) (int, error)
+	InsertWebhookJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte) (int64, error)
+	WorkflowTemplateWebhook(ctx context.Context, id int64) (store.WorkflowTemplateWebhook, error)
+	LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error)
+	PackWebhook(ctx context.Context, id int64) (store.PackWebhook, error)
+	QueuePackRebuild(ctx context.Context, id int64) error
+	NodeCallbackInfo(ctx context.Context, id int64) (store.NodeCallbackInfo, error)
+	ReleaseNode(ctx context.Context, id int64, result string) error
+}
 
 // WebhooksResource handles inbound (provider -> Praetor) webhooks that launch a
 // job template. There is no user auth: the per-template shared secret is the
 // authorization, verified per provider.
 type WebhooksResource struct {
-	DB *sqlx.DB
+	DB    *sqlx.DB
+	store WebhookStore
 }
 
 func NewWebhooksResource(db *sqlx.DB) *WebhooksResource {
-	return &WebhooksResource{DB: db}
+	return &WebhooksResource{DB: db, store: store.NewWebhookStore(db)}
 }
 
 // Handle POST /api/v1/webhooks/job-templates/{id}/{service}
@@ -36,18 +51,10 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	service := chi.URLParam(r, "service")
 
-	var t struct {
-		Name              string `db:"name"`
-		UJTID             *int64 `db:"unified_job_template_id"`
-		WebhookEnabled    bool   `db:"webhook_enabled"`
-		WebhookKey        string `db:"webhook_key"`
-		AllowSimultaneous bool   `db:"allow_simultaneous"`
-	}
 	// Not-found and verification-failure are deliberately indistinguishable from
 	// the outside (don't reveal which templates have webhooks).
-	if err := rs.DB.Get(&t,
-		`SELECT name, unified_job_template_id, webhook_enabled, webhook_key, allow_simultaneous
-		 FROM job_templates WHERE id = $1`, id); err != nil || !t.WebhookEnabled || t.UJTID == nil {
+	t, err := rs.store.JobTemplateWebhook(r.Context(), id)
+	if err != nil || !t.WebhookEnabled || t.UJTID == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -79,22 +86,15 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 	// webhook trigger while a prior run is still active (webhooks can fire in
 	// bursts; skip rather than queue an overlapping run).
 	if !t.AllowSimultaneous {
-		var active int
-		if err := rs.DB.Get(&active,
-			`SELECT count(*) FROM unified_jobs
-			 WHERE unified_job_template_id = $1 AND status NOT IN ('successful','failed','canceled','error')`,
-			*t.UJTID); err == nil && active > 0 {
+		if active, err := rs.store.ActiveJobCount(r.Context(), *t.UJTID); err == nil && active > 0 {
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "skipped", "reason": "a run of this template is already active"})
 			return
 		}
 	}
 
-	var jobID int64
-	if err := rs.DB.QueryRowx(`
-		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
-		VALUES ($1, $2, 'pending', now(), $3) RETURNING id`,
-		t.Name+" (webhook)", *t.UJTID, jobArgs).Scan(&jobID); err != nil {
+	jobID, err := rs.store.InsertWebhookJob(r.Context(), t.Name+" (webhook)", *t.UJTID, jobArgs)
+	if err != nil {
 		if isActiveRunConflict(err) {
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "skipped", "reason": "a run of this template is already active"})
@@ -117,12 +117,8 @@ func (rs *WebhooksResource) HandleWorkflow(w http.ResponseWriter, r *http.Reques
 	}
 	service := chi.URLParam(r, "service")
 
-	var t struct {
-		WebhookEnabled bool   `db:"webhook_enabled"`
-		WebhookKey     string `db:"webhook_key"`
-	}
-	if err := rs.DB.Get(&t,
-		`SELECT webhook_enabled, webhook_key FROM workflow_templates WHERE id = $1`, id); err != nil || !t.WebhookEnabled {
+	t, err := rs.store.WorkflowTemplateWebhook(r.Context(), id)
+	if err != nil || !t.WebhookEnabled {
 		http.NotFound(w, r)
 		return
 	}
@@ -135,34 +131,8 @@ func (rs *WebhooksResource) HandleWorkflow(w http.ResponseWriter, r *http.Reques
 
 	// Snapshot the template's nodes into a running workflow_jobs run, exactly as
 	// LaunchWorkflow does; the scheduler's workflow runner then walks it.
-	tx, err := rs.DB.Beginx()
+	wjID, err := rs.store.LaunchWorkflowSnapshot(r.Context(), id)
 	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	defer tx.Rollback()
-	var wjID int64
-	if err := tx.QueryRowx(
-		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`, id).Scan(&wjID); err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	// Snapshot nodes and edges into the run so later template edits don't affect it.
-	if _, err := tx.Exec(
-		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
-		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
-		wjID, id); err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if _, err := tx.Exec(
-		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
-		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
-		wjID, id); err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if err := tx.Commit(); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -180,11 +150,8 @@ func (rs *WebhooksResource) HandlePack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	service := chi.URLParam(r, "service")
-	var t struct {
-		Name       string         `db:"name"`
-		WebhookKey sql.NullString `db:"webhook_key"`
-	}
-	if err := rs.DB.Get(&t, `SELECT name, webhook_key FROM execution_packs WHERE id=$1`, id); err != nil || !t.WebhookKey.Valid || t.WebhookKey.String == "" {
+	t, err := rs.store.PackWebhook(r.Context(), id)
+	if err != nil || !t.WebhookKey.Valid || t.WebhookKey.String == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -193,7 +160,7 @@ func (rs *WebhooksResource) HandlePack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "signature verification failed", http.StatusUnauthorized)
 		return
 	}
-	if _, err := rs.DB.Exec(`UPDATE execution_packs SET status='pending' WHERE id=$1`, id); err != nil {
+	if err := rs.store.QueuePackRebuild(r.Context(), id); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -212,12 +179,8 @@ func (rs *WebhooksResource) HandleNodeCallback(w http.ResponseWriter, r *http.Re
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	var n struct {
-		Status     string `db:"status"`
-		EventToken string `db:"event_token"`
-	}
-	if err := rs.DB.Get(&n,
-		`SELECT status, COALESCE(event_token,'') AS event_token FROM workflow_job_nodes WHERE id=$1`, id); err != nil {
+	n, err := rs.store.NodeCallbackInfo(r.Context(), id)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -245,8 +208,7 @@ func (rs *WebhooksResource) HandleNodeCallback(w http.ResponseWriter, r *http.Re
 	if payload.Status == "failed" || r.URL.Query().Get("result") == "failed" {
 		result = "failed"
 	}
-	if _, err := rs.DB.Exec(
-		`UPDATE workflow_job_nodes SET status=$1 WHERE id=$2 AND status='awaiting_event'`, result, id); err != nil {
+	if err := rs.store.ReleaseNode(r.Context(), id, result); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
