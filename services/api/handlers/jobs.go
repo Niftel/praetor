@@ -44,17 +44,17 @@ func NewJobsResource(db *sqlx.DB, ingestionURL string) *JobsResource {
 	return &JobsResource{DB: db, Authorizer: NewAuthorizer(db), IngestionURL: ingestionURL, store: store.NewJobStore(db)}
 }
 
-// templateIDForRun resolves the job_templates.id that owns a given execution
-// run. ok is false when the run has no governing template (e.g. an ad-hoc job).
-func (rs *JobsResource) templateIDForRun(r *http.Request, runID uuid.UUID) (int64, bool) {
-	id, ok, _ := rs.store.TemplateIDForRun(r.Context(), runID)
-	return id, ok
-}
-
 // authorizeRunRead allows reading a run/its events when the user can read the
 // governing template; runs with no template are visible only to superuser/auditor.
+// A real DB error fails the request closed with a 500 rather than being masked
+// as an unowned run.
 func (rs *JobsResource) authorizeRunRead(w http.ResponseWriter, r *http.Request, runID uuid.UUID) bool {
-	if jtID, ok := rs.templateIDForRun(r, runID); ok {
+	jtID, ok, err := rs.store.TemplateIDForRun(r.Context(), runID)
+	if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return false
+	}
+	if ok {
 		return rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actRead)
 	}
 	uc := currentUser(r)

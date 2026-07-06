@@ -6,6 +6,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -74,7 +76,10 @@ func (s *JobStore) ListEvents(ctx context.Context, runID uuid.UUID) ([]models.Jo
 
 // TemplateIDForRun resolves the job_templates.id governing a run, via
 // unified_job -> unified_job_template_id. ok is false when the run has no
-// governing template (e.g. an ad-hoc / inventory-sync job).
+// governing template (e.g. an ad-hoc / inventory-sync job) — that is the ONLY
+// no-error miss. A real DB error is returned as an error, never masked as
+// "no template": masking it would silently degrade the RBAC decision at the
+// callsite (a transient outage would read as an unowned run).
 func (s *JobStore) TemplateIDForRun(ctx context.Context, runID uuid.UUID) (int64, bool, error) {
 	var jtID int64
 	err := s.db.GetContext(ctx, &jtID, `
@@ -83,8 +88,11 @@ func (s *JobStore) TemplateIDForRun(ctx context.Context, runID uuid.UUID) (int64
 		JOIN unified_jobs uj ON er.unified_job_id = uj.id
 		JOIN job_templates jt ON uj.unified_job_template_id = jt.unified_job_template_id
 		WHERE er.id = $1`, runID)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
 	}
 	return jtID, true, nil
 }
