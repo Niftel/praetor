@@ -61,7 +61,7 @@ func (s *EventStore) IntakeSource(ctx context.Context, name string) (EventIntake
 	var src EventIntakeSource
 	err := s.db.GetContext(ctx, &src,
 		`SELECT id, organization_id, token FROM event_sources WHERE name=$1 AND enabled`, name)
-	return src, err
+	return src, wrap("EventStore.IntakeSource", err)
 }
 
 // RulesForIntake returns enabled rules in a source's org bound to it or global.
@@ -72,7 +72,7 @@ func (s *EventStore) RulesForIntake(ctx context.Context, orgID, sourceID int64) 
 		 FROM event_rules
 		 WHERE enabled AND organization_id=$1 AND (source_id=$2 OR source_id IS NULL)
 		 ORDER BY id`, orgID, sourceID)
-	return rules, err
+	return rules, wrap("EventStore.RulesForIntake", err)
 }
 
 // InsertReceipt records an intake receipt (best-effort by the caller).
@@ -80,7 +80,7 @@ func (s *EventStore) InsertReceipt(ctx context.Context, sourceID int64, payload 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO event_receipts (source_id, payload, matched, launched) VALUES ($1,$2,$3,$4)`,
 		sourceID, payload, matched, launched)
-	return err
+	return wrap("EventStore.InsertReceipt", err)
 }
 
 // JobTemplateAllowSimultaneous reports whether a template permits overlapping runs.
@@ -107,32 +107,32 @@ func (s *EventStore) InsertEventJob(ctx context.Context, name string, unifiedTem
 		`INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
 		 VALUES ($1,$2,'pending',now(),$3) RETURNING id`,
 		name, unifiedTemplateID, jobArgs).Scan(&id)
-	return id, err
+	return id, wrap("EventStore.InsertEventJob", err)
 }
 
 // LaunchWorkflowSnapshot snapshots a workflow template into a running run.
 func (s *EventStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error) {
 	tx, err := s.db.Beginx()
 	if err != nil {
-		return 0, err
+		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}
 	defer tx.Rollback()
 	var wjID int64
 	if err := tx.QueryRowxContext(ctx,
 		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1,'running') RETURNING id`, workflowTemplateID).Scan(&wjID); err != nil {
-		return 0, err
+		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
 		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
 		wjID, workflowTemplateID); err != nil {
-		return 0, err
+		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
 		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
 		wjID, workflowTemplateID); err != nil {
-		return 0, err
+		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}
 	return wjID, tx.Commit()
 }
@@ -142,7 +142,7 @@ func (s *EventStore) ListSources(ctx context.Context) ([]EventSource, error) {
 	out := []EventSource{}
 	err := s.db.SelectContext(ctx, &out,
 		`SELECT id, organization_id, name, '' AS token, enabled, created_at FROM event_sources ORDER BY name`)
-	return out, err
+	return out, wrap("EventStore.ListSources", err)
 }
 
 // CreateSource inserts an event source and returns it (token included once).
@@ -153,13 +153,13 @@ func (s *EventStore) CreateSource(ctx context.Context, in EventSource) (EventSou
 		 VALUES ($1,$2,$3, COALESCE($4,true))
 		 RETURNING id, organization_id, name, token, enabled, created_at`,
 		in.OrganizationID, in.Name, in.Token, in.Enabled).StructScan(&created)
-	return created, err
+	return created, wrap("EventStore.CreateSource", err)
 }
 
 // DeleteSource removes an event source.
 func (s *EventStore) DeleteSource(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM event_sources WHERE id=$1`, id)
-	return err
+	return wrap("EventStore.DeleteSource", err)
 }
 
 // ListRules returns all event rules.
@@ -168,7 +168,7 @@ func (s *EventStore) ListRules(ctx context.Context) ([]EventRule, error) {
 	err := s.db.SelectContext(ctx, &out,
 		`SELECT id, organization_id, name, enabled, source_id, condition, unified_job_template_id, workflow_template_id, limit_field, created_at
 		 FROM event_rules ORDER BY id`)
-	return out, err
+	return out, wrap("EventStore.ListRules", err)
 }
 
 // CreateRule inserts an event rule (condition pre-validated by the caller).
@@ -179,11 +179,11 @@ func (s *EventStore) CreateRule(ctx context.Context, in EventRule) (EventRule, e
 		 VALUES ($1,$2, COALESCE($3,true), $4,$5,$6,$7,$8)
 		 RETURNING id, organization_id, name, enabled, source_id, condition, unified_job_template_id, workflow_template_id, limit_field, created_at`,
 		in.OrganizationID, in.Name, in.Enabled, in.SourceID, in.Condition, in.UnifiedJobTemplateID, in.WorkflowTemplateID, in.LimitField).StructScan(&created)
-	return created, err
+	return created, wrap("EventStore.CreateRule", err)
 }
 
 // DeleteRule removes an event rule.
 func (s *EventStore) DeleteRule(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM event_rules WHERE id=$1`, id)
-	return err
+	return wrap("EventStore.DeleteRule", err)
 }

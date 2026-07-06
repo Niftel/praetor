@@ -114,11 +114,11 @@ func (s *WorkflowStore) ListByOrgs(ctx context.Context, orgIDs []int64) ([]Workf
 	}
 	q, args, err := sqlx.In(`SELECT id, organization_id, name FROM workflow_templates WHERE organization_id IN (?) ORDER BY name`, orgIDs)
 	if err != nil {
-		return nil, err
+		return nil, wrap("WorkflowStore.ListByOrgs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &rows, q, args...)
-	return rows, err
+	return rows, wrap("WorkflowStore.ListByOrgs", err)
 }
 
 // insertGraph inserts a spec's nodes and edges for a template id (applying the
@@ -132,7 +132,7 @@ func insertGraph(ctx context.Context, tx *sqlx.Tx, templateID int64, spec Workfl
 			`INSERT INTO workflow_nodes (workflow_template_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			templateID, n.NodeKey, n.NodeType, n.JobTemplateID, n.Name, wfNullIfEmpty(n.WebhookURL), wfNullIfEmpty(n.WebhookBody)); err != nil {
-			return err
+			return wrap("insertGraph", err)
 		}
 	}
 	for _, e := range spec.Edges {
@@ -142,7 +142,7 @@ func insertGraph(ctx context.Context, tx *sqlx.Tx, templateID int64, spec Workfl
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO workflow_node_edges (workflow_template_id, parent_key, child_key, edge_type)
 			 VALUES ($1, $2, $3, $4)`, templateID, e.ParentKey, e.ChildKey, e.EdgeType); err != nil {
-			return err
+			return wrap("insertGraph", err)
 		}
 	}
 	return nil
@@ -153,7 +153,7 @@ func insertGraph(ctx context.Context, tx *sqlx.Tx, templateID int64, spec Workfl
 func (s *WorkflowStore) Create(ctx context.Context, spec WorkflowSpec) (int64, error) {
 	tx, err := s.db.Beginx()
 	if err != nil {
-		return 0, err
+		return 0, wrap("WorkflowStore.Create", err)
 	}
 	defer tx.Rollback()
 	var id int64
@@ -161,10 +161,10 @@ func (s *WorkflowStore) Create(ctx context.Context, spec WorkflowSpec) (int64, e
 		`INSERT INTO workflow_templates (organization_id, name, webhook_enabled, webhook_service, webhook_key, allow_simultaneous)
 		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		spec.OrganizationID, spec.Name, spec.WebhookEnabled, wfNullIfEmpty(spec.WebhookService), wfNullIfEmpty(spec.WebhookKey), spec.AllowSimultaneous).Scan(&id); err != nil {
-		return 0, err
+		return 0, wrap("WorkflowStore.Create", err)
 	}
 	if err := insertGraph(ctx, tx, id, spec); err != nil {
-		return 0, err
+		return 0, wrap("WorkflowStore.Create", err)
 	}
 	return id, tx.Commit()
 }
@@ -174,7 +174,7 @@ func (s *WorkflowStore) Create(ctx context.Context, spec WorkflowSpec) (int64, e
 func (s *WorkflowStore) Update(ctx context.Context, id int64, spec WorkflowSpec) error {
 	tx, err := s.db.Beginx()
 	if err != nil {
-		return err
+		return wrap("WorkflowStore.Update", err)
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx,
@@ -182,16 +182,16 @@ func (s *WorkflowStore) Update(ctx context.Context, id int64, spec WorkflowSpec)
 		        webhook_key=COALESCE(NULLIF($5,''), webhook_key), allow_simultaneous=$6, modified_at=now()
 		 WHERE id=$1`,
 		id, spec.Name, spec.WebhookEnabled, wfNullIfEmpty(spec.WebhookService), wfNullIfEmpty(spec.WebhookKey), spec.AllowSimultaneous); err != nil {
-		return err
+		return wrap("WorkflowStore.Update", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_node_edges WHERE workflow_template_id=$1`, id); err != nil {
-		return err
+		return wrap("WorkflowStore.Update", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_nodes WHERE workflow_template_id=$1`, id); err != nil {
-		return err
+		return wrap("WorkflowStore.Update", err)
 	}
 	if err := insertGraph(ctx, tx, id, spec); err != nil {
-		return err
+		return wrap("WorkflowStore.Update", err)
 	}
 	return tx.Commit()
 }
@@ -203,7 +203,7 @@ func (s *WorkflowStore) TemplateNodes(ctx context.Context, templateID int64) ([]
 		`SELECT node_key, node_type, job_template_id, name,
 		        COALESCE(webhook_url,'') AS webhook_url, COALESCE(webhook_body,'') AS webhook_body
 		 FROM workflow_nodes WHERE workflow_template_id=$1`, templateID)
-	return nodes, err
+	return nodes, wrap("WorkflowStore.TemplateNodes", err)
 }
 
 // TemplateEdges returns a template's edges.
@@ -211,7 +211,7 @@ func (s *WorkflowStore) TemplateEdges(ctx context.Context, templateID int64) ([]
 	edges := []WorkflowEdge{}
 	err := s.db.SelectContext(ctx, &edges,
 		`SELECT parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$1`, templateID)
-	return edges, err
+	return edges, wrap("WorkflowStore.TemplateEdges", err)
 }
 
 // TemplateMeta returns a template's webhook/concurrency config.
@@ -219,13 +219,13 @@ func (s *WorkflowStore) TemplateMeta(ctx context.Context, templateID int64) (Wor
 	var wh WorkflowMeta
 	err := s.db.GetContext(ctx, &wh,
 		`SELECT webhook_enabled, COALESCE(webhook_service,'') AS webhook_service, allow_simultaneous FROM workflow_templates WHERE id=$1`, templateID)
-	return wh, err
+	return wh, wrap("WorkflowStore.TemplateMeta", err)
 }
 
 // Delete removes a workflow template.
 func (s *WorkflowStore) Delete(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM workflow_templates WHERE id=$1`, id)
-	return err
+	return wrap("WorkflowStore.Delete", err)
 }
 
 // AllowSimultaneous reports whether a workflow permits overlapping runs.
@@ -240,7 +240,7 @@ func (s *WorkflowStore) ActiveRunCount(ctx context.Context, id int64) (int, erro
 	var active int
 	err := s.db.GetContext(ctx, &active,
 		`SELECT count(*) FROM workflow_jobs WHERE workflow_template_id = $1 AND status NOT IN ('successful','failed','canceled','error')`, id)
-	return active, err
+	return active, wrap("WorkflowStore.ActiveRunCount", err)
 }
 
 // LaunchSnapshot snapshots a template's nodes+edges into a running workflow_jobs
@@ -248,25 +248,25 @@ func (s *WorkflowStore) ActiveRunCount(ctx context.Context, id int64) (int, erro
 func (s *WorkflowStore) LaunchSnapshot(ctx context.Context, templateID int64) (int64, error) {
 	tx, err := s.db.Beginx()
 	if err != nil {
-		return 0, err
+		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
 	defer tx.Rollback()
 	var wjID int64
 	if err := tx.QueryRowxContext(ctx,
 		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`, templateID).Scan(&wjID); err != nil {
-		return 0, err
+		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
 		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
 		wjID, templateID); err != nil {
-		return 0, err
+		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
 		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
 		wjID, templateID); err != nil {
-		return 0, err
+		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
 	return wjID, tx.Commit()
 }
@@ -285,11 +285,11 @@ func (s *WorkflowStore) ListJobsByOrgs(ctx context.Context, orgIDs []int64) ([]W
 		WHERE wt.organization_id IN (?)
 		ORDER BY wj.id DESC LIMIT 100`, orgIDs)
 	if err != nil {
-		return nil, err
+		return nil, wrap("WorkflowStore.ListJobsByOrgs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &rows, q, args...)
-	return rows, err
+	return rows, wrap("WorkflowStore.ListJobsByOrgs", err)
 }
 
 // JobMeta returns a run's header (with owning org) by id.
@@ -300,7 +300,7 @@ func (s *WorkflowStore) JobMeta(ctx context.Context, id int64) (WorkflowJobMeta,
 		FROM workflow_jobs wj
 		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
 		WHERE wj.id=$1`, id)
-	return meta, err
+	return meta, wrap("WorkflowStore.JobMeta", err)
 }
 
 // JobNodes returns a run's nodes with each node's latest execution run id.
@@ -319,7 +319,7 @@ func (s *WorkflowStore) JobNodes(ctx context.Context, jobID int64) ([]WorkflowJo
 		) er ON true
 		WHERE wjn.workflow_job_id = $1
 		ORDER BY wjn.id`, jobID)
-	return nodes, err
+	return nodes, wrap("WorkflowStore.JobNodes", err)
 }
 
 // JobEdges returns a run's edges.
@@ -327,7 +327,7 @@ func (s *WorkflowStore) JobEdges(ctx context.Context, jobID int64) ([]WorkflowEd
 	edges := []WorkflowEdge{}
 	err := s.db.SelectContext(ctx, &edges,
 		`SELECT parent_key, child_key, edge_type FROM workflow_job_edges WHERE workflow_job_id=$1`, jobID)
-	return edges, err
+	return edges, wrap("WorkflowStore.JobEdges", err)
 }
 
 // NodeApprovalOrg returns the org owning the workflow a job node belongs to.
@@ -339,12 +339,12 @@ func (s *WorkflowStore) NodeApprovalOrg(ctx context.Context, nodeID int64) (int6
 		JOIN workflow_jobs wj ON wj.id = wjn.workflow_job_id
 		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
 		WHERE wjn.id=$1`, nodeID)
-	return org, err
+	return org, wrap("WorkflowStore.NodeApprovalOrg", err)
 }
 
 // SetNodeApproval transitions an awaiting_approval node to approved/rejected.
 func (s *WorkflowStore) SetNodeApproval(ctx context.Context, nodeID int64, status string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE workflow_job_nodes SET status=$1 WHERE id=$2 AND status='awaiting_approval'`, status, nodeID)
-	return err
+	return wrap("WorkflowStore.SetNodeApproval", err)
 }

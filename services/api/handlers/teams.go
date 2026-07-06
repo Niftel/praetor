@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -105,7 +106,7 @@ func (h *ContentHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	input.ID = id
 
 	updated, err := h.teams.Update(r.Context(), input)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
 	} else if err != nil {

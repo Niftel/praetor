@@ -37,7 +37,7 @@ func (s *NotificationStore) ListTemplates(ctx context.Context, orgID int64) ([]N
 	err := s.db.SelectContext(ctx, &nts,
 		`SELECT id, organization_id, name, notification_type FROM notification_templates
 		 WHERE organization_id = $1 ORDER BY name`, orgID)
-	return nts, err
+	return nts, wrap("NotificationStore.ListTemplates", err)
 }
 
 // CreateTemplate inserts a notification template (config already encrypted) and
@@ -48,20 +48,20 @@ func (s *NotificationStore) CreateTemplate(ctx context.Context, orgID int64, nam
 		`INSERT INTO notification_templates (organization_id, name, notification_type, config)
 		 VALUES ($1, $2, $3, $4) RETURNING id`,
 		orgID, name, notificationType, config).Scan(&id)
-	return id, err
+	return id, wrap("NotificationStore.CreateTemplate", err)
 }
 
 // TemplateOrg returns the org that owns a notification template.
 func (s *NotificationStore) TemplateOrg(ctx context.Context, id int64) (int64, error) {
 	var orgID int64
 	err := s.db.GetContext(ctx, &orgID, `SELECT organization_id FROM notification_templates WHERE id = $1`, id)
-	return orgID, err
+	return orgID, wrap("NotificationStore.TemplateOrg", err)
 }
 
 // DeleteTemplate removes a notification template.
 func (s *NotificationStore) DeleteTemplate(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM notification_templates WHERE id = $1`, id)
-	return err
+	return wrap("NotificationStore.DeleteTemplate", err)
 }
 
 // JobTemplateAttachments lists the notifications attached to a job template.
@@ -73,7 +73,7 @@ func (s *NotificationStore) JobTemplateAttachments(ctx context.Context, jobTempl
 		JOIN notification_templates nt ON nt.id = jtn.notification_template_id
 		WHERE jtn.job_template_id = $1
 		ORDER BY jtn.event, nt.name`, jobTemplateID)
-	return rows, err
+	return rows, wrap("NotificationStore.JobTemplateAttachments", err)
 }
 
 // AttachToJobTemplate attaches a notification to a job template for an event (idempotent).
@@ -81,7 +81,7 @@ func (s *NotificationStore) AttachToJobTemplate(ctx context.Context, jobTemplate
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO job_template_notifications (job_template_id, notification_template_id, event)
 		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, jobTemplateID, notificationTemplateID, event)
-	return err
+	return wrap("NotificationStore.AttachToJobTemplate", err)
 }
 
 // DetachFromJobTemplate removes a notification attachment.
@@ -89,5 +89,5 @@ func (s *NotificationStore) DetachFromJobTemplate(ctx context.Context, jobTempla
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM job_template_notifications WHERE job_template_id=$1 AND notification_template_id=$2 AND event=$3`,
 		jobTemplateID, notificationTemplateID, event)
-	return err
+	return wrap("NotificationStore.DetachFromJobTemplate", err)
 }

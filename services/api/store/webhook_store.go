@@ -48,7 +48,7 @@ func (s *WebhookStore) JobTemplateWebhook(ctx context.Context, id int64) (JobTem
 	err := s.db.GetContext(ctx, &t,
 		`SELECT name, unified_job_template_id, webhook_enabled, webhook_key, allow_simultaneous
 		 FROM job_templates WHERE id = $1`, id)
-	return t, err
+	return t, wrap("WebhookStore.JobTemplateWebhook", err)
 }
 
 // ActiveJobCount counts non-terminal jobs for a unified template (concurrency guard).
@@ -58,7 +58,7 @@ func (s *WebhookStore) ActiveJobCount(ctx context.Context, unifiedTemplateID int
 		`SELECT count(*) FROM unified_jobs
 		 WHERE unified_job_template_id = $1 AND status NOT IN ('successful','failed','canceled','error')`,
 		unifiedTemplateID)
-	return active, err
+	return active, wrap("WebhookStore.ActiveJobCount", err)
 }
 
 // InsertWebhookJob creates a pending unified_job from a webhook and returns its
@@ -69,7 +69,7 @@ func (s *WebhookStore) InsertWebhookJob(ctx context.Context, name string, unifie
 		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
 		VALUES ($1, $2, 'pending', now(), $3) RETURNING id`,
 		name, unifiedTemplateID, jobArgs).Scan(&jobID)
-	return jobID, err
+	return jobID, wrap("WebhookStore.InsertWebhookJob", err)
 }
 
 // WorkflowTemplateWebhook loads a workflow template's webhook config by id.
@@ -77,7 +77,7 @@ func (s *WebhookStore) WorkflowTemplateWebhook(ctx context.Context, id int64) (W
 	var t WorkflowTemplateWebhook
 	err := s.db.GetContext(ctx, &t,
 		`SELECT webhook_enabled, webhook_key FROM workflow_templates WHERE id = $1`, id)
-	return t, err
+	return t, wrap("WebhookStore.WorkflowTemplateWebhook", err)
 }
 
 // LaunchWorkflowSnapshot snapshots a workflow template's nodes+edges into a new
@@ -85,28 +85,28 @@ func (s *WebhookStore) WorkflowTemplateWebhook(ctx context.Context, id int64) (W
 func (s *WebhookStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error) {
 	tx, err := s.db.Beginx()
 	if err != nil {
-		return 0, err
+		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
 	defer tx.Rollback()
 	var wjID int64
 	if err := tx.QueryRowxContext(ctx,
 		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`, workflowTemplateID).Scan(&wjID); err != nil {
-		return 0, err
+		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
 		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
 		wjID, workflowTemplateID); err != nil {
-		return 0, err
+		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
 		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
 		wjID, workflowTemplateID); err != nil {
-		return 0, err
+		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
 	return wjID, nil
 }
@@ -115,13 +115,13 @@ func (s *WebhookStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTempl
 func (s *WebhookStore) PackWebhook(ctx context.Context, id int64) (PackWebhook, error) {
 	var t PackWebhook
 	err := s.db.GetContext(ctx, &t, `SELECT name, webhook_key FROM execution_packs WHERE id=$1`, id)
-	return t, err
+	return t, wrap("WebhookStore.PackWebhook", err)
 }
 
 // QueuePackRebuild marks a pack pending (git-push rebuild).
 func (s *WebhookStore) QueuePackRebuild(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE execution_packs SET status='pending' WHERE id=$1`, id)
-	return err
+	return wrap("WebhookStore.QueuePackRebuild", err)
 }
 
 // NodeCallbackInfo loads a workflow job node's status + event token by id.
@@ -129,12 +129,12 @@ func (s *WebhookStore) NodeCallbackInfo(ctx context.Context, id int64) (NodeCall
 	var n NodeCallbackInfo
 	err := s.db.GetContext(ctx, &n,
 		`SELECT status, COALESCE(event_token,'') AS event_token FROM workflow_job_nodes WHERE id=$1`, id)
-	return n, err
+	return n, wrap("WebhookStore.NodeCallbackInfo", err)
 }
 
 // ReleaseNode transitions an awaiting_event node to the given result.
 func (s *WebhookStore) ReleaseNode(ctx context.Context, id int64, result string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE workflow_job_nodes SET status=$1 WHERE id=$2 AND status='awaiting_event'`, result, id)
-	return err
+	return wrap("WebhookStore.ReleaseNode", err)
 }

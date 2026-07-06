@@ -21,7 +21,7 @@ func NewHostStore(db *sqlx.DB) *HostStore { return &HostStore{db: db} }
 func (s *HostStore) InventoryIDForHost(ctx context.Context, hostID int64) (int64, error) {
 	var invID int64
 	err := s.db.GetContext(ctx, &invID, `SELECT inventory_id FROM hosts WHERE id = $1`, hostID)
-	return invID, err
+	return invID, wrap("HostStore.InventoryIDForHost", err)
 }
 
 // Facts returns a host's cached ansible_facts (empty object when none).
@@ -37,14 +37,14 @@ func (s *HostStore) Facts(ctx context.Context, hostID int64) json.RawMessage {
 func (s *HostStore) ListByInventory(ctx context.Context, inventoryID int64) ([]models.Host, error) {
 	hosts := []models.Host{}
 	err := s.db.SelectContext(ctx, &hosts, `SELECT `+HostCols+` FROM hosts WHERE inventory_id = $1 ORDER BY name`, inventoryID)
-	return hosts, err
+	return hosts, wrap("HostStore.ListByInventory", err)
 }
 
 // Get returns a single host by id.
 func (s *HostStore) Get(ctx context.Context, id int64) (models.Host, error) {
 	var host models.Host
 	err := s.db.GetContext(ctx, &host, `SELECT `+HostCols+` FROM hosts WHERE id = $1`, id)
-	return host, err
+	return host, wrap("HostStore.Get", err)
 }
 
 // Create inserts a host (enabled defaulted true by the caller path) and returns it.
@@ -57,7 +57,7 @@ func (s *HostStore) Create(ctx context.Context, input models.Host) (models.Host,
 	err := s.db.QueryRowxContext(ctx, query,
 		input.InventoryID, input.Name, input.Description, input.Variables, true, input.IsControlNode,
 	).StructScan(&created)
-	return created, err
+	return created, wrap("HostStore.Create", err)
 }
 
 // Update applies the merged host fields and returns the persisted row.
@@ -71,13 +71,13 @@ func (s *HostStore) Update(ctx context.Context, id int64, host models.Host) (mod
 	err := s.db.QueryRowxContext(ctx, query,
 		id, host.Name, host.Description, host.Variables, host.Enabled, host.IsControlNode,
 	).StructScan(&updated)
-	return updated, err
+	return updated, wrap("HostStore.Update", err)
 }
 
 // Delete removes a host by id.
 func (s *HostStore) Delete(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM hosts WHERE id = $1`, id)
-	return err
+	return wrap("HostStore.Delete", err)
 }
 
 // GroupsForHost returns the groups a host is a member of, name-ordered.
@@ -89,7 +89,7 @@ func (s *HostStore) GroupsForHost(ctx context.Context, hostID int64) ([]models.G
 		WHERE hg.host_id = $1
 		ORDER BY g.name`
 	err := s.db.SelectContext(ctx, &groups, query, hostID)
-	return groups, err
+	return groups, wrap("HostStore.GroupsForHost", err)
 }
 
 // SetRunner makes hostID the sole runner host of its inventory (clearing any
@@ -98,21 +98,21 @@ func (s *HostStore) SetRunner(ctx context.Context, hostID int64) (models.Host, e
 	var host models.Host
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return host, err
+		return host, wrap("HostStore.SetRunner", err)
 	}
 	defer tx.Rollback()
 	var inventoryID int64
 	if err := tx.GetContext(ctx, &inventoryID, `SELECT inventory_id FROM hosts WHERE id = $1`, hostID); err != nil {
-		return host, err
+		return host, wrap("HostStore.SetRunner", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE hosts SET is_runner_host = FALSE WHERE inventory_id = $1`, inventoryID); err != nil {
-		return host, err
+		return host, wrap("HostStore.SetRunner", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE hosts SET is_runner_host = TRUE WHERE id = $1`, hostID); err != nil {
-		return host, err
+		return host, wrap("HostStore.SetRunner", err)
 	}
 	if err := tx.GetContext(ctx, &host, `SELECT `+HostCols+` FROM hosts WHERE id = $1`, hostID); err != nil {
-		return host, err
+		return host, wrap("HostStore.SetRunner", err)
 	}
 	return host, tx.Commit()
 }
@@ -123,5 +123,5 @@ func (s *HostStore) RunnerHeartbeat(ctx context.Context, hostID int64) error {
 		UPDATE hosts
 		SET runner_last_seen = NOW(), runner_healthy = TRUE
 		WHERE id = $1 AND is_runner_host = TRUE`, hostID)
-	return err
+	return wrap("HostStore.RunnerHeartbeat", err)
 }

@@ -29,7 +29,7 @@ func (s *TokenStore) ListForUser(ctx context.Context, userID int64) ([]APIToken,
 	err := s.db.SelectContext(ctx, &tokens,
 		`SELECT id, name, last_used_at, expires_at, created_at
 		 FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC`, userID)
-	return tokens, err
+	return tokens, wrap("TokenStore.ListForUser", err)
 }
 
 // Create inserts a token (hash precomputed by the caller) and returns its view.
@@ -40,7 +40,7 @@ func (s *TokenStore) Create(ctx context.Context, userID int64, name, tokenHash s
 		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, name, last_used_at, expires_at, created_at`,
 		userID, name, tokenHash, expiresAt)
-	return out, err
+	return out, wrap("TokenStore.Create", err)
 }
 
 // Revoke deletes a token. When restrictToUser is non-nil the delete is scoped to
@@ -54,7 +54,7 @@ func (s *TokenStore) Revoke(ctx context.Context, id int64, restrictToUser *int64
 		res, err = s.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = $1 AND user_id = $2`, id, *restrictToUser)
 	}
 	if err != nil {
-		return 0, err
+		return 0, wrap("TokenStore.Revoke", err)
 	}
 	return res.RowsAffected()
 }

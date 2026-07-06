@@ -19,14 +19,14 @@ func NewProjectStore(db *sqlx.DB) *ProjectStore { return &ProjectStore{db: db} }
 func (s *ProjectStore) ListAll(ctx context.Context, limit, offset int) ([]models.Project, error) {
 	projects := []models.Project{}
 	err := s.db.SelectContext(ctx, &projects, `SELECT `+ProjectCols+` FROM projects ORDER BY id LIMIT $1 OFFSET $2`, limit, offset)
-	return projects, err
+	return projects, wrap("ProjectStore.ListAll", err)
 }
 
 // CountAll returns the total number of projects.
 func (s *ProjectStore) CountAll(ctx context.Context) (int64, error) {
 	var total int64
 	err := s.db.GetContext(ctx, &total, "SELECT count(*) FROM projects")
-	return total, err
+	return total, wrap("ProjectStore.CountAll", err)
 }
 
 // ListByIDs returns a page of the projects whose id is in ids.
@@ -37,18 +37,18 @@ func (s *ProjectStore) ListByIDs(ctx context.Context, ids []int64, limit, offset
 	}
 	q, args, err := sqlx.In(`SELECT `+ProjectCols+` FROM projects WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, ids, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, wrap("ProjectStore.ListByIDs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &projects, q, args...)
-	return projects, err
+	return projects, wrap("ProjectStore.ListByIDs", err)
 }
 
 // Get returns a single project by id.
 func (s *ProjectStore) Get(ctx context.Context, id int64) (models.Project, error) {
 	var project models.Project
 	err := s.db.GetContext(ctx, &project, "SELECT "+ProjectCols+" FROM projects WHERE id = $1", id)
-	return project, err
+	return project, wrap("ProjectStore.Get", err)
 }
 
 // Create inserts a project and returns the persisted row.
@@ -60,12 +60,12 @@ func (s *ProjectStore) Create(ctx context.Context, input models.Project) (models
 	var created models.Project
 	rows, err := s.db.NamedQuery(query, input)
 	if err != nil {
-		return created, err
+		return created, wrap("ProjectStore.Create", err)
 	}
 	defer rows.Close()
 	if rows.Next() {
 		if err := rows.StructScan(&created); err != nil {
-			return created, err
+			return created, wrap("ProjectStore.Create", err)
 		}
 		return created, nil
 	}
@@ -75,5 +75,5 @@ func (s *ProjectStore) Create(ctx context.Context, input models.Project) (models
 // TouchModified stamps modified_at to signal a completed SCM sync.
 func (s *ProjectStore) TouchModified(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE projects SET modified_at = NOW() WHERE id = $1", id)
-	return err
+	return wrap("ProjectStore.TouchModified", err)
 }

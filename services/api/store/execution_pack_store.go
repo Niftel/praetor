@@ -37,7 +37,7 @@ func NewExecutionPackStore(db *sqlx.DB) *ExecutionPackStore { return &ExecutionP
 func (s *ExecutionPackStore) List(ctx context.Context) ([]ExecutionPack, error) {
 	packs := []ExecutionPack{}
 	err := s.db.SelectContext(ctx, &packs, `SELECT `+execPackReadCols+` FROM execution_packs ORDER BY name`)
-	return packs, err
+	return packs, wrap("ExecutionPackStore.List", err)
 }
 
 // Create inserts a pack (status decided by the caller) and returns it.
@@ -48,7 +48,7 @@ func (s *ExecutionPackStore) Create(ctx context.Context, in ExecutionPack, statu
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 RETURNING `+execPackReadCols,
 		in.Name, in.Description, in.Spec, status, in.SCMURL, in.SCMBranch, in.SpecPath, in.WebhookKey).StructScan(&created)
-	return created, err
+	return created, wrap("ExecutionPackStore.Create", err)
 }
 
 // Update replaces a pack's editable fields (webhook_key preserved unless a new
@@ -63,7 +63,7 @@ func (s *ExecutionPackStore) Update(ctx context.Context, id int64, in ExecutionP
 		 WHERE id=$1
 		 RETURNING `+execPackReadCols,
 		id, in.Name, in.Description, in.Spec, in.SCMURL, in.SCMBranch, in.SpecPath, in.WebhookKey, status).StructScan(&updated)
-	return updated, err
+	return updated, wrap("ExecutionPackStore.Update", err)
 }
 
 // Rebuild re-queues a buildable pack (has a spec or git source); returns rows
@@ -73,7 +73,7 @@ func (s *ExecutionPackStore) Rebuild(ctx context.Context, id int64) (int64, erro
 		`UPDATE execution_packs SET status='pending', build_log=NULL
 		 WHERE id=$1 AND (spec IS NOT NULL OR scm_url IS NOT NULL)`, id)
 	if err != nil {
-		return 0, err
+		return 0, wrap("ExecutionPackStore.Rebuild", err)
 	}
 	return res.RowsAffected()
 }
@@ -81,5 +81,5 @@ func (s *ExecutionPackStore) Rebuild(ctx context.Context, id int64) (int64, erro
 // Delete removes a pack by id.
 func (s *ExecutionPackStore) Delete(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM execution_packs WHERE id = $1`, id)
-	return err
+	return wrap("ExecutionPackStore.Delete", err)
 }

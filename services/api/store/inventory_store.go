@@ -20,14 +20,14 @@ func (s *InventoryStore) ListAll(ctx context.Context, limit, offset int) ([]mode
 	inventories := []models.Inventory{}
 	err := s.db.SelectContext(ctx, &inventories,
 		`SELECT `+InventoryCols+` FROM inventories ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset)
-	return inventories, err
+	return inventories, wrap("InventoryStore.ListAll", err)
 }
 
 // CountAll returns the total number of inventories.
 func (s *InventoryStore) CountAll(ctx context.Context) (int64, error) {
 	var total int64
 	err := s.db.GetContext(ctx, &total, "SELECT count(*) FROM inventories")
-	return total, err
+	return total, wrap("InventoryStore.CountAll", err)
 }
 
 // ListByIDs returns a page of the inventories whose id is in ids.
@@ -38,18 +38,18 @@ func (s *InventoryStore) ListByIDs(ctx context.Context, ids []int64, limit, offs
 	}
 	q, args, err := sqlx.In(`SELECT `+InventoryCols+` FROM inventories WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, wrap("InventoryStore.ListByIDs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &inventories, q, args...)
-	return inventories, err
+	return inventories, wrap("InventoryStore.ListByIDs", err)
 }
 
 // Get returns a single inventory by id.
 func (s *InventoryStore) Get(ctx context.Context, id int64) (models.Inventory, error) {
 	var inv models.Inventory
 	err := s.db.GetContext(ctx, &inv, `SELECT `+InventoryCols+` FROM inventories WHERE id = $1`, id)
-	return inv, err
+	return inv, wrap("InventoryStore.Get", err)
 }
 
 // Create inserts an inventory and returns the persisted row.
@@ -62,7 +62,7 @@ func (s *InventoryStore) Create(ctx context.Context, input models.Inventory) (mo
 	err := s.db.QueryRowxContext(ctx, query,
 		input.OrganizationID, input.Name, input.Description, input.Kind, input.Content,
 	).StructScan(&created)
-	return created, err
+	return created, wrap("InventoryStore.Create", err)
 }
 
 // UpdateContent updates name/description/content (the /{id} edit path).
@@ -74,7 +74,7 @@ func (s *InventoryStore) UpdateContent(ctx context.Context, id int64, input mode
 		RETURNING ` + InventoryCols
 	var updated models.Inventory
 	err := s.db.QueryRowxContext(ctx, query, id, input.Name, input.Description, input.Content).StructScan(&updated)
-	return updated, err
+	return updated, wrap("InventoryStore.UpdateContent", err)
 }
 
 // UpdateKind updates name/description/kind (the /{inventoryId} edit path).
@@ -86,13 +86,13 @@ func (s *InventoryStore) UpdateKind(ctx context.Context, id int64, input models.
 		RETURNING ` + InventoryCols
 	var updated models.Inventory
 	err := s.db.QueryRowxContext(ctx, query, id, input.Name, input.Description, input.Kind).StructScan(&updated)
-	return updated, err
+	return updated, wrap("InventoryStore.UpdateKind", err)
 }
 
 // Delete removes an inventory by id.
 func (s *InventoryStore) Delete(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM inventories WHERE id = $1`, id)
-	return err
+	return wrap("InventoryStore.Delete", err)
 }
 
 // --- inventory sources ---
@@ -115,7 +115,7 @@ func (s *InventoryStore) ListSources(ctx context.Context, inventoryID int64) ([]
 	err := s.db.SelectContext(ctx, &sources,
 		`SELECT id, inventory_id, name, source_kind, source, credential_id, update_on_launch, last_synced_at
 		 FROM inventory_sources WHERE inventory_id = $1 ORDER BY name`, inventoryID)
-	return sources, err
+	return sources, wrap("InventoryStore.ListSources", err)
 }
 
 // CreateSource inserts an inventory source and returns its id.
@@ -125,20 +125,20 @@ func (s *InventoryStore) CreateSource(ctx context.Context, inventoryID int64, na
 		`INSERT INTO inventory_sources (inventory_id, name, source_kind, source, credential_id, update_on_launch)
 		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		inventoryID, name, kind, source, credentialID, updateOnLaunch).Scan(&id)
-	return id, err
+	return id, wrap("InventoryStore.CreateSource", err)
 }
 
 // DeleteSource removes an inventory source scoped to its inventory.
 func (s *InventoryStore) DeleteSource(ctx context.Context, sourceID, inventoryID int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM inventory_sources WHERE id = $1 AND inventory_id = $2`, sourceID, inventoryID)
-	return err
+	return wrap("InventoryStore.DeleteSource", err)
 }
 
 // SourceName returns a source's name (scoped to its inventory).
 func (s *InventoryStore) SourceName(ctx context.Context, sourceID, inventoryID int64) (string, error) {
 	var name string
 	err := s.db.GetContext(ctx, &name, `SELECT name FROM inventory_sources WHERE id = $1 AND inventory_id = $2`, sourceID, inventoryID)
-	return name, err
+	return name, wrap("InventoryStore.SourceName", err)
 }
 
 // EnqueueSourceSync creates a pending unified_job for an inventory-source sync
@@ -148,7 +148,7 @@ func (s *InventoryStore) EnqueueSourceSync(ctx context.Context, jobName string, 
 	err := s.db.QueryRowxContext(ctx,
 		`INSERT INTO unified_jobs (name, status, created_at, job_args)
 		 VALUES ($1, 'pending', now(), $2) RETURNING id`, jobName, jobArgs).Scan(&jobID)
-	return jobID, err
+	return jobID, wrap("InventoryStore.EnqueueSourceSync", err)
 }
 
 // --- inventory import (upsert host/group by name within an inventory) ---
@@ -157,7 +157,7 @@ func (s *InventoryStore) EnqueueSourceSync(ctx context.Context, jobName string, 
 func (s *InventoryStore) HostByName(ctx context.Context, inventoryID int64, name string) (models.Host, error) {
 	var host models.Host
 	err := s.db.GetContext(ctx, &host, `SELECT `+HostCols+` FROM hosts WHERE inventory_id = $1 AND name = $2`, inventoryID, name)
-	return host, err
+	return host, wrap("InventoryStore.HostByName", err)
 }
 
 // CreateImportHost inserts a minimal enabled host during import.
@@ -166,14 +166,14 @@ func (s *InventoryStore) CreateImportHost(ctx context.Context, inventoryID int64
 	err := s.db.QueryRowxContext(ctx,
 		`INSERT INTO hosts (inventory_id, name, enabled) VALUES ($1, $2, true) RETURNING `+HostCols,
 		inventoryID, name).StructScan(&host)
-	return host, err
+	return host, wrap("InventoryStore.CreateImportHost", err)
 }
 
 // GroupByName finds a group by name within an inventory.
 func (s *InventoryStore) GroupByName(ctx context.Context, inventoryID int64, name string) (models.Group, error) {
 	var group models.Group
 	err := s.db.GetContext(ctx, &group, `SELECT `+GroupCols+` FROM groups WHERE inventory_id = $1 AND name = $2`, inventoryID, name)
-	return group, err
+	return group, wrap("InventoryStore.GroupByName", err)
 }
 
 // CreateImportGroup inserts a minimal group during import.
@@ -182,11 +182,11 @@ func (s *InventoryStore) CreateImportGroup(ctx context.Context, inventoryID int6
 	err := s.db.QueryRowxContext(ctx,
 		`INSERT INTO groups (inventory_id, name) VALUES ($1, $2) RETURNING `+GroupCols,
 		inventoryID, name).StructScan(&group)
-	return group, err
+	return group, wrap("InventoryStore.CreateImportGroup", err)
 }
 
 // LinkHostGroup adds a host to a group (idempotent).
 func (s *InventoryStore) LinkHostGroup(ctx context.Context, hostID, groupID int64) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hostID, groupID)
-	return err
+	return wrap("InventoryStore.LinkHostGroup", err)
 }

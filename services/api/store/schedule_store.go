@@ -21,7 +21,7 @@ func NewScheduleStore(db *sqlx.DB) *ScheduleStore { return &ScheduleStore{db: db
 func (s *ScheduleStore) ListAll(ctx context.Context) ([]models.Schedule, error) {
 	schedules := []models.Schedule{}
 	err := s.db.SelectContext(ctx, &schedules, "SELECT "+ScheduleCols+" FROM schedules ORDER BY id ASC")
-	return schedules, err
+	return schedules, wrap("ScheduleStore.ListAll", err)
 }
 
 // ListByTargetOrgIDs returns schedules whose target template lives in one of orgIDs.
@@ -37,18 +37,18 @@ func (s *ScheduleStore) ListByTargetOrgIDs(ctx context.Context, orgIDs []int64) 
 		WHERE COALESCE(wt.organization_id, jt.organization_id) IN (?)
 		ORDER BY s.id ASC`, orgIDs)
 	if err != nil {
-		return nil, err
+		return nil, wrap("ScheduleStore.ListByTargetOrgIDs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &schedules, q, args...)
-	return schedules, err
+	return schedules, wrap("ScheduleStore.ListByTargetOrgIDs", err)
 }
 
 // Get returns a single schedule by id.
 func (s *ScheduleStore) Get(ctx context.Context, id int64) (models.Schedule, error) {
 	var sched models.Schedule
 	err := s.db.GetContext(ctx, &sched, "SELECT "+ScheduleCols+" FROM schedules WHERE id = $1", id)
-	return sched, err
+	return sched, wrap("ScheduleStore.Get", err)
 }
 
 // Create inserts a schedule (fields already computed by the caller) and returns
@@ -60,13 +60,13 @@ func (s *ScheduleStore) Create(ctx context.Context, sched models.Schedule) (int6
 		RETURNING id`
 	rows, err := s.db.NamedQuery(query, sched)
 	if err != nil {
-		return 0, err
+		return 0, wrap("ScheduleStore.Create", err)
 	}
 	defer rows.Close()
 	var id int64
 	if rows.Next() {
 		if err := rows.Scan(&id); err != nil {
-			return 0, err
+			return 0, wrap("ScheduleStore.Create", err)
 		}
 	}
 	return id, nil
@@ -82,13 +82,13 @@ func (s *ScheduleStore) Update(ctx context.Context, sched models.Schedule) error
 		    workflow_template_id=:workflow_template_id
 		WHERE id = :id`
 	_, err := s.db.NamedExecContext(ctx, query, sched)
-	return err
+	return wrap("ScheduleStore.Update", err)
 }
 
 // Delete removes a schedule by id.
 func (s *ScheduleStore) Delete(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM schedules WHERE id = $1", id)
-	return err
+	return wrap("ScheduleStore.Delete", err)
 }
 
 // TargetOrg resolves the organization of a schedule's target (workflow XOR job

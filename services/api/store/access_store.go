@@ -37,13 +37,13 @@ type ActivityEntry struct {
 	ID           int64     `json:"id" db:"id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UserID       *int64    `json:"user_id" db:"user_id"`
-	Username     string `json:"username" db:"username"`
-	Action       string `json:"action" db:"action"`
-	ResourceType string `json:"resource_type" db:"resource_type"`
-	ResourceID   *int64 `json:"resource_id" db:"resource_id"`
-	Method       string `json:"method" db:"method"`
-	Path         string `json:"path" db:"path"`
-	StatusCode   int    `json:"status_code" db:"status_code"`
+	Username     string    `json:"username" db:"username"`
+	Action       string    `json:"action" db:"action"`
+	ResourceType string    `json:"resource_type" db:"resource_type"`
+	ResourceID   *int64    `json:"resource_id" db:"resource_id"`
+	Method       string    `json:"method" db:"method"`
+	Path         string    `json:"path" db:"path"`
+	StatusCode   int       `json:"status_code" db:"status_code"`
 }
 
 // AccessStore is the data-access layer for the access/audit read endpoints.
@@ -60,7 +60,7 @@ func (s *AccessStore) RoleUsers(ctx context.Context, roleID int64) ([]AccessUser
 		SELECT u.id, u.username, COALESCE(u.first_name,'') AS first_name, COALESCE(u.last_name,'') AS last_name
 		FROM role_members rm JOIN users u ON u.id = rm.user_id
 		WHERE rm.role_id = $1 ORDER BY u.username`, roleID)
-	return users, err
+	return users, wrap("AccessStore.RoleUsers", err)
 }
 
 // RoleTeams returns the teams holding a role (compact view).
@@ -69,7 +69,7 @@ func (s *AccessStore) RoleTeams(ctx context.Context, roleID int64) ([]AccessTeam
 	err := s.db.SelectContext(ctx, &teams, `
 		SELECT t.id, t.name FROM team_roles tr JOIN teams t ON t.id = tr.team_id
 		WHERE tr.role_id = $1 ORDER BY t.name`, roleID)
-	return teams, err
+	return teams, wrap("AccessStore.RoleTeams", err)
 }
 
 // UserAccessRoles returns the roles a user holds directly, resolved to a name.
@@ -90,7 +90,7 @@ func (s *AccessStore) UserAccessRoles(ctx context.Context, userID int64) ([]User
 		JOIN roles r ON r.id = rm.role_id
 		WHERE rm.user_id = $1
 		ORDER BY r.content_type NULLS FIRST, resource_name, r.role_field`, userID)
-	return rows, err
+	return rows, wrap("AccessStore.UserAccessRoles", err)
 }
 
 // ActivityStream returns audit entries, optionally filtered by resource type and
@@ -112,5 +112,5 @@ func (s *AccessStore) ActivityStream(ctx context.Context, resourceType, action s
 
 	entries := []ActivityEntry{}
 	err := s.db.SelectContext(ctx, &entries, query, args...)
-	return entries, err
+	return entries, wrap("AccessStore.ActivityStream", err)
 }

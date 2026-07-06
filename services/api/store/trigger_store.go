@@ -48,7 +48,7 @@ func (s *TriggerStore) TriggerOrg(ctx context.Context, id int64) (int64, bool) {
 func (s *TriggerStore) ListEventAll(ctx context.Context) ([]EventTrigger, error) {
 	rows := []EventTrigger{}
 	err := s.db.SelectContext(ctx, &rows, `SELECT `+eventTriggerCols+` FROM event_triggers ORDER BY id`)
-	return rows, err
+	return rows, wrap("TriggerStore.ListEventAll", err)
 }
 
 // ListEventByOrgs returns event triggers scoped to a set of orgs.
@@ -59,11 +59,11 @@ func (s *TriggerStore) ListEventByOrgs(ctx context.Context, orgIDs []int64) ([]E
 	}
 	q, args, err := sqlx.In(`SELECT `+eventTriggerCols+` FROM event_triggers WHERE organization_id IN (?) ORDER BY id`, orgIDs)
 	if err != nil {
-		return nil, err
+		return nil, wrap("TriggerStore.ListEventByOrgs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &rows, q, args...)
-	return rows, err
+	return rows, wrap("TriggerStore.ListEventByOrgs", err)
 }
 
 // CreateEvent inserts an event trigger (enabled=true) and returns it.
@@ -75,7 +75,7 @@ func (s *TriggerStore) CreateEvent(ctx context.Context, in EventTrigger) (EventT
 		 RETURNING `+eventTriggerCols,
 		in.OrganizationID, in.Name, in.EventType, in.SourceUJTID, in.WorkflowTemplateID, in.UnifiedJobTemplateID,
 	).StructScan(&created)
-	return created, err
+	return created, wrap("TriggerStore.CreateEvent", err)
 }
 
 // UpdateEvent edits an event trigger (enabled taken verbatim) and returns it.
@@ -87,13 +87,13 @@ func (s *TriggerStore) UpdateEvent(ctx context.Context, id int64, in EventTrigge
 		 RETURNING `+eventTriggerCols,
 		id, in.Name, in.Enabled, in.EventType, in.SourceUJTID, in.WorkflowTemplateID, in.UnifiedJobTemplateID,
 	).StructScan(&updated)
-	return updated, err
+	return updated, wrap("TriggerStore.UpdateEvent", err)
 }
 
 // DeleteEvent removes an event trigger.
 func (s *TriggerStore) DeleteEvent(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM event_triggers WHERE id=$1`, id)
-	return err
+	return wrap("TriggerStore.DeleteEvent", err)
 }
 
 // scopedWebhookRows runs a webhook-source base query, org-filtered when !all.
@@ -101,15 +101,15 @@ func (s *TriggerStore) scopedWebhookRows(ctx context.Context, base string, all b
 	rows := []WebhookSourceRow{}
 	if all {
 		err := s.db.SelectContext(ctx, &rows, base+" ORDER BY name")
-		return rows, err
+		return rows, wrap("TriggerStore.scopedWebhookRows", err)
 	}
 	q, args, err := sqlx.In(base+" AND organization_id IN (?) ORDER BY name", orgIDs)
 	if err != nil {
-		return nil, err
+		return nil, wrap("TriggerStore.scopedWebhookRows", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &rows, q, args...)
-	return rows, err
+	return rows, wrap("TriggerStore.scopedWebhookRows", err)
 }
 
 // WebhookWorkflows lists webhook-enabled workflow templates (org-scoped when !all).
@@ -127,5 +127,5 @@ func (s *TriggerStore) WebhookPacks(ctx context.Context) ([]WebhookSourceRow, er
 	rows := []WebhookSourceRow{}
 	err := s.db.SelectContext(ctx, &rows,
 		`SELECT id, name, 'generic' AS service FROM execution_packs WHERE webhook_key IS NOT NULL AND webhook_key <> '' ORDER BY name`)
-	return rows, err
+	return rows, wrap("TriggerStore.WebhookPacks", err)
 }

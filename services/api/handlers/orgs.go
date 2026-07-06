@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -92,9 +93,9 @@ type TeamStore interface {
 type ContentHandler struct {
 	DB *sqlx.DB
 	*Authorizer
-	orgs     OrgStore
-	projects ProjectStore
-	roles    RoleStore
+	orgs          OrgStore
+	projects      ProjectStore
+	roles         RoleStore
 	teams         TeamStore
 	access        AccessStore
 	users         UserStore
@@ -231,7 +232,7 @@ func (h *ContentHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 	input.ID = id
 
 	updated, err := h.orgs.Update(r.Context(), input)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
 	} else if err != nil {

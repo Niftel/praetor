@@ -21,7 +21,7 @@ func NewCredentialStore(db *sqlx.DB) *CredentialStore { return &CredentialStore{
 func (s *CredentialStore) ListAll(ctx context.Context) ([]models.Credential, error) {
 	creds := []models.Credential{}
 	err := s.db.SelectContext(ctx, &creds, "SELECT "+CredentialCols+" FROM credentials ORDER BY id ASC")
-	return creds, err
+	return creds, wrap("CredentialStore.ListAll", err)
 }
 
 // ListByIDs returns the credentials whose id is in ids.
@@ -32,18 +32,18 @@ func (s *CredentialStore) ListByIDs(ctx context.Context, ids []int64) ([]models.
 	}
 	q, args, err := sqlx.In("SELECT "+CredentialCols+" FROM credentials WHERE id IN (?) ORDER BY id ASC", ids)
 	if err != nil {
-		return nil, err
+		return nil, wrap("CredentialStore.ListByIDs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &creds, q, args...)
-	return creds, err
+	return creds, wrap("CredentialStore.ListByIDs", err)
 }
 
 // Get returns a single credential by id.
 func (s *CredentialStore) Get(ctx context.Context, id int64) (models.Credential, error) {
 	var cred models.Credential
 	err := s.db.GetContext(ctx, &cred, "SELECT "+CredentialCols+" FROM credentials WHERE id = $1", id)
-	return cred, err
+	return cred, wrap("CredentialStore.Get", err)
 }
 
 // Create inserts a credential (inputs already processed/encrypted by the caller).
@@ -56,7 +56,7 @@ func (s *CredentialStore) Create(ctx context.Context, input models.Credential) (
 	err := s.db.QueryRowxContext(ctx, query,
 		input.OrganizationID, input.CredentialTypeID, input.Name, input.Description, input.Inputs,
 	).StructScan(&created)
-	return created, err
+	return created, wrap("CredentialStore.Create", err)
 }
 
 // Update applies name/description/inputs to a credential and returns the row.
@@ -70,13 +70,13 @@ func (s *CredentialStore) Update(ctx context.Context, id int64, input models.Cre
 	err := s.db.QueryRowxContext(ctx, query,
 		input.Name, input.Description, input.Inputs, id,
 	).StructScan(&updated)
-	return updated, err
+	return updated, wrap("CredentialStore.Update", err)
 }
 
 // Delete removes a credential by id.
 func (s *CredentialStore) Delete(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM credentials WHERE id = $1", id)
-	return err
+	return wrap("CredentialStore.Delete", err)
 }
 
 // CredentialTypeInputs returns the `inputs` schema JSON of a credential type —
@@ -85,7 +85,7 @@ func (s *CredentialStore) CredentialTypeInputs(ctx context.Context, typeID int64
 	var ct models.CredentialType
 	err := s.db.GetContext(ctx, &ct, "SELECT "+CredentialTypeCols+" FROM credential_types WHERE id = $1", typeID)
 	if err != nil {
-		return nil, err
+		return nil, wrap("CredentialStore.CredentialTypeInputs", err)
 	}
 	return ct.Inputs, nil
 }

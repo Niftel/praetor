@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -230,7 +231,7 @@ func (rs *JobsResource) GetExecutionRun(w http.ResponseWriter, r *http.Request) 
 	}
 
 	run, err := rs.store.GetRun(r.Context(), runID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		render.Render(w, r, ErrNotFound)
 		return
 	} else if err != nil {
@@ -330,7 +331,7 @@ func (rs *JobsResource) CreateJobEvent(w http.ResponseWriter, r *http.Request) {
 	// 1. Look up UnifiedJobID from ExecutionRun
 	unifiedJobID, err := rs.store.UnifiedJobIDForRun(r.Context(), runID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			render.Render(w, r, ErrNotFound)
 			return
 		}

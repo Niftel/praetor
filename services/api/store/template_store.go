@@ -19,14 +19,14 @@ func (s *TemplateStore) ListAll(ctx context.Context, limit, offset int) ([]model
 	templates := []models.JobTemplate{}
 	err := s.db.SelectContext(ctx, &templates,
 		`SELECT `+JobTemplateCols+` FROM job_templates ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset)
-	return templates, err
+	return templates, wrap("TemplateStore.ListAll", err)
 }
 
 // CountAll returns the total number of job templates.
 func (s *TemplateStore) CountAll(ctx context.Context) (int64, error) {
 	var total int64
 	err := s.db.GetContext(ctx, &total, "SELECT count(*) FROM job_templates")
-	return total, err
+	return total, wrap("TemplateStore.CountAll", err)
 }
 
 // ListByIDs returns a page of the job templates whose id is in ids.
@@ -37,18 +37,18 @@ func (s *TemplateStore) ListByIDs(ctx context.Context, ids []int64, limit, offse
 	}
 	q, args, err := sqlx.In(`SELECT `+JobTemplateCols+` FROM job_templates WHERE id IN (?) ORDER BY id DESC LIMIT ? OFFSET ?`, ids, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, wrap("TemplateStore.ListByIDs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &templates, q, args...)
-	return templates, err
+	return templates, wrap("TemplateStore.ListByIDs", err)
 }
 
 // Get returns a single job template by id.
 func (s *TemplateStore) Get(ctx context.Context, id int64) (models.JobTemplate, error) {
 	var t models.JobTemplate
 	err := s.db.GetContext(ctx, &t, `SELECT `+JobTemplateCols+` FROM job_templates WHERE id = $1`, id)
-	return t, err
+	return t, wrap("TemplateStore.Get", err)
 }
 
 // Create inserts a job template and its backing unified_job_templates row in one
@@ -58,14 +58,14 @@ func (s *TemplateStore) Create(ctx context.Context, input models.JobTemplate) (m
 	var created models.JobTemplate
 	tx, err := s.db.Beginx()
 	if err != nil {
-		return created, err
+		return created, wrap("TemplateStore.Create", err)
 	}
 	defer tx.Rollback()
 
 	// 1. Insert into unified_job_templates to get ID
 	var ujtID int64
 	if err := tx.QueryRowxContext(ctx, "INSERT INTO unified_job_templates (name) VALUES ($1) RETURNING id", input.Name).Scan(&ujtID); err != nil {
-		return created, err
+		return created, wrap("TemplateStore.Create", err)
 	}
 
 	// 2. Insert into job_templates
@@ -82,10 +82,10 @@ func (s *TemplateStore) Create(ctx context.Context, input models.JobTemplate) (m
 		input.WebhookEnabled, input.WebhookService, input.WebhookKey, input.UseFactCache,
 		input.ExecutionPackID, input.AllowSimultaneous,
 	).StructScan(&created); err != nil {
-		return created, err
+		return created, wrap("TemplateStore.Create", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return created, err
+		return created, wrap("TemplateStore.Create", err)
 	}
 	return created, nil
 }
@@ -112,11 +112,11 @@ func (s *TemplateStore) Update(ctx context.Context, id int64, input models.JobTe
 		input.WebhookEnabled, input.WebhookService, input.WebhookKey, input.UseFactCache,
 		input.ExecutionPackID, input.AllowSimultaneous,
 	).StructScan(&updated)
-	return updated, err
+	return updated, wrap("TemplateStore.Update", err)
 }
 
 // Delete removes a job template by id.
 func (s *TemplateStore) Delete(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM job_templates WHERE id = $1`, id)
-	return err
+	return wrap("TemplateStore.Delete", err)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -86,7 +87,7 @@ func (rs *SchedulesResource) GetSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	sched, err := rs.store.Get(r.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		render.Render(w, r, ErrNotFound)
 		return
 	} else if err != nil {

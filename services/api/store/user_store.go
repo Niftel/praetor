@@ -26,21 +26,21 @@ func NewUserStore(db *sqlx.DB) *UserStore { return &UserStore{db: db} }
 func (s *UserStore) List(ctx context.Context, limit, offset int) ([]models.User, error) {
 	users := []models.User{}
 	err := s.db.SelectContext(ctx, &users, `SELECT `+userListCols+` FROM users ORDER BY id LIMIT $1 OFFSET $2`, limit, offset)
-	return users, err
+	return users, wrap("UserStore.List", err)
 }
 
 // Count returns the total number of users.
 func (s *UserStore) Count(ctx context.Context) (int64, error) {
 	var total int64
 	err := s.db.GetContext(ctx, &total, "SELECT count(*) FROM users")
-	return total, err
+	return total, wrap("UserStore.Count", err)
 }
 
 // Get returns a single user by id.
 func (s *UserStore) Get(ctx context.Context, id int64) (models.User, error) {
 	var user models.User
 	err := s.db.GetContext(ctx, &user, `SELECT `+userListCols+` FROM users WHERE id = $1`, id)
-	return user, err
+	return user, wrap("UserStore.Get", err)
 }
 
 // ByUsernameWithHash loads a user including password_hash for login verification.
@@ -49,7 +49,7 @@ func (s *UserStore) ByUsernameWithHash(ctx context.Context, username string) (mo
 	err := s.db.GetContext(ctx, &user,
 		`SELECT id, username, password_hash, first_name, last_name, email, is_superuser, is_system_auditor, is_active FROM users WHERE username = $1`,
 		username)
-	return user, err
+	return user, wrap("UserStore.ByUsernameWithHash", err)
 }
 
 // Create inserts a user (PasswordHash precomputed by the caller) and returns it.
@@ -80,12 +80,12 @@ func (s *UserStore) namedReturning(query string, arg models.User) (models.User, 
 	var out models.User
 	rows, err := s.db.NamedQuery(query, arg)
 	if err != nil {
-		return out, err
+		return out, wrap("UserStore.namedReturning", err)
 	}
 	defer rows.Close()
 	if rows.Next() {
 		if err := rows.StructScan(&out); err != nil {
-			return out, err
+			return out, wrap("UserStore.namedReturning", err)
 		}
 	}
 	return out, nil
@@ -95,7 +95,7 @@ func (s *UserStore) namedReturning(query string, arg models.User) (models.User, 
 func (s *UserStore) Delete(ctx context.Context, id int64) (int64, error) {
 	res, err := s.db.ExecContext(ctx, "DELETE FROM users WHERE id = $1", id)
 	if err != nil {
-		return 0, err
+		return 0, wrap("UserStore.Delete", err)
 	}
 	return res.RowsAffected()
 }
@@ -110,7 +110,7 @@ func (s *UserStore) Organizations(ctx context.Context, userID int64) ([]models.O
 		JOIN role_members rm ON rm.role_id = r.id
 		WHERE rm.user_id = $1
 		ORDER BY o.id`, userID)
-	return orgs, err
+	return orgs, wrap("UserStore.Organizations", err)
 }
 
 // Teams returns the teams a user belongs to (via role membership or direct
@@ -129,5 +129,5 @@ func (s *UserStore) Teams(ctx context.Context, userID int64) ([]models.Team, err
 		JOIN team_members tm ON tm.team_id = t.id
 		WHERE tm.user_id = $1
 		ORDER BY id`, userID)
-	return teams, err
+	return teams, wrap("UserStore.Teams", err)
 }

@@ -26,14 +26,14 @@ func NewOrgStore(db *sqlx.DB) *OrgStore { return &OrgStore{db: db} }
 func (s *OrgStore) ListAll(ctx context.Context, limit, offset int) ([]models.Organization, error) {
 	orgs := []models.Organization{}
 	err := s.db.SelectContext(ctx, &orgs, `SELECT `+OrganizationCols+` FROM organizations ORDER BY id LIMIT $1 OFFSET $2`, limit, offset)
-	return orgs, err
+	return orgs, wrap("OrgStore.ListAll", err)
 }
 
 // CountAll returns the total number of organizations.
 func (s *OrgStore) CountAll(ctx context.Context) (int64, error) {
 	var total int64
 	err := s.db.GetContext(ctx, &total, "SELECT count(*) FROM organizations")
-	return total, err
+	return total, wrap("OrgStore.CountAll", err)
 }
 
 // ListByIDs returns a page of the organizations whose id is in ids.
@@ -44,18 +44,18 @@ func (s *OrgStore) ListByIDs(ctx context.Context, ids []int64, limit, offset int
 	}
 	q, args, err := sqlx.In(`SELECT `+OrganizationCols+` FROM organizations WHERE id IN (?) ORDER BY id LIMIT ? OFFSET ?`, ids, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, wrap("OrgStore.ListByIDs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &orgs, q, args...)
-	return orgs, err
+	return orgs, wrap("OrgStore.ListByIDs", err)
 }
 
 // Get returns a single organization by id.
 func (s *OrgStore) Get(ctx context.Context, id int64) (models.Organization, error) {
 	var org models.Organization
 	err := s.db.GetContext(ctx, &org, "SELECT "+OrganizationCols+" FROM organizations WHERE id = $1", id)
-	return org, err
+	return org, wrap("OrgStore.Get", err)
 }
 
 // Create inserts an organization and returns the persisted row.
@@ -82,12 +82,12 @@ func (s *OrgStore) namedReturning(query string, arg models.Organization) (models
 	var out models.Organization
 	rows, err := s.db.NamedQuery(query, arg)
 	if err != nil {
-		return out, err
+		return out, wrap("OrgStore.namedReturning", err)
 	}
 	defer rows.Close()
 	if rows.Next() {
 		if err := rows.StructScan(&out); err != nil {
-			return out, err
+			return out, wrap("OrgStore.namedReturning", err)
 		}
 		return out, nil
 	}
@@ -99,7 +99,7 @@ func (s *OrgStore) namedReturning(query string, arg models.Organization) (models
 func (s *OrgStore) Delete(ctx context.Context, id int64) (int64, error) {
 	res, err := s.db.ExecContext(ctx, "DELETE FROM organizations WHERE id = $1", id)
 	if err != nil {
-		return 0, err
+		return 0, wrap("OrgStore.Delete", err)
 	}
 	return res.RowsAffected()
 }
@@ -114,28 +114,28 @@ func (s *OrgStore) UsersByRoleField(ctx context.Context, orgID int64, roleField 
 		JOIN role_members rm ON u.id = rm.user_id
 		JOIN roles r ON rm.role_id = r.id
 		WHERE r.content_type = 'organization' AND r.object_id = $1 AND r.role_field = $2`, orgID, roleField)
-	return users, err
+	return users, wrap("OrgStore.UsersByRoleField", err)
 }
 
 // ListTeams returns an organization's teams.
 func (s *OrgStore) ListTeams(ctx context.Context, orgID int64) ([]models.Team, error) {
 	teams := []models.Team{}
 	err := s.db.SelectContext(ctx, &teams, `SELECT `+TeamCols+` FROM teams WHERE organization_id = $1 ORDER BY id`, orgID)
-	return teams, err
+	return teams, wrap("OrgStore.ListTeams", err)
 }
 
 // ListProjects returns an organization's projects.
 func (s *OrgStore) ListProjects(ctx context.Context, orgID int64) ([]models.Project, error) {
 	projects := []models.Project{}
 	err := s.db.SelectContext(ctx, &projects, `SELECT `+ProjectCols+` FROM projects WHERE organization_id = $1 ORDER BY id`, orgID)
-	return projects, err
+	return projects, wrap("OrgStore.ListProjects", err)
 }
 
 // ListInventories returns an organization's inventories.
 func (s *OrgStore) ListInventories(ctx context.Context, orgID int64) ([]models.Inventory, error) {
 	inventories := []models.Inventory{}
 	err := s.db.SelectContext(ctx, &inventories, `SELECT `+InventoryCols+` FROM inventories WHERE organization_id = $1 ORDER BY id`, orgID)
-	return inventories, err
+	return inventories, wrap("OrgStore.ListInventories", err)
 }
 
 // OrgGalaxyCredential is a Galaxy credential attached to an organization.
@@ -155,7 +155,7 @@ func (s *OrgStore) GalaxyCredentials(ctx context.Context, orgID int64) ([]OrgGal
 		JOIN credentials c ON c.id = ogc.credential_id
 		WHERE ogc.organization_id = $1
 		ORDER BY ogc.position, ogc.id`, orgID)
-	return creds, err
+	return creds, wrap("OrgStore.GalaxyCredentials", err)
 }
 
 // AddGalaxyCredential attaches (or repositions) a Galaxy credential on an org.
@@ -165,11 +165,11 @@ func (s *OrgStore) AddGalaxyCredential(ctx context.Context, orgID, credentialID 
 		VALUES ($1, $2, $3)
 		ON CONFLICT (organization_id, credential_id) DO UPDATE SET position = EXCLUDED.position`,
 		orgID, credentialID, position)
-	return err
+	return wrap("OrgStore.AddGalaxyCredential", err)
 }
 
 // RemoveGalaxyCredential detaches a Galaxy credential from an org.
 func (s *OrgStore) RemoveGalaxyCredential(ctx context.Context, orgID, credentialID int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM organization_galaxy_credentials WHERE organization_id = $1 AND credential_id = $2`, orgID, credentialID)
-	return err
+	return wrap("OrgStore.RemoveGalaxyCredential", err)
 }

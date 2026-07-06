@@ -38,7 +38,7 @@ func (s *JobStore) ListRecent(ctx context.Context, limit int) ([]models.UnifiedJ
 	jobs := []models.UnifiedJob{}
 	err := s.db.SelectContext(ctx, &jobs,
 		`SELECT `+unifiedJobCols+` FROM unified_jobs ORDER BY created_at DESC LIMIT $1`, limit)
-	return jobs, err
+	return jobs, wrap("JobStore.ListRecent", err)
 }
 
 // ListReadable returns recent unified jobs whose governing template is in tmplIDs.
@@ -54,11 +54,11 @@ func (s *JobStore) ListReadable(ctx context.Context, tmplIDs []int64, limit int)
 		WHERE jt.id IN (?)
 		ORDER BY uj.created_at DESC LIMIT ?`, tmplIDs, limit)
 	if err != nil {
-		return nil, err
+		return nil, wrap("JobStore.ListReadable", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &jobs, q, args...)
-	return jobs, err
+	return jobs, wrap("JobStore.ListReadable", err)
 }
 
 // GetRun returns a single execution run by id.
@@ -66,7 +66,7 @@ func (s *JobStore) GetRun(ctx context.Context, runID uuid.UUID) (models.Executio
 	var run models.ExecutionRun
 	err := s.db.GetContext(ctx, &run,
 		`SELECT `+executionRunCols+` FROM execution_runs WHERE id = $1`, runID)
-	return run, err
+	return run, wrap("JobStore.GetRun", err)
 }
 
 // ListEvents returns a run's job events in sequence order.
@@ -74,7 +74,7 @@ func (s *JobStore) ListEvents(ctx context.Context, runID uuid.UUID) ([]models.Jo
 	events := []models.JobEvent{}
 	err := s.db.SelectContext(ctx, &events,
 		`SELECT `+jobEventCols+` FROM job_events WHERE execution_run_id = $1 ORDER BY seq ASC`, runID)
-	return events, err
+	return events, wrap("JobStore.ListEvents", err)
 }
 
 // TemplateIDForRun resolves the job_templates.id governing a run, via
@@ -95,7 +95,7 @@ func (s *JobStore) TemplateIDForRun(ctx context.Context, runID uuid.UUID) (int64
 		return 0, false, nil
 	}
 	if err != nil {
-		return 0, false, err
+		return 0, false, wrap("JobStore.TemplateIDForRun", err)
 	}
 	return jtID, true, nil
 }

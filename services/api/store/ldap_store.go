@@ -50,7 +50,7 @@ func (s *LdapStore) RecentSyncLogs(ctx context.Context, limit int) ([]LdapSyncLo
 		FROM ldap_sync_log
 		ORDER BY started_at DESC
 		LIMIT $1`, limit)
-	return logs, err
+	return logs, wrap("LdapStore.RecentSyncLogs", err)
 }
 
 // SyncLog returns a single sync-log entry by id.
@@ -60,7 +60,7 @@ func (s *LdapStore) SyncLog(ctx context.Context, id int64) (LdapSyncLog, error) 
 		SELECT id, sync_type, started_at, finished_at, status,
 		       items_processed, items_created, items_updated, items_failed, error_message
 		FROM ldap_sync_log WHERE id = $1`, id)
-	return log, err
+	return log, wrap("LdapStore.SyncLog", err)
 }
 
 // SyncItems returns the per-entity items of a sync, ordered by type then name.
@@ -71,5 +71,5 @@ func (s *LdapStore) SyncItems(ctx context.Context, syncLogID int64) ([]LdapSyncI
 		FROM ldap_sync_items
 		WHERE sync_log_id = $1
 		ORDER BY entity_type, entity_name`, syncLogID)
-	return items, err
+	return items, wrap("LdapStore.SyncItems", err)
 }
