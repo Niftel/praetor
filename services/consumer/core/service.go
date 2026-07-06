@@ -2,10 +2,13 @@ package core
 
 import (
 	"context"
-	"log"
+	"github.com/praetordev/praetor/pkg/plog"
 
 	"github.com/praetordev/praetor/pkg/events"
 )
+
+// logger is the consumer package component logger (handler installed by pkg/plog).
+var logger = plog.New("consumer")
 
 // EventConsumer delivers job events and log-chunk references to handlers and
 // acknowledges each one only when its handler returns nil. A non-nil return
@@ -29,17 +32,17 @@ func NewConsumer(sub EventConsumer, writer *DBWriter) *Consumer {
 }
 
 func (c *Consumer) Start() error {
-	log.Println("Consumer started, waiting for events...")
+	logger.Info("consumer started, waiting for events")
 
 	// The handler's error is the ack signal: returning nil acks the message,
 	// returning an error (e.g. the DB is unavailable) leaves it in the stream
 	// for redelivery once we recover.
 	if err := c.Subscriber.ConsumeJobEvents(func(evt events.JobEvent) error {
 		if err := c.processEvent(evt); err != nil {
-			log.Printf("Error processing event %d for run %s (will retry): %v", evt.Seq, evt.ExecutionRunID, err)
+			logger.Error("process event failed (will retry)", "seq", evt.Seq, "run_id", evt.ExecutionRunID, "err", err)
 			return err
 		}
-		log.Printf("Processed event %s (Seq: %d) for Job %d", evt.EventType, evt.Seq, evt.UnifiedJobID)
+		logger.Info("processed event", "event_type", evt.EventType, "seq", evt.Seq, "job_id", evt.UnifiedJobID)
 		return nil
 	}); err != nil {
 		return err
@@ -48,10 +51,10 @@ func (c *Consumer) Start() error {
 	// Log-chunk references are indexed on the same ack-after-commit contract.
 	if err := c.Subscriber.ConsumeLogChunks(func(chunk events.LogChunk) error {
 		if err := c.Writer.WriteLogChunk(context.Background(), chunk); err != nil {
-			log.Printf("Error indexing log chunk %d for run %s (will retry): %v", chunk.Seq, chunk.ExecutionRunID, err)
+			logger.Error("index log chunk failed (will retry)", "seq", chunk.Seq, "run_id", chunk.ExecutionRunID, "err", err)
 			return err
 		}
-		log.Printf("Indexed log chunk (Seq: %d) for run %s", chunk.Seq, chunk.ExecutionRunID)
+		logger.Info("indexed log chunk", "seq", chunk.Seq, "run_id", chunk.ExecutionRunID)
 		return nil
 	}); err != nil {
 		return err

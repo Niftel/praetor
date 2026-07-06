@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/plog"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/store"
 )
@@ -59,7 +60,7 @@ func NewJobsResource(db *sqlx.DB, ingestionURL string) *JobsResource {
 		Authorizer:   NewAuthorizer(db),
 		IngestionURL: ingestionURL,
 		store:        store.NewJobStore(db),
-		log:          slog.Default().With("component", "api.jobs"),
+		log:          plog.New("api.jobs"),
 	}
 }
 

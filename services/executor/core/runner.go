@@ -1,7 +1,6 @@
 package core
 
 import (
-	"log"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
@@ -16,7 +15,7 @@ type Runner interface {
 type MockRunner struct{}
 
 func (r *MockRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) error {
-	log.Printf("MockRunner: Starting job %d (Run %s)", req.UnifiedJobID, req.ExecutionRunID)
+	logger.Info("mock runner starting job", "job_id", req.UnifiedJobID, "run_id", req.ExecutionRunID)
 
 	// 1. Emit JOB_STARTED
 	eventChan <- events.JobEvent{
@@ -50,7 +49,7 @@ func (r *MockRunner) Run(req *events.ExecutionRequest, eventChan chan<- events.J
 		Seq:            int64(len(tasks) + 2),
 	}
 
-	log.Printf("MockRunner: Finished job %d", req.UnifiedJobID)
+	logger.Info("mock runner finished job", "job_id", req.UnifiedJobID)
 	return nil
 }
 

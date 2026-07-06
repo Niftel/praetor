@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -71,7 +70,7 @@ func (n *Notifier) send(jobID int64, ev, verb string) {
 		JOIN job_template_notifications jtn ON jtn.job_template_id = jt.id AND jtn.event = $2
 		JOIN notification_templates nt ON nt.id = jtn.notification_template_id
 		WHERE uj.id = $1`, jobID, ev); err != nil {
-		log.Printf("notifier: lookup failed for job %d: %v", jobID, err)
+		logger.Error("notifier lookup failed", "job_id", jobID, "err", err)
 		return
 	}
 
@@ -100,16 +99,16 @@ func (n *Notifier) send(jobID int64, ev, verb string) {
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
-			log.Printf("notifier: build request failed: %v", err)
+			logger.Error("notifier build request failed", "err", err)
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := n.client.Do(req)
 		if err != nil {
-			log.Printf("notifier: POST (%s) for job %d failed: %v", r.Type, jobID, err)
+			logger.Error("notifier POST failed", "type", r.Type, "job_id", jobID, "err", err)
 			continue
 		}
 		resp.Body.Close()
-		log.Printf("notifier: sent %s notification for job %d (%s) -> HTTP %d", r.Type, jobID, ev, resp.StatusCode)
+		logger.Info("notifier sent notification", "type", r.Type, "job_id", jobID, "event", ev, "status", resp.StatusCode)
 	}
 }

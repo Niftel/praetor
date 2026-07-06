@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"context"
-	"log"
+	"github.com/praetordev/praetor/pkg/plog"
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
@@ -10,6 +10,9 @@ import (
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/praetor/services/api/render"
 )
+
+// logger is the api handlers component logger (handler installed by pkg/plog).
+var logger = plog.New("api")
 
 // permAction is the kind of access an endpoint requires on an object. Each maps
 // to an AWX object role field via the AccessChecker.
@@ -103,10 +106,10 @@ func (a *Authorizer) grantCreatorAdmin(ctx context.Context, contentType rbac.Con
 	}
 	role, err := a.Access.GetObjectRole(ctx, contentType, objectID, rbac.RoleFieldAdmin)
 	if err != nil {
-		log.Printf("authz: could not find admin_role for %s/%d to grant creator: %v", contentType, objectID, err)
+		logger.Error("authz: admin_role not found to grant creator", "content_type", contentType, "object_id", objectID, "err", err)
 		return
 	}
 	if err := a.Access.AddUserToRole(ctx, role.ID, uc.UserID); err != nil {
-		log.Printf("authz: could not grant creator %d admin on %s/%d: %v", uc.UserID, contentType, objectID, err)
+		logger.Error("authz: grant creator admin failed", "user_id", uc.UserID, "content_type", contentType, "object_id", objectID, "err", err)
 	}
 }

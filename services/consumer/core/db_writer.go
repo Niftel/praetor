@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/events"
@@ -161,7 +160,7 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 		  AND NOT run_is_terminal(state)`,
 		newState, evt.Timestamp, finishedAt, evt.Seq, evt.ExecutionRunID,
 	); err != nil {
-		log.Printf("Failed to update execution_run %s: %v", evt.ExecutionRunID, err)
+		logger.Error("update execution_run failed", "run_id", evt.ExecutionRunID, "err", err)
 		return err
 	}
 
@@ -174,7 +173,7 @@ func (w *DBWriter) updateRunState(ctx context.Context, tx *sqlx.Tx, evt events.J
 		  AND NOT job_is_terminal(status)`,
 		newStatus, evt.Timestamp, finishedAt, evt.UnifiedJobID,
 	); err != nil {
-		log.Printf("Failed to update unified_job %d: %v", evt.UnifiedJobID, err)
+		logger.Error("update unified_job failed", "job_id", evt.UnifiedJobID, "err", err)
 		return err
 	}
 

@@ -12,7 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"github.com/praetordev/praetor/pkg/plog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,6 +26,9 @@ import (
 	"github.com/praetordev/praetor/pkg/hostconn"
 	"golang.org/x/crypto/ssh"
 )
+
+// logger is the reconciler package component logger (handler installed by pkg/plog).
+var logger = plog.New("reconciler")
 
 // maxLogChunk matches the host-runner's LogSyncer so pulled stdout is chunked the
 // same way; combined with a byte offset from already-stored chunks this yields
@@ -60,7 +63,7 @@ func NewReconciler(db *sqlx.DB, interval time.Duration, apiURL string) *Reconcil
 }
 
 func (r *Reconciler) Start() {
-	log.Printf("Reconciler started (interval %s, api %s)", r.Interval, r.APIURL)
+	logger.Info("reconciler started", "interval", r.Interval, "api", r.APIURL)
 	ticker := time.NewTicker(r.Interval)
 	defer ticker.Stop()
 	for {
@@ -104,7 +107,7 @@ func (r *Reconciler) tick() {
 		ORDER BY er.reconcile_after NULLS FIRST
 		LIMIT $1`, r.Batch)
 	if err != nil {
-		log.Printf("Reconciler: candidate query failed: %v", err)
+		logger.Error("candidate query failed", "err", err)
 		return
 	}
 	for _, c := range cs {
@@ -146,12 +149,12 @@ func (r *Reconciler) processRun(ctx context.Context, c candidate) {
 		return
 	}
 	if err := r.projectLogs(ctx, client, sudo, jobDir, c.RunID); err != nil {
-		log.Printf("Reconciler: run %s log projection failed (non-fatal): %v", c.RunID, err)
+		logger.Warn("run log projection failed (non-fatal)", "run_id", c.RunID, "err", err)
 	}
 
 	if hasStatus && isTerminal(st.State) {
 		r.finalize(ctx, c, st.State, st.MaxSeq, st.CompletedAt)
-		log.Printf("Reconciler: run %s recovered as %q (max_seq %d)", c.RunID, st.State, st.MaxSeq)
+		logger.Info("run recovered", "run_id", c.RunID, "state", st.State, "max_seq", st.MaxSeq)
 		return
 	}
 
@@ -273,14 +276,14 @@ func (r *Reconciler) finalize(ctx context.Context, c candidate, state string, ma
 			state = CASE WHEN NOT run_is_terminal(state) THEN $3 ELSE state END,
 			finished_at = COALESCE(finished_at, $4)
 		WHERE id = $1`, c.RunID, maxSeq, state, fin); err != nil {
-		log.Printf("Reconciler: finalize run %s failed: %v", c.RunID, err)
+		logger.Error("finalize run failed", "run_id", c.RunID, "err", err)
 		return
 	}
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE unified_jobs SET status = $2, finished_at = COALESCE(finished_at, $3)
 		WHERE id = $1 AND NOT job_is_terminal(status) AND status <> 'error'`,
 		c.UnifiedJobID, state, fin); err != nil {
-		log.Printf("Reconciler: finalize job %d failed: %v", c.UnifiedJobID, err)
+		logger.Error("finalize job failed", "job_id", c.UnifiedJobID, "err", err)
 	}
 	ReconcileOutcomes.WithLabelValues("recovered_" + state).Inc()
 }
@@ -292,7 +295,7 @@ func (r *Reconciler) advance(ctx context.Context, c candidate, newSeq int64) {
 		UPDATE execution_runs
 		SET persisted_event_seq = $2, reconcile_attempts = 0, reconcile_after = now() + interval '30 seconds'
 		WHERE id = $1`, c.RunID, newSeq); err != nil {
-		log.Printf("Reconciler: advance run %s failed: %v", c.RunID, err)
+		logger.Error("advance run failed", "run_id", c.RunID, "err", err)
 	}
 	ReconcileOutcomes.WithLabelValues("still_running").Inc()
 }
@@ -307,27 +310,27 @@ func (r *Reconciler) backoff(ctx context.Context, c candidate, reason string) {
 		return
 	}
 	delay := backoffDelay(attempts, r.MaxBackoff)
-	log.Printf("Reconciler: run %s retry %d in %s (%s)", c.RunID, attempts, delay, reason)
+	logger.Info("run retry scheduled", "run_id", c.RunID, "attempt", attempts, "delay", delay, "reason", reason)
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE execution_runs
 		SET reconcile_attempts = $2, reconcile_after = now() + ($3 || ' seconds')::interval
 		WHERE id = $1`, c.RunID, attempts, strconv.Itoa(int(delay.Seconds()))); err != nil {
-		log.Printf("Reconciler: backoff run %s failed: %v", c.RunID, err)
+		logger.Error("backoff run failed", "run_id", c.RunID, "err", err)
 	}
 }
 
 // markLost declares a run unrecoverable: host is gone or persistently unreachable.
 func (r *Reconciler) markLost(ctx context.Context, c candidate, reason string) {
-	log.Printf("Reconciler: marking run %s lost: %s", c.RunID, reason)
+	logger.Warn("marking run lost", "run_id", c.RunID, "reason", reason)
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE execution_runs SET state = 'lost', finished_at = now()
 		WHERE id = $1 AND state NOT IN ('successful','failed','canceled')`, c.RunID); err != nil {
-		log.Printf("Reconciler: markLost run %s failed: %v", c.RunID, err)
+		logger.Error("markLost run failed", "run_id", c.RunID, "err", err)
 	}
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE unified_jobs SET status = 'error', finished_at = now()
 		WHERE id = $1 AND status NOT IN ('successful','failed','canceled','error')`, c.UnifiedJobID); err != nil {
-		log.Printf("Reconciler: markLost job %d failed: %v", c.UnifiedJobID, err)
+		logger.Error("markLost job failed", "job_id", c.UnifiedJobID, "err", err)
 	}
 	ReconcileOutcomes.WithLabelValues("lost").Inc()
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -96,7 +95,7 @@ func (r *BootstrapRunner) fetchPackTarball(pack, arch string) (string, func(), e
 					os.Remove(tmp.Name())
 					return "", noop, fmt.Errorf("download Execution Pack %q (%s) from Gitea: %w", pack, arch, cerr)
 				}
-				log.Printf("BootstrapRunner: fetched Execution Pack %q (%s) from Gitea", pack, arch)
+				logger.Info("fetched execution pack from Gitea", "pack", pack, "arch", arch)
 				return tmp.Name(), func() { os.Remove(tmp.Name()) }, nil
 			}
 			resp.Body.Close() // non-200 (e.g. not published): fall through to shared dir
@@ -137,7 +136,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	// on any transport error, so a transient issue never blocks a legitimate job.
 	if r.ingest != nil {
 		if runnable, _ := r.ingest.Runnable(context.Background(), req.ExecutionRunID.String()); !runnable {
-			log.Printf("BootstrapRunner: run %s is no longer runnable (already terminal); skipping bootstrap", req.ExecutionRunID)
+			logger.Info("run no longer runnable (already terminal); skipping bootstrap", "run_id", req.ExecutionRunID)
 			return nil
 		}
 	}
@@ -166,7 +165,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		return r.syncInventory(req, eventChan)
 	}
 
-	log.Printf("BootstrapRunner: Starting deployment for run %s", req.ExecutionRunID)
+	logger.Info("starting deployment", "run_id", req.ExecutionRunID)
 
 	manifestBytes, err := json.Marshal(req)
 	if err != nil {
@@ -220,7 +219,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		return fmt.Errorf("ssh to runner host %s@%s:%s: %w", user, addr, port, err)
 	}
 	defer client.Close()
-	log.Printf("BootstrapRunner: connected to %s@%s:%s for run %s", user, addr, port, req.ExecutionRunID)
+	logger.Info("connected to runner host", "user", user, "addr", addr, "port", port, "run_id", req.ExecutionRunID)
 
 	runID := req.ExecutionRunID.String()
 	jobDir := "/var/lib/praetor/jobs/" + runID
@@ -232,7 +231,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 
 	// 2. The checkpoint callback plugin (task-level resume).
 	if err := pushFile(client, "/tmp/plugins/callback/praetor_checkpoint.py", "/usr/local/share/praetor/plugins/callback/praetor_checkpoint.py", "0644", sudo); err != nil {
-		log.Printf("BootstrapRunner: checkpoint plugin push failed (non-fatal): %v", err)
+		logger.Warn("checkpoint plugin push failed (non-fatal)", "err", err)
 	}
 
 	// 3. The Execution Pack — the single self-contained bootstrapping unit
@@ -268,7 +267,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 
 	// 6. The resume systemd unit (best-effort; skipped where systemd is absent).
 	if out, err := runShellScript(client, sudo, resumeUnitScript); err != nil {
-		log.Printf("BootstrapRunner: resume unit install skipped: %v: %s", err, out)
+		logger.Warn("resume unit install skipped", "err", err, "output", out)
 	}
 
 	// 7. Launch the host-runner as root, detached so it outlives this SSH session.
@@ -281,7 +280,7 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		return fmt.Errorf("start host-runner: %w: %s", err, out)
 	}
 
-	log.Printf("BootstrapRunner: host-runner launched on %s for run %s", addr, req.ExecutionRunID)
+	logger.Info("host-runner launched", "addr", addr, "run_id", req.ExecutionRunID)
 	return nil
 }
 
@@ -313,7 +312,7 @@ fi`, pack))
 		return fmt.Errorf("open Execution Pack %q for %s: %w", pack, arch, err)
 	}
 	defer f.Close()
-	log.Printf("BootstrapRunner: pushing Execution Pack %q (%s)", pack, arch)
+	logger.Info("pushing execution pack", "pack", pack, "arch", arch)
 	return pushStream(client, f, fmt.Sprintf("%smkdir -p /opt/praetor/packs && %star -xzf - -C /", sudo, sudo))
 }
 
@@ -328,7 +327,7 @@ func (r *BootstrapRunner) localBootstrap(req *events.ExecutionRequest, manifestB
 	if err := os.WriteFile(jobDir+"/manifest.json", manifestBytes, 0600); err != nil {
 		return err
 	}
-	log.Printf("BootstrapRunner: no runner host — executing locally for run %s", req.ExecutionRunID)
+	logger.Info("no runner host - executing locally", "run_id", req.ExecutionRunID)
 	// Localhost jobs run on the executor itself, but still source the daemon (and
 	// Ansible runtime) from the pack — same as the remote path — so the daemon is
 	// versioned via the pack rather than the executor image.

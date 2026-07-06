@@ -2,12 +2,16 @@ package core
 
 import (
 	"fmt"
-	"log"
+	"github.com/praetordev/praetor/pkg/plog"
 	"sync"
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
 )
+
+// logger is the executor package component logger; the composition root
+// installs the handler (pkg/plog).
+var logger = plog.New("executor")
 
 type Agent struct {
 	Subscriber EventSubscriber
@@ -35,7 +39,7 @@ func (a *Agent) Start() error {
 		return err
 	}
 
-	log.Println("Agent started, waiting for jobs...")
+	logger.Info("agent started, waiting for jobs")
 
 	// simple worker pool
 	for i := 0; i < a.Workers; i++ {
@@ -49,10 +53,10 @@ func (a *Agent) Start() error {
 
 func (a *Agent) worker(id int, reqChan <-chan events.ExecutionRequest) {
 	defer a.wg.Done()
-	log.Printf("Worker %d started", id)
+	logger.Info("worker started", "worker", id)
 
 	for req := range reqChan {
-		log.Printf("Worker %d picked up run %s", id, req.ExecutionRunID)
+		logger.Info("worker picked up run", "worker", id, "run_id", req.ExecutionRunID)
 		a.processRequest(req)
 	}
 }
@@ -74,7 +78,7 @@ func (a *Agent) publishWithRetry(evt *events.JobEvent) error {
 		if err = a.Publisher.PublishJobEvent(evt); err == nil {
 			return nil
 		}
-		log.Printf("publish %s for run %s failed (attempt %d/3): %v", evt.EventType, evt.ExecutionRunID, attempt, err)
+		logger.Warn("publish event failed", "event_type", evt.EventType, "run_id", evt.ExecutionRunID, "attempt", attempt, "err", err)
 		time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
 	}
 	return err
@@ -93,7 +97,7 @@ func (a *Agent) processRequest(req events.ExecutionRequest) {
 		for evt := range eventChan {
 			evt.Seq = seq
 			if err := a.publishWithRetry(&evt); err != nil {
-				log.Printf("ERROR: gave up publishing %s for run %s after retries: %v", evt.EventType, evt.ExecutionRunID, err)
+				logger.Error("gave up publishing event after retries", "event_type", evt.EventType, "run_id", evt.ExecutionRunID, "err", err)
 			}
 			seq++
 		}
@@ -101,7 +105,7 @@ func (a *Agent) processRequest(req events.ExecutionRequest) {
 
 	// Run the job (blocking for this worker)
 	if err := a.Runner.Run(&req, eventChan); err != nil {
-		log.Printf("Job run failed: %v", err)
+		logger.Error("job run failed", "err", err)
 		// Emit JOB_FAILED event since runner didn't succeed
 		failMsg := fmt.Sprintf("Runner failed: %v", err)
 		eventChan <- events.JobEvent{

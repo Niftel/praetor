@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"github.com/praetordev/praetor/pkg/plog"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +17,9 @@ import (
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/objectstore"
 )
+
+// logger is the ingestion package component logger (handler installed by pkg/plog).
+var logger = plog.New("ingestion")
 
 type EventPublisher interface {
 	PublishJobEvent(event *events.JobEvent) error
@@ -141,7 +144,7 @@ func (s *IngestionService) StoreFacts(ctx context.Context, runID uuid.UUID, fact
 			WHERE h.inventory_id = $1 AND h.name = $2
 			ON CONFLICT (host_id) DO UPDATE SET facts = EXCLUDED.facts, modified_at = now()`,
 			*inventoryID, host, []byte(f)); err != nil {
-			log.Printf("facts: upsert for host %q failed: %v", host, err)
+			logger.Error("facts upsert for host failed", "host", host, "err", err)
 		}
 	}
 	return nil
@@ -198,12 +201,12 @@ func (s *IngestionService) UpsertInventory(ctx context.Context, inventoryID int6
 			if ierr := s.DB.QueryRowContext(ctx,
 				`INSERT INTO hosts (inventory_id, name, variables) VALUES ($1, $2, $3::jsonb) RETURNING id`,
 				inventoryID, h, []byte(vars)).Scan(&id); ierr != nil {
-				log.Printf("sync: insert host %q failed: %v", h, ierr)
+				logger.Error("sync insert host failed", "host", h, "err", ierr)
 				continue
 			}
 		} else {
 			if _, err := s.DB.ExecContext(ctx, `UPDATE hosts SET variables=$2::jsonb, modified_at=now() WHERE id=$1`, id, []byte(vars)); err != nil {
-				log.Printf("sync: update host %q vars failed: %v", h, err)
+				logger.Error("sync update host vars failed", "host", h, "err", err)
 			}
 		}
 		hostID[h] = id
@@ -215,7 +218,7 @@ func (s *IngestionService) UpsertInventory(ctx context.Context, inventoryID int6
 			if ierr := s.DB.QueryRowContext(ctx,
 				`INSERT INTO groups (inventory_id, name, created_at, modified_at) VALUES ($1, $2, now(), now()) RETURNING id`,
 				inventoryID, gname).Scan(&gid); ierr != nil {
-				log.Printf("sync: insert group %q failed: %v", gname, ierr)
+				logger.Error("sync insert group failed", "group", gname, "err", ierr)
 				continue
 			}
 		}
@@ -223,16 +226,16 @@ func (s *IngestionService) UpsertInventory(ctx context.Context, inventoryID int6
 			if hid, ok := hostID[h]; ok {
 				if _, err := s.DB.ExecContext(ctx,
 					`INSERT INTO host_groups (host_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hid, gid); err != nil {
-					log.Printf("sync: link host %q to group %q failed: %v", h, gname, err)
+					logger.Error("sync link host to group failed", "host", h, "group", gname, "err", err)
 				}
 			}
 		}
 	}
 
 	if _, err := s.DB.ExecContext(ctx, `UPDATE inventory_sources SET last_synced_at=now() WHERE inventory_id=$1`, inventoryID); err != nil {
-		log.Printf("sync: mark inventory %d synced failed: %v", inventoryID, err)
+		logger.Error("sync mark inventory synced failed", "inventory_id", inventoryID, "err", err)
 	}
-	log.Printf("sync: inventory %d upserted %d host(s), %d group(s)", inventoryID, len(hostID), len(groups))
+	logger.Info("inventory synced", "inventory_id", inventoryID, "hosts", len(hostID), "groups", len(groups))
 	return nil
 }
 
@@ -349,7 +352,7 @@ func (s *IngestionService) IngestEvents(ctx context.Context, runID uuid.UUID, ev
 		}
 
 		if err := s.Publisher.PublishJobEvent(natsEvent); err != nil {
-			log.Printf("Failed to publish event to NATS: %v", err)
+			logger.Error("publish event to NATS failed", "err", err)
 			return fmt.Errorf("failed to publish event to NATS: %w", err)
 		}
 	}

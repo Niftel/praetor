@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,7 +17,7 @@ import (
 // The executor emits the lifecycle events itself (there is no host-runner here).
 func (r *BootstrapRunner) syncInventory(req *events.ExecutionRequest, eventChan chan<- events.JobEvent) error {
 	m := req.JobManifest
-	log.Printf("Inventory sync for run %s -> inventory %d", req.ExecutionRunID, m.SyncInventoryID)
+	logger.Info("inventory sync starting", "run_id", req.ExecutionRunID, "inventory_id", m.SyncInventoryID)
 	eventChan <- events.JobEvent{
 		ExecutionRunID: req.ExecutionRunID, UnifiedJobID: req.UnifiedJobID,
 		Seq: 1, EventType: "JOB_STARTED", Timestamp: time.Now(),
@@ -79,12 +78,12 @@ func (r *BootstrapRunner) syncInventory(req *events.ExecutionRequest, eventChan 
 		ExecutionRunID: req.ExecutionRunID, UnifiedJobID: req.UnifiedJobID,
 		Seq: 2, EventType: "JOB_COMPLETED", Timestamp: time.Now(), StdoutSnippet: &msg,
 	}
-	log.Printf("Inventory sync complete for run %s", req.ExecutionRunID)
+	logger.Info("inventory sync complete", "run_id", req.ExecutionRunID)
 	return nil
 }
 
 func (r *BootstrapRunner) syncFail(req *events.ExecutionRequest, eventChan chan<- events.JobEvent, cause error) error {
-	log.Printf("Inventory sync failed for run %s: %v", req.ExecutionRunID, cause)
+	logger.Error("inventory sync failed", "run_id", req.ExecutionRunID, "err", cause)
 	msg := cause.Error()
 	eventChan <- events.JobEvent{
 		ExecutionRunID: req.ExecutionRunID, UnifiedJobID: req.UnifiedJobID,

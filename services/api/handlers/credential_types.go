@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strconv"
 
@@ -38,7 +37,7 @@ func (rs *CredentialTypesResource) Routes() chi.Router {
 func (rs *CredentialTypesResource) ListCredentialTypes(w http.ResponseWriter, r *http.Request) {
 	types, err := rs.store.ListAll(r.Context())
 	if err != nil {
-		log.Printf("Failed to list credential types: %v", err)
+		logger.Error("list credential types failed", "err", err)
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

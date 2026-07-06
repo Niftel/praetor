@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -209,7 +208,7 @@ func (rs *EventsResource) Intake(w http.ResponseWriter, r *http.Request) {
 	for _, rl := range rules {
 		ok, err := ruleMatches(rl.Condition, ev)
 		if err != nil {
-			log.Printf("eda: rule %d (%s) condition error: %v", rl.ID, rl.Name, err)
+			logger.Error("eda rule condition error", "rule_id", rl.ID, "name", rl.Name, "err", err)
 			continue
 		}
 		if !ok {
@@ -222,7 +221,7 @@ func (rs *EventsResource) Intake(w http.ResponseWriter, r *http.Request) {
 		}
 		id, err := rs.launch(r.Context(), rl.Name, rl.UJTID, rl.WfID, payload, limit)
 		if err != nil {
-			log.Printf("eda: rule %d launch failed: %v", rl.ID, err)
+			logger.Error("eda rule launch failed", "rule_id", rl.ID, "err", err)
 			continue
 		}
 		if id != 0 {
@@ -232,7 +231,7 @@ func (rs *EventsResource) Intake(w http.ResponseWriter, r *http.Request) {
 
 	launchedJSON, _ := json.Marshal(launched)
 	if err := rs.store.InsertReceipt(r.Context(), src.ID, body, matched, launchedJSON); err != nil {
-		log.Printf("eda: receipt insert failed: %v", err)
+		logger.Error("eda receipt insert failed", "err", err)
 	}
 
 	w.WriteHeader(http.StatusAccepted)
