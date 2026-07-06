@@ -172,27 +172,30 @@ func (b *NatsBus) PublishLogChunk(chunk *events.LogChunk) error {
 
 // -- Subscriber Implementation --
 
-// SubscribeToExecutionRequests binds a durable, manual-ack work-queue consumer
-// and returns a channel of launches. The interface is unchanged for callers, but
-// delivery is now durable: a launch survives the executor being offline and is
-// redelivered until acknowledged. The message is acked once it has been handed
-// to a local worker (ack-on-receipt) — a crash before completion is recovered by
-// the scheduler's stale-run reconciliation rather than by redelivery, which
-// avoids double-bootstrapping a host. The queue group still load-balances across
-// executors.
+// SubscribeToExecutionRequests binds a durable, manual-ack PULL consumer and
+// returns a channel of launches. A pull consumer is deliberate: with the previous
+// push queue-subscriber, a delivered message's AckWait ran from delivery and was
+// NOT extended by the callback blocking on a full worker pool, so under sustained
+// saturation JetStream redelivered launches that were still buffered — double-
+// bootstrapping a host. A pull consumer only fetches when a worker is free, so a
+// launch is never "in flight but waiting", and there is no 100-deep buffer whose
+// acked-but-unprocessed contents are lost on a crash.
+//
+// A single puller feeds an UNBUFFERED channel that the executor's worker pool
+// drains, so it fetches exactly as fast as workers accept. Each message is acked
+// on receipt (before hand-off) — a crash mid-bootstrap is recovered by the
+// scheduler's stale-run reconciliation, not by redelivery (which would double-
+// bootstrap). At most len(workers)+1 launches are in flight, so a crash loses at
+// most that many (all recovered by the reconciler), versus up to 100 before.
+// Multiple executors sharing the durable pull work natively (no queue group).
 func (b *NatsBus) SubscribeToExecutionRequests() (<-chan events.ExecutionRequest, error) {
-	ch := make(chan events.ExecutionRequest, 100)
-	_, err := b.JS.QueueSubscribe(SubjectExecutionRequest, QueueGroupExecutor, func(msg *nats.Msg) {
-		var req events.ExecutionRequest
-		if err := json.Unmarshal(msg.Data, &req); err != nil {
-			log.Printf("[executor] terminating undecodable execution request: %v", err)
-			_ = msg.Term()
-			return
-		}
-		ch <- req // backpressure: blocks (extending ack via AckWait) if workers are saturated
-		_ = msg.Ack()
-	},
-		nats.Durable(DurableConsumerExecutor),
+	// A durable consumer can't switch between push and pull in place; drop any
+	// pre-existing consumer (e.g. the old push queue-subscriber) so PullSubscribe
+	// recreates it as pull. WorkQueue streams allow only one consumer per subject,
+	// so this also prevents an "overlapping subjects" bind error.
+	_ = b.JS.DeleteConsumer(StreamRequests, DurableConsumerExecutor)
+
+	sub, err := b.JS.PullSubscribe(SubjectExecutionRequest, DurableConsumerExecutor,
 		nats.ManualAck(),
 		nats.AckExplicit(),
 		nats.DeliverAll(),
@@ -201,6 +204,31 @@ func (b *NatsBus) SubscribeToExecutionRequests() (<-chan events.ExecutionRequest
 	if err != nil {
 		return nil, err
 	}
+
+	ch := make(chan events.ExecutionRequest) // unbuffered: fetch only when a worker is ready
+	go func() {
+		for {
+			msgs, ferr := sub.Fetch(1, nats.MaxWait(5*time.Second))
+			if ferr != nil {
+				if ferr == nats.ErrTimeout {
+					continue // no work this window; poll again
+				}
+				log.Printf("[executor] pull fetch error: %v", ferr)
+				time.Sleep(time.Second) // back off on transient errors
+				continue
+			}
+			for _, msg := range msgs {
+				var req events.ExecutionRequest
+				if err := json.Unmarshal(msg.Data, &req); err != nil {
+					log.Printf("[executor] terminating undecodable execution request: %v", err)
+					_ = msg.Term()
+					continue
+				}
+				_ = msg.Ack()  // ack on receipt; recovery is the reconciler's job
+				ch <- req      // blocks until a worker takes it — natural backpressure
+			}
+		}
+	}()
 	return ch, nil
 }
 
