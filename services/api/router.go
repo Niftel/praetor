@@ -68,6 +68,11 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 	// A waiting webhook_in workflow node is released by its per-run event_token.
 	r.Post("/api/v1/webhooks/workflow-job-nodes/{id}/callback", webhooks.HandleNodeCallback)
 
+	// Public event-driven-automation intake (EDA-style): a source pushes an event,
+	// verified by the source's shared token; matching rules launch remediation.
+	events := handlers.NewEventsResource(db)
+	r.Post("/api/v1/events/{source}", events.Intake)
+
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware(db))
@@ -75,6 +80,10 @@ func NewRouter(db *sqlx.DB) *chi.Mux {
 
 		// Execution Packs registry (the self-contained runtimes pushed to hosts).
 		r.Mount("/execution-packs", handlers.NewExecutionPacksResource(db).Routes())
+
+		// Event-driven automation (EDA): sources + rules management.
+		r.Mount("/event-sources", events.SourceRoutes())
+		r.Mount("/event-rules", events.RuleRoutes())
 
 		// Personal access tokens (headless / CI API auth) — each user manages own.
 		r.Mount("/tokens", handlers.NewTokensResource(db).Routes())
