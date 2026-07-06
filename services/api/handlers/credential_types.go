@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
@@ -12,12 +13,19 @@ import (
 	"github.com/praetordev/praetor/services/api/store"
 )
 
+// CredentialTypeStore is the credential-types data access the handler depends on.
+type CredentialTypeStore interface {
+	ListAll(ctx context.Context) ([]models.CredentialType, error)
+	Get(ctx context.Context, id int64) (models.CredentialType, error)
+}
+
 type CredentialTypesResource struct {
-	DB *sqlx.DB
+	DB    *sqlx.DB
+	store CredentialTypeStore
 }
 
 func NewCredentialTypesResource(db *sqlx.DB) *CredentialTypesResource {
-	return &CredentialTypesResource{DB: db}
+	return &CredentialTypesResource{DB: db, store: store.NewCredentialTypeStore(db)}
 }
 
 func (rs *CredentialTypesResource) Routes() chi.Router {
@@ -28,8 +36,7 @@ func (rs *CredentialTypesResource) Routes() chi.Router {
 }
 
 func (rs *CredentialTypesResource) ListCredentialTypes(w http.ResponseWriter, r *http.Request) {
-	var types []models.CredentialType
-	err := rs.DB.SelectContext(r.Context(), &types, "SELECT "+store.CredentialTypeCols+" FROM credential_types ORDER BY id ASC")
+	types, err := rs.store.ListAll(r.Context())
 	if err != nil {
 		log.Printf("Failed to list credential types: %v", err)
 		render.ErrInternal(err).Render(w, r)
@@ -46,8 +53,7 @@ func (rs *CredentialTypesResource) GetCredentialType(w http.ResponseWriter, r *h
 		return
 	}
 
-	var ct models.CredentialType
-	err = rs.DB.GetContext(r.Context(), &ct, "SELECT "+store.CredentialTypeCols+" FROM credential_types WHERE id = $1", id)
+	ct, err := rs.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(err).Render(w, r)
 		return
