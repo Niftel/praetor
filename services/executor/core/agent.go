@@ -57,21 +57,43 @@ func (a *Agent) worker(id int, reqChan <-chan events.ExecutionRequest) {
 	}
 }
 
+// executorSeqBase reserves a high sequence range for executor-emitted events
+// (bootstrap failures, inventory-sync lifecycle) so they never collide with the
+// host-runner's own seqs, which start at 1 and grow with task count. The consumer
+// dedups on (execution_run_id, seq); without this reservation an executor
+// bootstrap-failure JOB_FAILED at seq 1 would collide with the host-runner's
+// seq-1 event and one would be silently dropped. No single run emits a billion
+// host-runner events, so the range is collision-free and stays ascending.
+const executorSeqBase = 1_000_000_000
+
+// publishWithRetry publishes an event with a few bounded retries so a transient
+// publish failure doesn't silently drop the event (terminal events especially).
+func (a *Agent) publishWithRetry(evt *events.JobEvent) error {
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if err = a.Publisher.PublishJobEvent(evt); err == nil {
+			return nil
+		}
+		log.Printf("publish %s for run %s failed (attempt %d/3): %v", evt.EventType, evt.ExecutionRunID, attempt, err)
+		time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+	}
+	return err
+}
+
 func (a *Agent) processRequest(req events.ExecutionRequest) {
 	// Channel to receive events from the runner
 	// We make it buffered so the runner doesn't block too easily
 	eventChan := make(chan events.JobEvent, 100)
 
-	// Start a goroutine to consume events from the runner and publish them
+	// Publish executor-side events under the reserved high seq range, retrying so a
+	// terminal event (e.g. a bootstrap-failure JOB_FAILED) isn't silently lost —
+	// dropping it would leave the job hanging until the scheduler's timeout.
 	go func() {
-		seq := int64(1)
+		seq := int64(executorSeqBase)
 		for evt := range eventChan {
-			evt.Seq = seq // overwrite logical sequence or trust runner?
-			// Let's trust runner for now, or enforce monotonic here.
-			// Ideally the runner is the source of truth for order, but we can double check.
-
-			if err := a.Publisher.PublishJobEvent(&evt); err != nil {
-				log.Printf("Failed to publish event: %v", err)
+			evt.Seq = seq
+			if err := a.publishWithRetry(&evt); err != nil {
+				log.Printf("ERROR: gave up publishing %s for run %s after retries: %v", evt.EventType, evt.ExecutionRunID, err)
 			}
 			seq++
 		}
