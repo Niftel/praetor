@@ -66,10 +66,19 @@ func (s *Syncer) Start(done chan bool) {
 	}
 }
 
-// flush pushes every complete, not-yet-synced line from the WAL. The cursor is
-// advanced (in memory, persisted once at the end) only past lines that were
-// confirmed received, so a push failure leaves the cursor parked and the line is
-// retried on the next tick.
+// maxEventBatch bounds a single events POST so a burst of output ships as a few
+// batched requests rather than one POST per event (#47), while keeping the request
+// well under the transport/JetStream size limits.
+const (
+	maxEventBatch      = 500
+	maxEventBatchBytes = 512 * 1024
+)
+
+// flush pushes every complete, not-yet-synced line from the WAL, batched into a
+// few POSTs rather than one per event. The cursor is advanced (in memory,
+// persisted once at the end) only past events the control plane confirmed
+// receiving, so a push failure leaves the cursor parked and the batch is retried
+// on the next tick (the consumer dedups any re-sent event on (run, seq)).
 func (s *Syncer) flush() {
 	f, err := os.Open(s.walPath)
 	if err != nil {
@@ -84,31 +93,60 @@ func (s *Syncer) flush() {
 
 	reader := bufio.NewReader(f)
 	advanced := false
+	batch := make([]events.JobEvent, 0, 64)
+	var batchBytes int64 // WAL bytes represented by the pending batch
+
+	// sendBatch POSTs the accumulated events and, on success, advances the cursor
+	// past exactly those WAL bytes. Returns false on failure so the caller stops
+	// (cursor parked at the batch start; retried next tick).
+	sendBatch := func() bool {
+		if len(batch) == 0 {
+			return true
+		}
+		if err := s.push(batch); err != nil {
+			log.Printf("Syncer: batch push of %d event(s) failed at offset %d (will retry): %v", len(batch), s.offset, err)
+			return false
+		}
+		s.offset += batchBytes
+		advanced = true
+		batch = batch[:0]
+		batchBytes = 0
+		return true
+	}
+
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
-			// No newline-terminated record available: either EOF or a partial
-			// trailing write. Never advance past an incomplete record.
+			// No newline-terminated record: EOF or a partial trailing write. Never
+			// advance past an incomplete record.
 			break
 		}
 
 		var evt events.JobEvent
 		if jsonErr := json.Unmarshal(bytes.TrimSpace(line), &evt); jsonErr != nil {
-			// A complete line that won't parse is corrupt, not partial; skip it
-			// so the syncer can't wedge forever on one bad record.
+			// A complete line that won't parse is corrupt, not partial. Ship the
+			// good events accumulated so far (to keep cursor order), then skip it so
+			// the syncer can't wedge forever on one bad record.
+			if !sendBatch() {
+				break
+			}
 			log.Printf("Syncer: skipping unparseable record at offset %d: %v", s.offset, jsonErr)
 			s.offset += int64(len(line))
 			advanced = true
 			continue
 		}
 
-		if pushErr := s.push(&evt); pushErr != nil {
-			log.Printf("Syncer: push failed at offset %d (will retry): %v", s.offset, pushErr)
-			break // keep cursor parked; retry this same line next tick
+		batch = append(batch, evt)
+		batchBytes += int64(len(line))
+		if len(batch) >= maxEventBatch || batchBytes >= maxEventBatchBytes {
+			if !sendBatch() {
+				break
+			}
 		}
-		s.offset += int64(len(line))
-		advanced = true
 	}
+
+	// Ship any remainder that didn't hit a size cap.
+	sendBatch()
 
 	if advanced {
 		s.writeCursor(s.offset)
@@ -140,11 +178,11 @@ func (s *Syncer) writeCursor(off int64) {
 	}
 }
 
-func (s *Syncer) push(evt *events.JobEvent) error {
+// push POSTs a batch of events; the ingestion endpoint accepts a []JobEvent array.
+func (s *Syncer) push(batch []events.JobEvent) error {
 	url := fmt.Sprintf("%s/api/v1/runs/%s/events", s.APIURL, s.RunID)
 
-	// Wrap in array as the Ingestion Service expects []JobEvent.
-	body, err := json.Marshal([]*events.JobEvent{evt})
+	body, err := json.Marshal(batch)
 	if err != nil {
 		return err
 	}
