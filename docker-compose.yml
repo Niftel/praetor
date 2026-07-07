@@ -55,7 +55,9 @@ services:
       LDAP_ORGANISATION: "Praetor Demo"
       LDAP_DOMAIN: "praetor.local"
       LDAP_BASE_DN: "dc=praetor,dc=local"
-      LDAP_ADMIN_PASSWORD: "admin"
+      # Same source as the API's PRAETOR_LDAP_BIND_PASSWORD so the mock's admin pw
+      # and the bind password stay in sync from one variable (demo default: admin).
+      LDAP_ADMIN_PASSWORD: "${PRAETOR_LDAP_BIND_PASSWORD:-admin}"
       LDAP_CONFIG_PASSWORD: "config"
       LDAP_READONLY_USER: "true"
       LDAP_READONLY_USER_USERNAME: "readonly"
@@ -150,6 +152,9 @@ services:
       # ingestion's PRAETOR_INTERNAL_TOKEN.
       PRAETOR_INTERNAL_TOKEN: "${PRAETOR_INTERNAL_TOKEN:-dev-internal-token}"
       PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
+      # LDAP bind password, read by ldap-config.yaml via bind_password_env (never
+      # committed in the config file). Demo default matches the mock's admin pw.
+      PRAETOR_LDAP_BIND_PASSWORD: "${PRAETOR_LDAP_BIND_PASSWORD:-admin}"
     volumes:
       - ./deployments/ldap/ldap-config.yaml:/etc/praetor/ldap.yaml:ro
     ports:
