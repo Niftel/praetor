@@ -260,7 +260,10 @@ services:
       ANSIBLE_FORKS: 1
     shm_size: 1gb
     volumes:
-      - ./keys:/tmp/keys:ro
+      # The executor no longer mounts ./keys: job connection keys come from each
+      # job's Machine credential (resolved at dispatch to an ephemeral per-run
+      # file), not a shared key staged in the container. The demo targets still
+      # mount ./keys to authorize the demo credential's public key.
       # Fallback source for locally-built Execution Pack tarballs
       # (build/runtime/<pack>-linux-<arch>.tar.gz from `make execpack`), used only
       # when a pack isn't in the Gitea registry. The host-runner daemon is NOT
@@ -374,6 +377,16 @@ services:
       GITEA_INTERNAL_URL: "${PRAETOR_GITEA_INTERNAL_URL:-http://gitea-host:3000}"
       GITEA_TOKEN: "${PRAETOR_GITEA_TOKEN:-}"
     volumes:
+      # RESIDUAL RISK (tracked follow-up): packbuilder needs the raw host socket to
+      # run `docker build` (with --network=host) + create/cp to extract the pack
+      # tarball — that is host-compromise-equivalent power, so a scoped socket-proxy
+      # would be theater here (POST /containers/create + docker cp = full host fs).
+      # It is NOT edge-exposed (no published ports) and its build inputs are the
+      # real control: every spec — including git-fetched ones — is typed/validated
+      # (pkg/packspec) before reaching the docker argv, and deps go through a file +
+      # `pip install -r`, never shell-split. The genuine fix is migrating to a
+      # rootless BuildKit sidecar (also removes the --network=host/--add-host and
+      # create/cp machinery); filed as its own change, not part of #25.
       - /var/run/docker.sock:/var/run/docker.sock
       - ./build:/build:rw
     depends_on:
@@ -425,6 +438,24 @@ services:
       - "traefik.http.routers.gitea.rule=Host(`gitea.localhost`)"
       - "traefik.http.services.gitea.loadbalancer.server.port=3000"
 
+  # Read-only Docker API proxy for traefik's service discovery. traefik is the only
+  # edge-exposed container (binds :80/:443), so giving it the raw root-equivalent
+  # /var/run/docker.sock means an RCE in traefik = host compromise. Instead it talks
+  # to this single-purpose haproxy, which exposes only the GET endpoints the Docker
+  # provider needs (containers/events/version) and no POST. It lives on an
+  # internal-only network shared solely with traefik: container-inspect output
+  # includes every service's env (secrets/tokens/LDAP pw), so it must NOT be
+  # reachable from praetor-net (which the demo target hosts also share).
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: 1 # EVENTS/PING/VERSION default on; POST/other endpoints stay off
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-proxy-net
+    restart: unless-stopped
+
   # Reverse proxy: routes *.localhost hostnames to services (browser-friendly,
   # *.localhost auto-resolves to 127.0.0.1). Dashboard at http://traefik.localhost.
   traefik:
@@ -432,6 +463,8 @@ services:
     container_name: praetor-traefik
     command:
       - "--providers.docker=true"
+      # Discover via the read-only socket proxy, not the raw host socket.
+      - "--providers.docker.endpoint=tcp://docker-socket-proxy:2375"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=praetor_praetor-net"
       # File provider supplies the default TLS cert (mkcert) for websecure.
@@ -449,11 +482,12 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # No raw docker.sock: discovery goes through docker-socket-proxy (above).
       - ./deployments/traefik/dynamic:/dynamic:ro
       - ./deployments/traefik/certs:/certs:ro
     networks:
       - praetor-net
+      - docker-proxy-net
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
@@ -526,6 +560,12 @@ services:
 networks:
   praetor-net:
     driver: bridge
+  # Isolated network carrying ONLY traefik <-> docker-socket-proxy. internal:true
+  # keeps it off any external bridge; it is deliberately NOT shared with
+  # praetor-net so the proxy's container-inspect data (service env/secrets) is
+  # unreachable from application services and the demo target hosts.
+  docker-proxy-net:
+    internal: true
 
 volumes:
   pgdata:
