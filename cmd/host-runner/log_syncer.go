@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -30,6 +31,7 @@ type LogSyncer struct {
 	cursorPath string
 	offset     int64 // bytes of stdout.log confirmed stored
 	chunkSeq   int64 // next chunk sequence number
+	needResync bool  // local cursor missing mid-run: recover position from server (#9)
 }
 
 func NewLogSyncer(jobDir, apiURL, runID, token string) *LogSyncer {
@@ -45,7 +47,7 @@ func NewLogSyncer(jobDir, apiURL, runID, token string) *LogSyncer {
 
 func (s *LogSyncer) Start(done chan bool) {
 	log.Printf("Starting LogSyncer for Run %s to %s", s.RunID, s.APIURL)
-	s.offset, s.chunkSeq = s.readCursor()
+	s.loadCursor()
 	if s.offset > 0 {
 		log.Printf("LogSyncer: resuming from offset %d (chunk seq %d)", s.offset, s.chunkSeq)
 	}
@@ -65,9 +67,76 @@ func (s *LogSyncer) Start(done chan bool) {
 	}
 }
 
+// loadCursor initialises (offset, chunkSeq) from the persisted local cursor. If
+// the cursor file is absent BUT stdout.log already holds output, we're resuming
+// after losing the cursor mid-run: re-reading from offset 0 with timing-dependent
+// chunk boundaries would overwrite some stored chunks and strand others, so we
+// instead recover the true position from the server on the next flush (#9). A
+// genuinely fresh run (no cursor, empty stdout) correctly starts at (0, 0).
+func (s *LogSyncer) loadCursor() {
+	s.offset, s.chunkSeq = s.readCursor()
+	if s.cursorExists() {
+		return
+	}
+	if fi, err := os.Stat(s.logPath); err == nil && fi.Size() > 0 {
+		s.needResync = true
+		log.Printf("LogSyncer: local cursor missing but stdout has %d bytes — will recover position from ingestion", fi.Size())
+	}
+}
+
+func (s *LogSyncer) cursorExists() bool {
+	_, err := os.Stat(s.cursorPath)
+	return err == nil
+}
+
+// fetchServerCursor asks ingestion for the run's authoritative stdout resume point
+// (bytes stored, max seq). Returns the next offset and next seq to write.
+func (s *LogSyncer) fetchServerCursor() (offset, nextSeq int64, err error) {
+	url := fmt.Sprintf("%s/api/v1/runs/%s/logs/cursor", s.APIURL, s.RunID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	if s.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.Token)
+	}
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, 0, fmt.Errorf("cursor endpoint status %d", resp.StatusCode)
+	}
+	var body struct {
+		Bytes int64 `json:"bytes"`
+		Seq   int64 `json:"seq"` // max stored seq, -1 if none
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return 0, 0, err
+	}
+	return body.Bytes, body.Seq + 1, nil
+}
+
 // flush ships all newly-written stdout, capped at maxLogChunk per chunk. The
 // cursor is advanced only past chunks the control plane confirmed storing.
 func (s *LogSyncer) flush() {
+	// Recover from a lost cursor before touching stdout: adopt the server's stored
+	// (offset, seq) so we append new chunks instead of re-chunking from 0. If
+	// ingestion is momentarily unreachable, skip this tick and retry — never fall
+	// back to offset 0, which is what corrupts the reassembled log (#9).
+	if s.needResync {
+		offset, nextSeq, err := s.fetchServerCursor()
+		if err != nil {
+			log.Printf("LogSyncer: cursor recovery deferred (ingestion unreachable): %v", err)
+			return
+		}
+		s.offset, s.chunkSeq = offset, nextSeq
+		s.needResync = false
+		s.writeCursor(s.offset, s.chunkSeq)
+		log.Printf("LogSyncer: recovered position from ingestion — offset %d, next seq %d", s.offset, s.chunkSeq)
+	}
+
 	f, err := os.Open(s.logPath)
 	if err != nil {
 		return // stdout.log not created yet
