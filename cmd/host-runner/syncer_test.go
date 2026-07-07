@@ -75,7 +75,7 @@ func TestSyncerCursorSurvivesOutageAndRestart(t *testing.T) {
 
 	// Outage: every push fails, so nothing must be acknowledged or advanced.
 	fake.setFail(true)
-	s := NewSyncer(dir, fake.server.URL, "run-1")
+	s := NewSyncer(dir, fake.server.URL, "run-1", "")
 	s.offset = s.readCursor()
 	s.flush()
 
@@ -95,7 +95,7 @@ func TestSyncerCursorSurvivesOutageAndRestart(t *testing.T) {
 	// Append more, then simulate a process restart with a brand-new Syncer that
 	// only knows the on-disk cursor. It must deliver ONLY the new events.
 	writeWAL(t, walPath, 4, 5)
-	s2 := NewSyncer(dir, fake.server.URL, "run-1")
+	s2 := NewSyncer(dir, fake.server.URL, "run-1", "")
 	s2.offset = s2.readCursor()
 	if s2.offset == 0 {
 		t.Fatalf("restarted syncer did not load a persisted cursor")

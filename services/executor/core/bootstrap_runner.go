@@ -18,6 +18,7 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/hostconn"
 	"github.com/praetordev/praetor/pkg/ingestclient"
+	"github.com/praetordev/praetor/pkg/runtoken"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -44,12 +45,17 @@ type BootstrapRunner struct {
 	// ingest is the shared ingestion client used for the run-scoped pre-flight
 	// (runnable) and just-in-time credential resolution.
 	ingest *ingestclient.Client
+	// internalToken is the shared cluster secret (PRAETOR_INTERNAL_TOKEN). The
+	// executor uses it both to mint each run's host-runner ingestion token (see
+	// pkg/runtoken) and to authenticate its own in-cluster ingestion calls (e.g.
+	// the inventory-sync upsert).
+	internalToken string
 }
 
 // NewBootstrapRunner constructs the runner from resolved config values. All
 // environment resolution happens in cmd/executor/main.go (the composition root),
 // so this core type stays free of os.Getenv and testable with plain values.
-func NewBootstrapRunner(giteaURL, giteaOwner, runtimeDir, ingestionURL, callbackURL string, ingest *ingestclient.Client) *BootstrapRunner {
+func NewBootstrapRunner(giteaURL, giteaOwner, runtimeDir, ingestionURL, callbackURL, internalToken string, ingest *ingestclient.Client) *BootstrapRunner {
 	if runtimeDir == "" {
 		runtimeDir = "/tmp/build/runtime"
 	}
@@ -60,12 +66,13 @@ func NewBootstrapRunner(giteaURL, giteaOwner, runtimeDir, ingestionURL, callback
 		callbackURL = ingestionURL
 	}
 	return &BootstrapRunner{
-		GiteaURL:     giteaURL,
-		GiteaOwner:   giteaOwner,
-		RuntimeDir:   runtimeDir,
-		IngestionURL: ingestionURL,
-		CallbackURL:  callbackURL,
-		ingest:       ingest,
+		GiteaURL:      giteaURL,
+		GiteaOwner:    giteaOwner,
+		RuntimeDir:    runtimeDir,
+		IngestionURL:  ingestionURL,
+		CallbackURL:   callbackURL,
+		ingest:        ingest,
+		internalToken: internalToken,
 	}
 }
 
@@ -166,6 +173,11 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 	}
 
 	logger.Info("starting deployment", "run_id", req.ExecutionRunID)
+
+	// Mint the per-run ingestion token the host-runner will present on its
+	// events/logs/heartbeat/facts calls. It rides only in the 0600 manifest below;
+	// ingestion recomputes and verifies it from the same shared secret + run id.
+	req.JobManifest.IngestToken = runtoken.Mint(r.internalToken, req.ExecutionRunID.String())
 
 	manifestBytes, err := json.Marshal(req)
 	if err != nil {

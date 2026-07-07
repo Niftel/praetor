@@ -64,7 +64,17 @@ func (r *BootstrapRunner) syncInventory(req *events.ExecutionRequest, eventChan 
 		ingestion = "http://ingestion:8081"
 	}
 	url := fmt.Sprintf("%s/api/v1/inventories/%d/sync-data", ingestion, m.SyncInventoryID)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(out))
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(out))
+	if err != nil {
+		return r.syncFail(req, eventChan, fmt.Errorf("building sync-data request: %w", err))
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	// sync-data is an in-cluster, authenticated ingestion endpoint; the executor
+	// presents the shared internal token (the host-runner is not involved here).
+	if r.internalToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+r.internalToken)
+	}
+	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		return r.syncFail(req, eventChan, fmt.Errorf("posting sync data: %w", err))
 	}

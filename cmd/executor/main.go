@@ -48,6 +48,7 @@ func main() {
 		env.String("RUNTIME_DIR", ""),
 		ingestionURL,
 		env.String("HOST_RUNNER_CALLBACK_URL", ""),
+		env.String("PRAETOR_INTERNAL_TOKEN", ""),
 		ingest,
 	)
 

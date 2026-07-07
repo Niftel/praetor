@@ -73,7 +73,7 @@ func TestLogSyncerStreamsChunksAndResumes(t *testing.T) {
 
 	// Outage: nothing delivered, no cursor.
 	fake.setFail(true)
-	s := NewLogSyncer(dir, fake.server.URL, "run-1")
+	s := NewLogSyncer(dir, fake.server.URL, "run-1", "")
 	s.offset, s.chunkSeq = s.readCursor()
 	s.flush()
 	if fake.count() != 0 {
@@ -100,7 +100,7 @@ func TestLogSyncerStreamsChunksAndResumes(t *testing.T) {
 	_, _ = fAppend.Write(second)
 	fAppend.Close()
 
-	s2 := NewLogSyncer(dir, fake.server.URL, "run-1")
+	s2 := NewLogSyncer(dir, fake.server.URL, "run-1", "")
 	s2.offset, s2.chunkSeq = s2.readCursor()
 	if s2.offset == 0 {
 		t.Fatalf("restarted log syncer did not load a persisted cursor")
@@ -129,7 +129,7 @@ func TestLogSyncerChunkSizeCap(t *testing.T) {
 	fake := newFakeLogIngestion()
 	defer fake.server.Close()
 
-	s := NewLogSyncer(dir, fake.server.URL, "run-2")
+	s := NewLogSyncer(dir, fake.server.URL, "run-2", "")
 	s.flush()
 
 	if fake.count() < 3 {
