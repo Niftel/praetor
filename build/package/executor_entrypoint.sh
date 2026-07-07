@@ -25,10 +25,12 @@ chmod 600 /home/praetor/.ssh/config
 chown praetor:praetor /home/praetor/.ssh/config
 
 # Localhost jobs run the host-runner on the executor itself: it writes job dirs
-# under /var/lib/praetor and extracts the Execution Pack under /opt/praetor. Make
-# both writable by the runtime user (the process runs as praetor via gosu).
-mkdir -p /var/lib/praetor /opt/praetor
-chown praetor:praetor /var/lib/praetor /opt/praetor
+# under /var/lib/praetor and extracts the Execution Pack under /opt/praetor/packs.
+# Both are persistent volumes (for crash recovery, #45) and are mounted root-owned,
+# so chown the mount points to the runtime user (the process runs as praetor via
+# gosu) or pack extraction and WAL writes fail.
+mkdir -p /var/lib/praetor /opt/praetor/packs
+chown praetor:praetor /var/lib/praetor /opt/praetor /opt/praetor/packs
 
 # Drop privileges and exec
 exec gosu praetor "$@"
