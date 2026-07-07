@@ -48,7 +48,13 @@ type ExecutionRequest struct {
 // JobManifest contains all resolved configuration for the job execution.
 type JobManifest struct {
 	// For now, minimal fields as per vision doc example
-	Inventory       string                 `json:"inventory"`        // Raw inventory INI content
+	// InventoryID references the inventory to run against. The scheduler ships only
+	// this id (by reference) in the outbox/NATS message; the executor fetches the
+	// rendered INI from ingestion at dispatch and fills Inventory below, so a large
+	// inventory doesn't bloat the message toward NATS's size limit (#13). 0 = none
+	// (localhost).
+	InventoryID     int64                  `json:"inventory_id,omitempty"`
+	Inventory       string                 `json:"inventory"`        // Rendered INI; empty in the outbox/NATS, filled by the executor
 	ProjectURL      string                 `json:"project_url"`      // Git URL for project
 	ProjectRef      string                 `json:"project_ref"`      // Git branch/tag/commit (optional)
 	Playbook        string                 `json:"playbook"`         // Playbook file path within project
