@@ -47,7 +47,6 @@ const (
 
 type NatsBus struct {
 	Conn *nats.Conn
-	Enc  *nats.EncodedConn
 	JS   nats.JetStreamContext
 }
 
@@ -62,22 +61,14 @@ func NewNatsBus(url string) (*NatsBus, error) {
 		return nil, fmt.Errorf("nats connect failed: %w", err)
 	}
 
-	ec, err := nats.NewEncodedConn(nc, nats.JSON_ENCODER)
-	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("nats encoded conn failed: %w", err)
-	}
-
 	js, err := nc.JetStream()
 	if err != nil {
-		ec.Close()
 		nc.Close()
 		return nil, fmt.Errorf("jetstream init failed: %w", err)
 	}
 
-	bus := &NatsBus{Conn: nc, Enc: ec, JS: js}
+	bus := &NatsBus{Conn: nc, JS: js}
 	if err := bus.ensureStreams(); err != nil {
-		ec.Close()
 		nc.Close()
 		return nil, err
 	}
@@ -85,7 +76,6 @@ func NewNatsBus(url string) (*NatsBus, error) {
 }
 
 func (b *NatsBus) Close() {
-	b.Enc.Close()
 	b.Conn.Close()
 }
 

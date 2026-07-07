@@ -138,8 +138,8 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		// 3. Create Execution Run
 		var runID uuid.UUID
 		err := tx.QueryRowContext(ctx, `
-			INSERT INTO execution_runs (unified_job_id, attempt_number, state) 
-			VALUES ($1, 1, 'pending') 
+			INSERT INTO execution_runs (unified_job_id, state)
+			VALUES ($1, 'pending')
 			RETURNING id`, job.ID).Scan(&runID)
 
 		if err != nil {
