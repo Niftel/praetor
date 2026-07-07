@@ -609,7 +609,11 @@ volumes:
   praetor-ssh:
   prometheus-data:
   grafana-data:
-  # Pre-existing volume holding Gitea's config/DB/repos/packages (created out of
-  # band); referenced as external so compose never wipes it.
+  # Holds Gitea's config/DB/repos + the Execution Pack registry. Declared external
+  # on purpose so `docker compose down -v` can't wipe the registry. Because of that,
+  # a fresh checkout must create it first — and it should be backed up:
+  #   scripts/gitea-volume.sh init                 # once, on a fresh checkout
+  #   scripts/gitea-volume.sh backup [FILE]        # tar it out
+  #   scripts/gitea-volume.sh restore FILE         # restore (gitea stopped)
   gitea-data:
     external: true
