@@ -106,6 +106,40 @@ func (c *Client) Runnable(ctx context.Context, runID string) (bool, error) {
 	return body.Runnable, nil
 }
 
+// ResolveInventory fetches the rendered Ansible INI for an inventory. The manifest
+// ships only the inventory id (by reference); the executor calls this at dispatch
+// and fills the INI into its manifest copy before pushing to the host-runner (#13).
+func (c *Client) ResolveInventory(ctx context.Context, inventoryID int64) (string, error) {
+	if c.baseURL == "" {
+		return "", fmt.Errorf("ingestclient: no base URL configured")
+	}
+	url := fmt.Sprintf("%s/internal/v1/inventories/%d/rendered", c.baseURL, inventoryID)
+	var ini string
+	err := c.doRetry(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		c.auth(req)
+		resp, err := c.hc.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			return fmt.Errorf("resolve inventory: status %d: %s", resp.StatusCode, string(b))
+		}
+		b, rerr := io.ReadAll(resp.Body)
+		if rerr != nil {
+			return rerr
+		}
+		ini = string(b)
+		return nil
+	})
+	return ini, err
+}
+
 // PostEvents delivers a batch of job events for a run.
 func (c *Client) PostEvents(ctx context.Context, runID string, evs []events.JobEvent) error {
 	if c.baseURL == "" {

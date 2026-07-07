@@ -172,6 +172,22 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 		return r.syncInventory(req, eventChan)
 	}
 
+	// Resolve the inventory just-in-time. The scheduler ships only the inventory id
+	// (no large INI at rest in the outbox/NATS, #13); the executor is DB-free, so
+	// ingestion renders the INI server-side. We hold it only in this in-memory
+	// manifest copy, which is then pushed to the host-runner. A resolve failure is
+	// fatal — the play can't run without its inventory.
+	if req.JobManifest.InventoryID != 0 && req.JobManifest.Inventory == "" {
+		if r.ingest == nil {
+			return fmt.Errorf("run %s needs inventory %d but no ingestion client is configured", req.ExecutionRunID, req.JobManifest.InventoryID)
+		}
+		ini, ierr := r.ingest.ResolveInventory(context.Background(), req.JobManifest.InventoryID)
+		if ierr != nil {
+			return fmt.Errorf("resolve inventory %d for run %s: %w", req.JobManifest.InventoryID, req.ExecutionRunID, ierr)
+		}
+		req.JobManifest.Inventory = ini
+	}
+
 	logger.Info("starting deployment", "run_id", req.ExecutionRunID)
 
 	// Mint the per-run ingestion token the host-runner will present on its
