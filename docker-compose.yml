@@ -391,8 +391,29 @@ services:
     networks:
       - praetor-net
 
-  # Builds Execution Packs from their YAML spec (docker build via the mounted
-  # socket) and writes the tarball into ./build/runtime, shared with the executor.
+  # Dedicated BuildKit daemon for the packbuilder (issue #46): the packbuilder no
+  # longer mounts the host docker.sock — it drives builds over BuildKit's gRPC API.
+  # Privileged, but single-purpose: no host socket, no host mounts, no published
+  # ports. --oci-worker-net=host makes build RUN steps share THIS container's netns
+  # (on praetor-net) so they can reach the in-cluster Gitea mirror by IP (the
+  # packbuilder pins the names via build add-hosts). SECURITY NOTE: the gRPC
+  # listener is unauthenticated on praetor-net; acceptable for the local dev/demo
+  # stack — enable buildkitd mTLS (--tlscacert/--tlscert/--tlskey) to harden.
+  buildkitd:
+    logging: *default-logging
+    image: moby/buildkit:v0.13.2
+    privileged: true
+    command:
+      - --addr=tcp://0.0.0.0:1234
+      - --oci-worker-net=host
+    volumes:
+      - buildkit-cache:/var/lib/buildkit
+    networks:
+      - praetor-net
+    restart: unless-stopped
+
+  # Builds Execution Packs from their YAML spec by driving the buildkitd daemon
+  # (no host socket) and publishes the tarball to Gitea (or ./build/runtime).
   packbuilder:
     logging: *default-logging
     build:
@@ -411,22 +432,17 @@ services:
       # writing the tarball into the shared ./build/runtime dir (legacy).
       GITEA_INTERNAL_URL: "${PRAETOR_GITEA_INTERNAL_URL:-http://gitea-host:3000}"
       GITEA_TOKEN: "${PRAETOR_GITEA_TOKEN:-}"
+      # Drive the dedicated BuildKit daemon over gRPC — no host Docker socket (#46).
+      BUILDKIT_HOST: tcp://buildkitd:1234
     volumes:
-      # RESIDUAL RISK (tracked follow-up): packbuilder needs the raw host socket to
-      # run `docker build` (with --network=host) + create/cp to extract the pack
-      # tarball — that is host-compromise-equivalent power, so a scoped socket-proxy
-      # would be theater here (POST /containers/create + docker cp = full host fs).
-      # It is NOT edge-exposed (no published ports) and its build inputs are the
-      # real control: every spec — including git-fetched ones — is typed/validated
-      # (pkg/packspec) before reaching the docker argv, and deps go through a file +
-      # `pip install -r`, never shell-split. The genuine fix is migrating to a
-      # rootless BuildKit sidecar (also removes the --network=host/--add-host and
-      # create/cp machinery); filed as its own change, not part of #25.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # No docker.sock. ./build carries the Dockerfile (build/ansible-runtime) and
+      # the legacy ./build/runtime output dir (when GITEA_TOKEN is unset).
       - ./build:/build:rw
     depends_on:
       migrator:
         condition: service_completed_successfully
+      buildkitd:
+        condition: service_started
     networks:
       - praetor-net
     restart: unless-stopped
@@ -615,6 +631,7 @@ volumes:
   praetor-ssh:
   praetor-jobs:  # localhost-run WAL/state, persisted for crash recovery (#45)
   praetor-packs: # extracted Execution Packs, persisted so recovery needn't re-fetch
+  buildkit-cache: # BuildKit daemon layer/build cache (#46)
   prometheus-data:
   grafana-data:
   # Holds Gitea's config/DB/repos + the Execution Pack registry. Declared external
