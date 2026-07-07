@@ -179,11 +179,19 @@ func (b *NatsBus) PublishLogChunk(chunk *events.LogChunk) error {
 // most that many (all recovered by the reconciler), versus up to 100 before.
 // Multiple executors sharing the durable pull work natively (no queue group).
 func (b *NatsBus) SubscribeToExecutionRequests() (<-chan events.ExecutionRequest, error) {
-	// A durable consumer can't switch between push and pull in place; drop any
-	// pre-existing consumer (e.g. the old push queue-subscriber) so PullSubscribe
-	// recreates it as pull. WorkQueue streams allow only one consumer per subject,
-	// so this also prevents an "overlapping subjects" bind error.
-	_ = b.JS.DeleteConsumer(StreamRequests, DurableConsumerExecutor)
+	// A durable consumer can't switch between push and pull in place, so the OLD
+	// push queue-subscriber has to be dropped before PullSubscribe can recreate it
+	// as pull. But deleting unconditionally is unsafe with >1 executor: a second
+	// executor starting up would delete the shared durable consumer out from under
+	// the first one mid-fetch. So only delete when the existing consumer is actually
+	// the legacy push type (it has a DeliverSubject); a compatible pull consumer is
+	// left in place and simply re-bound below. This makes startup idempotent and
+	// safe to run with multiple executors sharing the durable pull consumer.
+	if info, ierr := b.JS.ConsumerInfo(StreamRequests, DurableConsumerExecutor); ierr == nil {
+		if info.Config.DeliverSubject != "" { // push consumer — incompatible, must recreate
+			_ = b.JS.DeleteConsumer(StreamRequests, DurableConsumerExecutor)
+		}
+	}
 
 	sub, err := b.JS.PullSubscribe(SubjectExecutionRequest, DurableConsumerExecutor,
 		nats.ManualAck(),
