@@ -1,0 +1,38 @@
+{{- if and .Values.nats.bundled.enabled (not .Values.nats.external.url) }}
+{{- $natsMB := include "praetor.natsMaxFileStoreMB" . | int }}
+{{- if and (gt $natsMB 0) (ge (.Values.ingestion.logStoreMaxMB | int) $natsMB) }}
+{{- fail (printf "ingestion.logStoreMaxMB (%vMB) must be LESS than nats.bundled.maxFileStore (%s ≈ %dMB): the JetStream run-log object store cannot exceed the file store, or ingestion fails with 'insufficient storage resources'." .Values.ingestion.logStoreMaxMB .Values.nats.bundled.maxFileStore $natsMB) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "praetor.configMapName" . }}
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+data:
+  # Cross-service URLs, derived from Service names (never free-form).
+  NATS_URL: {{ include "praetor.natsUrl" . | quote }}
+  API_URL: {{ printf "http://%s-api:%v" (include "praetor.fullname" .) .Values.api.service.port | quote }}
+  INGESTION_URL: {{ printf "http://%s-ingestion:%v" (include "praetor.fullname" .) .Values.ingestion.service.port | quote }}
+  # Ports.
+  PORT: {{ .Values.api.service.port | quote }}
+  INGESTION_PORT: {{ .Values.ingestion.service.port | quote }}
+  # Fail hard on missing secrets in production (see values.allowInsecureDefaults).
+  PRAETOR_ALLOW_INSECURE_DEFAULTS: {{ .Values.allowInsecureDefaults | quote }}
+  # Scheduler / reconciler / executor tunables.
+  JOB_RETENTION_DAYS: {{ .Values.scheduler.jobRetentionDays | quote }}
+  RECONCILE_INTERVAL: {{ .Values.reconciler.interval | quote }}
+  EXECUTOR_WORKERS: {{ .Values.executor.workers | quote }}
+  ANSIBLE_FORKS: {{ .Values.executor.ansibleForks | quote }}
+  # Ingestion log-store bounds.
+  PRAETOR_LOG_STORE_MAX_MB: {{ .Values.ingestion.logStoreMaxMB | quote }}
+  PRAETOR_LOG_STORE_MAX_AGE_DAYS: {{ .Values.ingestion.logStoreMaxAgeDays | quote }}
+  # Execution Pack registry (Gitea) — where the executor pulls packs from.
+  GITEA_INTERNAL_URL: {{ .Values.gitea.internalUrl | quote }}
+  GITEA_OWNER: {{ .Values.gitea.owner | quote }}
+  # Host-runner callback URL (must be routable from managed targets).
+  HOST_RUNNER_CALLBACK_URL: {{ include "praetor.callbackUrl" . | quote }}
+  {{- if .Values.ldap.enabled }}
+  PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
+  {{- end }}
