@@ -23,6 +23,7 @@ const maxLogChunk = 256 * 1024
 type LogSyncer struct {
 	APIURL string
 	RunID  string
+	Token  string
 	Client *http.Client
 
 	logPath    string
@@ -31,10 +32,11 @@ type LogSyncer struct {
 	chunkSeq   int64 // next chunk sequence number
 }
 
-func NewLogSyncer(jobDir, apiURL, runID string) *LogSyncer {
+func NewLogSyncer(jobDir, apiURL, runID, token string) *LogSyncer {
 	return &LogSyncer{
 		APIURL:     apiURL,
 		RunID:      runID,
+		Token:      token,
 		Client:     &http.Client{Timeout: 10 * time.Second},
 		logPath:    filepath.Join(jobDir, "stdout.log"),
 		cursorPath: filepath.Join(jobDir, "stdout.cursor"),
@@ -137,6 +139,9 @@ func (s *LogSyncer) push(seq int64, data []byte) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
+	if s.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.Token)
+	}
 
 	resp, err := s.Client.Do(req)
 	if err != nil {

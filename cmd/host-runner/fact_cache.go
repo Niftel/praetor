@@ -61,13 +61,22 @@ func collectFacts(jobDir string) map[string]json.RawMessage {
 
 // postFacts ships gathered facts to the ingestion service, which maps each host
 // name to a host_id within the run's inventory and upserts host_facts.
-func postFacts(apiURL, runID string, facts map[string]json.RawMessage) {
+func postFacts(apiURL, runID, token string, facts map[string]json.RawMessage) {
 	if apiURL == "" || len(facts) == 0 {
 		return
 	}
 	body, _ := json.Marshal(map[string]interface{}{"facts": facts})
 	url := fmt.Sprintf("%s/api/v1/runs/%s/facts", apiURL, runID)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("facts: build request failed: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("facts: post failed: %v", err)
 		return

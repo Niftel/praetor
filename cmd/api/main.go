@@ -30,6 +30,7 @@ func main() {
 
 	router := api.NewRouter(database, api.Config{
 		IngestionURL:   env.String("INGESTION_URL", ""),
+		InternalToken:  env.String("PRAETOR_INTERNAL_TOKEN", ""),
 		LDAPConfigPath: env.String("PRAETOR_LDAP_CONFIG", ""),
 	})
 

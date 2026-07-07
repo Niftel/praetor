@@ -319,7 +319,7 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 
 	// Ship any facts Ansible gathered into the cache back to the control plane.
 	if req.JobManifest.UseFactCache {
-		postFacts(r.APIURL, req.ExecutionRunID.String(), collectFacts(r.JobDir))
+		postFacts(r.APIURL, req.ExecutionRunID.String(), req.JobManifest.IngestToken, collectFacts(r.JobDir))
 	}
 
 	finalState := "successful"
