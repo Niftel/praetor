@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/go-git/go-billy/v5"
@@ -236,8 +235,12 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			logger.Info("template has no project - using default/inline logic", "template", template.Name, "job_id", job.ID)
 		}
 
-		// 6. Generate inventory from structured hosts and groups
-		var inventoryContent string
+		// 6. Inventory by reference: ship only the id. The executor fetches the
+		// rendered INI from ingestion at dispatch and fills manifest.Inventory
+		// before pushing to the host-runner, so a large inventory never bloats the
+		// outbox row / NATS message or runs an O(n) INI build inside this claim
+		// transaction (#13). INI generation now lives in ingestion (pkg/inventoryrender).
+		var inventoryID int64
 		if template.InventoryID != nil {
 			var inventory models.Inventory
 			err = tx.GetContext(ctx, &inventory, "SELECT * FROM inventories WHERE id = $1", *template.InventoryID)
@@ -246,31 +249,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
-
-			// Fetch all hosts in this inventory
-			var hosts []models.Host
-			err = tx.SelectContext(ctx, &hosts, "SELECT * FROM hosts WHERE inventory_id = $1 AND enabled = true", *template.InventoryID)
-			if err != nil {
-				logger.Error("fetch hosts for inventory failed", "inventory_id", *template.InventoryID, "err", err)
-				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
-				continue
-			}
-
-			// Fetch all groups in this inventory
-			var groups []models.Group
-			err = tx.SelectContext(ctx, &groups, "SELECT * FROM groups WHERE inventory_id = $1", *template.InventoryID)
-			if err != nil {
-				logger.Error("fetch groups for inventory failed", "inventory_id", *template.InventoryID, "err", err)
-			}
-
-			// Build INI inventory
-			inventoryContent = generateInventoryINI(tx, ctx, hosts, groups)
-			logger.Debug("generated inventory", "inventory", inventory.Name, "job_id", job.ID, "content", inventoryContent)
-			logger.Info("generated inventory", "inventory", inventory.Name, "hosts", len(hosts), "groups", len(groups), "job_id", job.ID)
-
-			if len(hosts) == 0 {
-				logger.Warn("inventory has no enabled hosts - proceeding (localhost/group vars may apply)", "inventory", inventory.Name)
-			}
+			inventoryID = *template.InventoryID
 		} else {
 			logger.Info("template has no inventory - using default localhost", "template", template.Name, "job_id", job.ID)
 			// inventoryContent remains empty, Executor will default to localhost
@@ -334,7 +313,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		}
 
 		manifest := events.JobManifest{
-			Inventory:       inventoryContent,
+			InventoryID:     inventoryID, // executor fetches + fills Inventory at dispatch (#13)
 			ProjectURL:      projectURL,
 			Playbook:        template.Playbook,
 			PlaybookContent: "", // inline playbooks disabled — SCM projects only
@@ -720,110 +699,6 @@ func findFile(fs billy.Filesystem, path string) (billy.File, error) {
 	return nil, fmt.Errorf("file not found: %s", path)
 }
 
-// generateInventoryINI converts structured hosts and groups to Ansible INI format
-func generateInventoryINI(tx *sqlx.Tx, ctx context.Context, hosts []models.Host, groups []models.Group) string {
-	var sb strings.Builder
-
-	// Index hosts by id once (O(1) lookup) instead of scanning the slice per member
-	// (the old inner loop was O(groups x members x hosts)).
-	hostByID := make(map[int64]models.Host, len(hosts))
-	ungroupedHosts := make(map[int64]bool, len(hosts))
-	for _, h := range hosts {
-		hostByID[h.ID] = h
-		ungroupedHosts[h.ID] = true
-	}
-
-	// Fetch ALL group memberships in one query rather than one per group (the old
-	// N+1 ran a SELECT per group inside the dispatch transaction, holding the claim
-	// lock longer as the inventory grew). Membership lives in host_groups.
-	membersByGroup := make(map[int64][]int64, len(groups))
-	if len(groups) > 0 {
-		groupIDs := make([]int64, len(groups))
-		for i, g := range groups {
-			groupIDs[i] = g.ID
-		}
-		q, args, err := sqlx.In(`SELECT group_id, host_id FROM host_groups WHERE group_id IN (?)`, groupIDs)
-		if err == nil {
-			q = tx.Rebind(q)
-			rows := []struct {
-				GroupID int64 `db:"group_id"`
-				HostID  int64 `db:"host_id"`
-			}{}
-			if err := tx.SelectContext(ctx, &rows, q, args...); err == nil {
-				for _, r := range rows {
-					membersByGroup[r.GroupID] = append(membersByGroup[r.GroupID], r.HostID)
-				}
-			} else {
-				logger.Error("fetch group memberships failed", "err", err)
-			}
-		}
-	}
-
-	// Process each group.
-	for _, g := range groups {
-		groupHostIDs := membersByGroup[g.ID]
-		if len(groupHostIDs) == 0 {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("[%s]\n", g.Name))
-		for _, hostID := range groupHostIDs {
-			if h, ok := hostByID[hostID]; ok {
-				sb.WriteString(formatHostLine(h))
-				delete(ungroupedHosts, h.ID)
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Add ungrouped hosts under [ungrouped] if any.
-	if len(ungroupedHosts) > 0 {
-		sb.WriteString("[ungrouped]\n")
-		for _, h := range hosts {
-			if ungroupedHosts[h.ID] {
-				sb.WriteString(formatHostLine(h))
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
-}
-
-// formatHostLine formats a host with its variables for INI
-func formatHostLine(h models.Host) string {
-	var sb strings.Builder
-	sb.WriteString(h.Name)
-
-	// Parse variables JSON
-	// Parse variables JSON
-	var vars map[string]interface{}
-	if h.Variables != nil {
-		_ = json.Unmarshal(h.Variables, &vars)
-	}
-	if vars == nil {
-		vars = make(map[string]interface{})
-	}
-
-	// Inject ControlMaster=no to prevent Docker crashes
-	if val, ok := vars["ansible_ssh_common_args"]; ok {
-		vars["ansible_ssh_common_args"] = fmt.Sprintf("%v -o ControlMaster=no", val)
-	} else {
-		vars["ansible_ssh_common_args"] = "-o StrictHostKeyChecking=no -o ControlMaster=no"
-	}
-
-	for k, v := range vars {
-		// Quote string values if they contain spaces
-		strVal := fmt.Sprintf("%v", v)
-		if strings.Contains(strVal, " ") {
-			sb.WriteString(fmt.Sprintf(" %s=\"%s\"", k, strVal))
-		} else {
-			sb.WriteString(fmt.Sprintf(" %s=%s", k, strVal))
-		}
-	}
-
-	sb.WriteString("\n")
-	return sb.String()
-}
 
 // packProjectToTar creates a base64-encoded tar.gz of the entire in-memory filesystem
 func packProjectToTar(fs billy.Filesystem) (string, error) {
