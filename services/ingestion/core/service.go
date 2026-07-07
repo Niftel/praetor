@@ -322,47 +322,40 @@ func (s *IngestionService) IngestLogChunk(ctx context.Context, runID uuid.UUID, 
 	return nil
 }
 
-// IngestEvents persists a batch of events.
+// IngestEvents publishes a batch of events for a run to the durable event stream.
+//
+// No Postgres access: the runID is already authenticated (per-run token) and is
+// the source of truth for the run. unified_job_id is resolved authoritatively by
+// the consumer (the Postgres boundary) at projection time, so ingestion needs no
+// DB lookup and keeps accepting events — buffering them in JetStream — even while
+// Postgres is down (#16). The on-target WAL plus JetStream, not a DB round-trip,
+// are the real durability buffer.
 func (s *IngestionService) IngestEvents(ctx context.Context, runID uuid.UUID, eventsList []models.JobEvent) error {
 	if len(eventsList) == 0 {
 		return nil
 	}
 	EventsIngested.Add(float64(len(eventsList)))
 
-	// 1. Fetch the UnifiedJobID for this run.
-	// We trust the runID from the URL, but the DB requires unified_job_id for the FK in job_events.
-	var unifiedJobID int64
-	err := s.DB.GetContext(ctx, &unifiedJobID, "SELECT unified_job_id FROM execution_runs WHERE id = $1", runID)
-	if err != nil {
-		return fmt.Errorf("failed to find execution run %s: %w", runID, err)
-	}
-
-	// Now publish to NATS
 	for _, event := range eventsList {
-		// Ensure system fields match the URL and DB reality
+		// The run id comes from the authenticated URL, not the event body.
 		event.ExecutionRunID = runID
-		event.UnifiedJobID = unifiedJobID
-
-		// ID is BIGSERIAL, let DB handle it if 0
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = time.Now()
 		}
-
-		// Ensure EventData is not nil/empty for JSONB column
+		// Ensure EventData is valid JSON for the downstream JSONB column.
 		if len(event.EventData) == 0 {
 			event.EventData = json.RawMessage("{}")
 		}
 
 		natsEvent := &events.JobEvent{
-			UnifiedJobID:   event.UnifiedJobID,
-			ExecutionRunID: event.ExecutionRunID, // Valid uuid.UUID
+			ExecutionRunID: event.ExecutionRunID,
 			EventType:      event.EventType,
 			Seq:            event.Seq,
 			Timestamp:      event.CreatedAt,
 			TaskName:       event.TaskName,
 			PlayName:       event.PlayName,
 			StdoutSnippet:  event.StdoutSnippet,
-			EventData:      event.EventData, // Valid json.RawMessage
+			EventData:      event.EventData,
 		}
 
 		if err := s.Publisher.PublishJobEvent(natsEvent); err != nil {
