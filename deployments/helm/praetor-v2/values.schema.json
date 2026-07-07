@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Praetor chart values",
+  "type": "object",
+  "properties": {
+    "allowInsecureDefaults": { "type": "boolean" },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "secretKey": {
+          "type": "string",
+          "description": "Empty, or exactly 32 bytes.",
+          "oneOf": [
+            { "maxLength": 0 },
+            { "minLength": 32, "maxLength": 32 }
+          ]
+        },
+        "secretKeyOld": { "type": "string" },
+        "jwtSecret": { "type": "string" },
+        "internalToken": { "type": "string" },
+        "ldapBindPassword": { "type": "string" }
+      }
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "external": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } }
+        },
+        "bundled": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        }
+      }
+    },
+    "nats": {
+      "type": "object",
+      "properties": {
+        "external": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } }
+        },
+        "bundled": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        }
+      }
+    },
+    "executor": {
+      "type": "object",
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    }
+  }
+}

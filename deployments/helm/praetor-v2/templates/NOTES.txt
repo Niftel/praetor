@@ -1,0 +1,41 @@
+Praetor {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Control-plane services:
+  api, ingestion, scheduler, consumer, reconciler, executor (StatefulSet), ui
+{{ if and .Values.database.bundled.enabled (not .Values.database.external.url) }}Datastore: bundled PostgreSQL ({{ .Values.database.bundled.image }}).{{ else }}Datastore: external Postgres ({{ .Values.database.external.url }}).{{ end }}
+{{ if and .Values.nats.bundled.enabled (not .Values.nats.external.url) }}Bus/log store: bundled NATS JetStream ({{ .Values.nats.bundled.image }}).{{ else }}Bus/log store: external NATS ({{ .Values.nats.external.url }}).{{ end }}
+
+Check rollout:
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{- if not .Values.ingress.enabled }}
+
+No ingress is enabled. Reach the UI with a port-forward:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "praetor.fullname" . }}-ui 8080:{{ .Values.ui.service.port }}
+  open http://localhost:8080
+{{- else }}
+
+UI:        https://{{ .Values.ingress.host }}
+Ingestion: https://{{ .Values.ingress.ingestionHost }}   (host-runner callbacks)
+{{- end }}
+
+IMPORTANT — before running remote jobs against managed hosts:
+{{- $cb := include "praetor.callbackUrl" . }}
+{{- if not $cb }}
+  * hostRunner.callbackUrl is NOT set. Remote runs will drift into "reconciling"
+    because managed hosts have no address to call back to. Set it to the EXTERNAL
+    ingestion URL (e.g. https://{{ .Values.ingress.ingestionHost }}), never a
+    cluster-internal *.svc name.
+{{- else }}
+  * Managed hosts will call back to: {{ $cb }}
+    Confirm that URL is reachable FROM your target hosts (not just in-cluster).
+{{- end }}
+{{- if not .Values.gitea.internalUrl }}
+  * gitea.internalUrl is NOT set — the executor cannot pull Execution Packs until
+    you point it at your Gitea package registry.
+{{- end }}
+{{- if .Values.allowInsecureDefaults }}
+
+WARNING: allowInsecureDefaults=true — services may run on a built-in dev key.
+Set secrets.secretKey (32 bytes) + secrets.jwtSecret and flip this to false for anything real.
+{{- end }}
