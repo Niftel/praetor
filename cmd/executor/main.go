@@ -112,6 +112,11 @@ func main() {
 	// fast to scrape.
 	metrics.Serve("")
 
+	// Recover interrupted localhost runs from their persisted WAL before serving
+	// new work: a local run whose host-runner died with the executor container is
+	// resumed from /var/lib/praetor/jobs instead of being declared lost (#45).
+	runner.ResumeLocalJobs("")
+
 	// 2. Create Agent (Daemon Mode)
 	// We use NATS for Subscription (bus), and our selected publisher for Events
 	agent := core.NewAgent(bus, publisher, runner, env.Int("EXECUTOR_WORKERS", 2))

@@ -357,6 +357,44 @@ func (r *BootstrapRunner) localBootstrap(req *events.ExecutionRequest, manifestB
 	return cmd.Start() // detached; do not wait
 }
 
+// ResumeLocalJobs recovers localhost runs after an executor restart. A local run
+// executes the host-runner as a child of THIS container, writing its WAL to
+// /var/lib/praetor/jobs (a persistent volume). On startup we relaunch the
+// host-runner in --resume-root mode: it scans the root, skips already-terminal
+// dirs, and for each interrupted job resumes from its on-disk WAL (checkpoint /
+// task-level resume) while its syncers push the backlog. The resumed runner's
+// first heartbeat revives a run the scheduler parked in 'reconciling' (see
+// RecordHeartbeat), so a local job that outlived a control-plane blip completes
+// normally instead of being falsely reported as an error (#45).
+//
+// Best-effort and detached: recovery must never block or fail executor startup.
+func (r *BootstrapRunner) ResumeLocalJobs(root string) {
+	if root == "" {
+		root = "/var/lib/praetor/jobs"
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) == 0 {
+		return // nothing to resume (fresh executor / no local runs)
+	}
+	// The resume needs a host-runner binary; localhost runs use the default pack.
+	// Its own extracted pack (persisted) supplies ansible for any re-run.
+	hostRunner, err := r.ensureLocalPack("ansible-runtime")
+	if err != nil {
+		logger.Warn("local job recovery skipped: host-runner unavailable", "err", err)
+		return
+	}
+	cmd := exec.Command(hostRunner, "--resume-root="+root)
+	if lf, ferr := os.OpenFile(filepath.Join(root, "resume.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
+		cmd.Stdout, cmd.Stderr = lf, lf
+	}
+	if err := cmd.Start(); err != nil {
+		logger.Warn("local job recovery: failed to start resume", "err", err)
+		return
+	}
+	logger.Info("local job recovery started", "root", root, "dirs", len(entries))
+	// Detached: the resume process outlives this call and runs alongside the agent.
+}
+
 // ensureLocalPack extracts the pack for the executor's own arch under
 // /opt/praetor/packs/<pack> if absent, and returns the path to the bundled
 // host-runner daemon. Mirrors the remote bootstrap: the daemon + runtime come

@@ -300,6 +300,12 @@ services:
       # Persist SSH known_hosts (trust-on-first-use) across executor restarts.
       # Mounted at the runtime user's ~/.ssh so the non-root process can write it.
       - praetor-ssh:/home/praetor/.ssh
+      # Persist localhost-run WAL/state (/var/lib/praetor/jobs) and extracted packs
+      # across executor restarts, so an interrupted local run can be recovered on
+      # startup instead of being declared lost (#45). Without this a container
+      # restart destroys the WAL and recovery is impossible.
+      - praetor-jobs:/var/lib/praetor
+      - praetor-packs:/opt/praetor/packs
     depends_on:
       nats:
         condition: service_healthy
@@ -607,6 +613,8 @@ volumes:
   pgdata:
   nats-data:
   praetor-ssh:
+  praetor-jobs:  # localhost-run WAL/state, persisted for crash recovery (#45)
+  praetor-packs: # extracted Execution Packs, persisted so recovery needn't re-fetch
   prometheus-data:
   grafana-data:
   # Holds Gitea's config/DB/repos + the Execution Pack registry. Declared external
