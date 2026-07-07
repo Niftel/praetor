@@ -128,11 +128,9 @@ func buildPack(name, specYAML string) (string, error) {
 	if strings.HasSuffix(giteaHost, ".localhost") {
 		routeContainer = envOr("TRAEFIK_CONTAINER", "praetor-traefik")
 	}
-	// The daemon version is a pack.yml element; fall back to env/default if unset.
+	// The daemon version is the pack.yml `host_runner` field — the single source of
+	// truth, required and validated by spec.Validate() above (no silent default).
 	hostRunnerVersion := spec.HostRunner
-	if hostRunnerVersion == "" {
-		hostRunnerVersion = envOr("HOST_RUNNER_VERSION", "v0.1.0")
-	}
 
 	var out strings.Builder
 	for _, arch := range spec.Arches {
