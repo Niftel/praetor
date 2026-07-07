@@ -1,6 +1,11 @@
 apiVersion: v2
 name: praetor
-description: A Helm chart for the Praetor Event-Driven Automation Platform
+description: UNMAINTAINED / UNSUPPORTED Helm chart for Praetor — see README.md. Not validated against the current architecture; use docker-compose.yml.
 type: application
+# Marked deprecated: this chart is stale (missing ingestion, reconciler, buildkitd,
+# the docker-socket-proxy, gitea, ldap, persistent volumes, host-runner v0.7.0) and
+# is NOT tested against any cluster. See README.md. docker-compose.yml is the
+# source of truth for the deployment topology.
+deprecated: true
 version: 0.1.0
 appVersion: "1.0.0"
