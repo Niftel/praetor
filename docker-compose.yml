@@ -392,13 +392,27 @@ services:
       - praetor-net
 
   # Dedicated BuildKit daemon for the packbuilder (issue #46): the packbuilder no
+  # One-shot: generates the mTLS material (CA + daemon cert + client cert) shared
+  # by buildkitd and the packbuilder, into the buildkit-certs volume. Idempotent —
+  # a second run is a no-op if the CA already exists. buildkitd/packbuilder wait on
+  # its successful completion so the certs are present before they start.
+  buildkit-certgen:
+    logging: *default-logging
+    image: alpine:3.19
+    entrypoint: ["/bin/sh", "/gen-certs.sh"]
+    volumes:
+      - buildkit-certs:/certs
+      - ./deployments/buildkit/gen-certs.sh:/gen-certs.sh:ro
+    restart: "no"
+
   # longer mounts the host docker.sock — it drives builds over BuildKit's gRPC API.
   # Privileged, but single-purpose: no host socket, no host mounts, no published
   # ports. --oci-worker-net=host makes build RUN steps share THIS container's netns
   # (on praetor-net) so they can reach the in-cluster Gitea mirror by IP (the
-  # packbuilder pins the names via build add-hosts). SECURITY NOTE: the gRPC
-  # listener is unauthenticated on praetor-net; acceptable for the local dev/demo
-  # stack — enable buildkitd mTLS (--tlscacert/--tlscert/--tlskey) to harden.
+  # packbuilder pins the names via build add-hosts). The gRPC listener is secured
+  # with mTLS (--tlscacert/--tlscert/--tlskey): buildkitd requires a client cert
+  # signed by the shared CA, so nothing else on praetor-net can drive builds. Certs
+  # come from buildkit-certgen via the buildkit-certs volume.
   buildkitd:
     logging: *default-logging
     image: moby/buildkit:v0.13.2
@@ -406,10 +420,17 @@ services:
     command:
       - --addr=tcp://0.0.0.0:1234
       - --oci-worker-net=host
+      - --tlscacert=/certs/ca.pem
+      - --tlscert=/certs/daemon-cert.pem
+      - --tlskey=/certs/daemon-key.pem
     volumes:
       - buildkit-cache:/var/lib/buildkit
+      - buildkit-certs:/certs:ro
     networks:
       - praetor-net
+    depends_on:
+      buildkit-certgen:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # Builds Execution Packs from their YAML spec by driving the buildkitd daemon
@@ -434,12 +455,23 @@ services:
       GITEA_TOKEN: "${PRAETOR_GITEA_TOKEN:-}"
       # Drive the dedicated BuildKit daemon over gRPC — no host Docker socket (#46).
       BUILDKIT_HOST: tcp://buildkitd:1234
+      # mTLS to buildkitd: present the client cert and verify the daemon's, so the
+      # otherwise-open gRPC listener on praetor-net only accepts this builder. The
+      # servername must match the daemon cert's CN/SAN (buildkitd). Certs are shared
+      # via the buildkit-certs volume, mounted read-only below.
+      BUILDKIT_TLS_CACERT: /certs/ca.pem
+      BUILDKIT_TLS_CERT: /certs/client-cert.pem
+      BUILDKIT_TLS_KEY: /certs/client-key.pem
+      BUILDKIT_TLS_SERVERNAME: buildkitd
     volumes:
       # No docker.sock. ./build carries the Dockerfile (build/ansible-runtime) and
       # the legacy ./build/runtime output dir (when GITEA_TOKEN is unset).
       - ./build:/build:rw
+      - buildkit-certs:/certs:ro
     depends_on:
       migrator:
+        condition: service_completed_successfully
+      buildkit-certgen:
         condition: service_completed_successfully
       buildkitd:
         condition: service_started
@@ -632,6 +664,7 @@ volumes:
   praetor-jobs:  # localhost-run WAL/state, persisted for crash recovery (#45)
   praetor-packs: # extracted Execution Packs, persisted so recovery needn't re-fetch
   buildkit-cache: # BuildKit daemon layer/build cache (#46)
+  buildkit-certs: # mTLS CA + daemon/client certs shared by buildkitd & packbuilder
   prometheus-data:
   grafana-data:
   # Holds Gitea's config/DB/repos + the Execution Pack registry. Declared external
