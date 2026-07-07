@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -108,35 +109,54 @@ func buildPack(name, specYAML string) (string, error) {
 	// already validated — written to a file and `pip install -r`, never shell-split.
 	requirements := strings.Join(spec.Requirements(), "\n") + "\n"
 
-	// The pack pulls Python + wheels from the Gitea mirror. The build reaches
-	// Gitea (a container) via --network=host + an --add-host entry resolving the
-	// Gitea hostname to its bridge IP, so pip/curl inside the build can hit it.
-	giteaURL := envOr("GITEA_URL", "http://gitea-host:3000")
 	giteaOwner := envOr("GITEA_OWNER", "praetor")
 	// Server-side base URL for publishing the built pack to Gitea's package
-	// registry (in-cluster name, not the browser-facing Traefik host used for the
-	// build). A write:package token enables publishing; without one the builder
-	// falls back to the legacy shared runtime dir.
+	// registry (in-cluster name). A write:package token enables publishing; without
+	// one the builder falls back to the legacy shared runtime dir.
 	giteaAPI := envOr("GITEA_INTERNAL_URL", "http://gitea-host:3000")
 	giteaToken := os.Getenv("GITEA_TOKEN")
-	giteaHost := hostFromURL(giteaURL)
-	// A *.localhost Gitea URL is the browser-facing name fronted by Traefik (so
-	// Gitea's absolute package/repo URLs resolve the same in the browser and in
-	// this build). Host networking has no Docker DNS, so add-host that name to the
-	// Traefik container; other hostnames resolve straight to Gitea's container.
-	routeContainer := giteaHost
-	if strings.HasSuffix(giteaHost, ".localhost") {
-		routeContainer = envOr("TRAEFIK_CONTAINER", "praetor-traefik")
-	}
 	// The daemon version is the pack.yml `host_runner` field — the single source of
 	// truth, required and validated by spec.Validate() above (no silent default).
 	hostRunnerVersion := spec.HostRunner
 
+	// Builds run on a dedicated BuildKit daemon (no host Docker socket here, #46).
+	// The build fetches Python/Ansible/host-runner from the in-cluster Gitea; RUN
+	// steps share buildkitd's netns (--oci-worker-net=host, on praetor-net) so they
+	// reach Gitea by IP, but BuildKit strips Docker's embedded DNS from RUN
+	// resolv.conf — so resolve the names HERE (via our own Docker DNS) and pin them
+	// as build `add-hosts`. Two names matter:
+	//   - the in-cluster Gitea (GITEA_INTERNAL_URL host, e.g. gitea-host): the
+	//     python/host-runner/pip-index fetches; and
+	//   - the browser-facing Gitea (GITEA_URL host, e.g. gitea.localhost) that
+	//     Gitea's package index emits as absolute wheel URLs, routed via Traefik.
+	buildGiteaURL := giteaAPI
+	addHosts := map[string]string{}
+	if h := hostFromURL(buildGiteaURL); h != "" {
+		if ip := dnsIP(h); ip != "" {
+			addHosts[h] = ip
+		}
+	}
+	if browser := hostFromURL(envOr("GITEA_URL", "")); strings.HasSuffix(browser, ".localhost") {
+		if ip := dnsIP(envOr("TRAEFIK_CONTAINER", "traefik")); ip != "" {
+			addHosts[browser] = ip
+		}
+	}
+
+	// Comma-joined add-hosts opt for buildctl (a single --opt; repeating it would
+	// let the last win).
+	var addHostsOpt string
+	if len(addHosts) > 0 {
+		parts := make([]string, 0, len(addHosts))
+		for h, ip := range addHosts {
+			parts = append(parts, h+"="+ip)
+		}
+		addHostsOpt = strings.Join(parts, ",")
+	}
+
 	var out strings.Builder
 	for _, arch := range spec.Arches {
-		// Per-build context holding only requirements.txt; the Dockerfile is
-		// referenced with -f and COPYs requirements.txt from this context. A temp
-		// dir avoids races between concurrent arch builds.
+		// Per-build context holding only requirements.txt; the Dockerfile is a
+		// separate --local dir. A temp dir avoids races between concurrent arch builds.
 		ctx, err := os.MkdirTemp("", "packbuild-")
 		if err != nil {
 			return out.String(), fmt.Errorf("temp build context: %w", err)
@@ -145,76 +165,64 @@ func buildPack(name, specYAML string) (string, error) {
 			os.RemoveAll(ctx)
 			return out.String(), fmt.Errorf("write requirements.txt: %w", werr)
 		}
+		outDir, err := os.MkdirTemp("", "packout-")
+		if err != nil {
+			os.RemoveAll(ctx)
+			return out.String(), fmt.Errorf("temp out dir: %w", err)
+		}
 
-		img := "praetor-execpack-" + name + "-" + arch
-		args := []string{"build", "--target", "build",
-			"--platform", "linux/" + arch,
-			"--network", "host",
-			"-f", "/build/ansible-runtime/Dockerfile",
-			"--build-arg", "TARGETARCH=" + arch,
-			"--build-arg", "PY_VERSION=" + spec.Python,
-			"--build-arg", "PACK_NAME=" + name,
-			"--build-arg", "GITEA_URL=" + giteaURL,
-			"--build-arg", "GITEA_OWNER=" + giteaOwner,
-			"--build-arg", "HOST_RUNNER_VERSION=" + hostRunnerVersion,
+		file := fmt.Sprintf("%s-linux-%s.tar.gz", name, arch)
+		// One buildctl invocation builds AND extracts: the Dockerfile's `export`
+		// stage (FROM scratch, COPY /out) is emitted with --output type=local, so
+		// the tarball lands on disk directly — no docker create/cp/rm needed.
+		args := []string{"build",
+			"--frontend", "dockerfile.v0",
+			"--local", "context=" + ctx,
+			"--local", "dockerfile=/build/ansible-runtime",
+			"--opt", "filename=Dockerfile",
+			"--opt", "target=export",
+			"--opt", "platform=linux/" + arch,
+			"--opt", "build-arg:TARGETARCH=" + arch,
+			"--opt", "build-arg:PY_VERSION=" + spec.Python,
+			"--opt", "build-arg:PACK_NAME=" + name,
+			"--opt", "build-arg:GITEA_URL=" + buildGiteaURL,
+			"--opt", "build-arg:GITEA_OWNER=" + giteaOwner,
+			"--opt", "build-arg:HOST_RUNNER_VERSION=" + hostRunnerVersion,
+			"--output", "type=local,dest=" + outDir,
 		}
-		if ip := containerIP(routeContainer); ip != "" {
-			args = append(args, "--add-host", giteaHost+":"+ip)
+		if addHostsOpt != "" {
+			args = append(args, "--opt", "add-hosts="+addHostsOpt)
 		}
-		args = append(args, "-t", img, ctx)
-		build := exec.Command("docker", args...)
-		// --platform needs buildkit for cross-arch (qemu) builds.
-		build.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+		// BUILDKIT_HOST (env, e.g. tcp://buildkitd:1234) points buildctl at the daemon.
+		build := exec.Command("buildctl", args...)
 		b, err := build.CombinedOutput()
 		os.RemoveAll(ctx)
 		out.Write(b)
 		if err != nil {
-			return out.String(), fmt.Errorf("docker build (%s): %w", arch, err)
+			os.RemoveAll(outDir)
+			return out.String(), fmt.Errorf("buildctl build (%s): %w", arch, err)
 		}
 
-		// Extract the pack tarball from the built image.
-		cid, err := exec.Command("docker", "create", img).Output()
-		if err != nil {
-			return out.String(), fmt.Errorf("docker create: %w", err)
-		}
-		id := strings.TrimSpace(string(cid))
-		file := fmt.Sprintf("%s-linux-%s.tar.gz", name, arch)
-
+		local := filepath.Join(outDir, file)
 		if giteaToken != "" {
 			// Publish to Gitea's generic registry — the artifact store the executor
 			// pulls from over HTTP, decoupling it from this builder's filesystem.
-			// Copy the tarball out of the image to a temp file, upload it, drop it.
-			pub, perr := os.MkdirTemp("", "packpub-")
+			perr := publishPack(giteaAPI, giteaOwner, giteaToken, name, arch, local)
+			os.RemoveAll(outDir)
 			if perr != nil {
-				exec.Command("docker", "rm", id).Run()
-				return out.String(), fmt.Errorf("temp publish dir: %w", perr)
-			}
-			local := filepath.Join(pub, file)
-			if cp, err := exec.Command("docker", "cp", id+":/out/"+file, local).CombinedOutput(); err != nil {
-				out.Write(cp)
-				os.RemoveAll(pub)
-				exec.Command("docker", "rm", id).Run()
-				return out.String(), fmt.Errorf("docker cp: %w", err)
-			}
-			perr = publishPack(giteaAPI, giteaOwner, giteaToken, name, arch, local)
-			os.RemoveAll(pub)
-			if perr != nil {
-				exec.Command("docker", "rm", id).Run()
 				return out.String(), fmt.Errorf("publish pack to Gitea: %w", perr)
 			}
 			out.WriteString(fmt.Sprintf("\npublished %s to %s/generic/execpack-%s@current\n", file, giteaOwner, name))
 		} else {
-			// No token: legacy behavior — extract into the shared runtime dir the
+			// No token: legacy behavior — copy into the shared runtime dir the
 			// executor also mounts. (Set GITEA_TOKEN to publish to the registry.)
-			if cp, err := exec.Command("docker", "cp", id+":/out/.", "/build/runtime/").CombinedOutput(); err != nil {
-				out.Write(cp)
-				exec.Command("docker", "rm", id).Run()
-				return out.String(), fmt.Errorf("docker cp: %w", err)
+			if cerr := copyFile(local, filepath.Join("/build/runtime", file)); cerr != nil {
+				os.RemoveAll(outDir)
+				return out.String(), fmt.Errorf("copy pack to runtime dir: %w", cerr)
 			}
+			os.RemoveAll(outDir)
 			out.WriteString(fmt.Sprintf("\nbuilt %s (shared dir; set GITEA_TOKEN to publish to Gitea)\n", file))
 		}
-		exec.Command("docker", "rm", id).Run()
-		exec.Command("docker", "rmi", img).Run()
 	}
 	return out.String(), nil
 }
@@ -317,16 +325,45 @@ func hostFromURL(u string) string {
 // or "" if it can't be determined. Used to add an --add-host entry so the
 // host-networked pack build can resolve the Gitea container by name whether it's
 // on the default bridge or a user-defined compose network.
-func containerIP(container string) string {
-	out, err := exec.Command("docker", "inspect", "-f",
-		`{{range .NetworkSettings.Networks}}{{if .IPAddress}}{{.IPAddress}} {{end}}{{end}}`, container).Output()
-	if err != nil {
+// dnsIP resolves a container/service name to an IP via the packbuilder's own
+// Docker embedded DNS. Used to pin BuildKit `add-hosts` entries, since BuildKit
+// strips Docker's embedded DNS from RUN resolv.conf but the resolved IPs are
+// reachable from the build (buildkitd runs with --oci-worker-net=host on the same
+// network). Replaces the old `docker inspect` lookup, which needed the host socket
+// the packbuilder no longer mounts (#46).
+func dnsIP(host string) string {
+	ips, err := net.LookupHost(host)
+	if err != nil || len(ips) == 0 {
 		return ""
 	}
-	if fields := strings.Fields(string(out)); len(fields) > 0 {
-		return fields[0]
+	return ips[0]
+}
+
+// copyFile copies src to dst (used for the legacy shared-runtime-dir publish path).
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
 	}
-	return ""
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp := dst + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
 }
 
 // tail sanitizes build output for storage in the build_log TEXT column, then
