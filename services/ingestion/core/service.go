@@ -248,6 +248,20 @@ func (s *IngestionService) LatestLogSeq(ctx context.Context, runID uuid.UUID) (i
 	return seq, err
 }
 
+// LogCursor returns the authoritative resume point for a run's stdout: the total
+// bytes already stored and the highest chunk seq (or -1 if none). The host-runner
+// calls this after losing its local sync cursor so it can continue appending new
+// chunks from the exact stored position, instead of re-reading stdout from offset
+// 0 (which, with timing-dependent chunk boundaries, would overwrite some chunks
+// and leave stale higher-seq chunks — corrupting the reassembled log, issue #9).
+// It mirrors the offset/seq accounting the reconciler already uses to resume.
+func (s *IngestionService) LogCursor(ctx context.Context, runID uuid.UUID) (bytes int64, maxSeq int64, err error) {
+	err = s.DB.QueryRowxContext(ctx,
+		`SELECT COALESCE(SUM(byte_length),0), COALESCE(MAX(seq),-1)
+		 FROM job_output_chunks WHERE execution_run_id = $1`, runID).Scan(&bytes, &maxSeq)
+	return bytes, maxSeq, err
+}
+
 // StreamLogs writes the run's stored output, in chunk order, to w. sinceSeq
 // supports incremental tailing: a caller polling for live updates passes the
 // highest seq it has already seen, and only later chunks are written.

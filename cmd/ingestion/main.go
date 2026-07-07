@@ -137,6 +137,7 @@ func main() {
 	// Host-runner-facing writes: full internal token OR the run's per-run token.
 	r.With(runScoped).Post("/api/v1/runs/{run_id}/events", h.Ingest)
 	r.With(runScoped).Post("/api/v1/runs/{run_id}/logs", h.IngestLog)
+	r.With(runScoped).Get("/api/v1/runs/{run_id}/logs/cursor", h.LogCursor) // stdout resume point (#9)
 	r.With(runScoped).Post("/api/v1/runs/{run_id}/heartbeat", h.Heartbeat)
 	r.With(runScoped).Post("/api/v1/runs/{run_id}/facts", h.IngestFacts)
 

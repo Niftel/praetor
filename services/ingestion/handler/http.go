@@ -40,6 +40,23 @@ func (h *IngestionHandler) Runnable(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]bool{"runnable": ok})
 }
 
+// LogCursor GET /api/v1/runs/{run_id}/logs/cursor — the host-runner's stdout
+// resume point: {"bytes": <total stored>, "seq": <max seq, -1 if none>}. Used to
+// recover after a lost local sync cursor without re-chunking stdout from 0 (#9).
+func (h *IngestionHandler) LogCursor(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "run_id"))
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	bytes, seq, err := h.Service.LogCursor(r.Context(), runID)
+	if err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, map[string]int64{"bytes": bytes, "seq": seq})
+}
+
 // ResolveCredentials GET /internal/v1/runs/{run_id}/credentials — returns the
 // decrypted injectors for the run's snapshotted Machine credential. Authenticated
 // (internal token) and run-scoped; the response is never logged.
