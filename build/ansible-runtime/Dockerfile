@@ -31,7 +31,10 @@ ARG GITEA_URL=http://gitea-host:3000
 ARG GITEA_OWNER=praetor
 # HOST_RUNNER_VERSION: the host-runner daemon release (in Gitea) to bundle, so the
 # pack is the single self-contained bootstrapping unit (daemon + Python + Ansible).
-ARG HOST_RUNNER_VERSION=v0.1.0
+# REQUIRED, no default: the version is single-sourced from the pack spec's
+# `host_runner` field (the packbuilder passes it here). An unset value fails the
+# download step below rather than silently bundling a stale release.
+ARG HOST_RUNNER_VERSION
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -50,6 +53,7 @@ RUN set -eux; \
 # Bundle the host-runner daemon (Praetor comms + WAL) from its Gitea release into
 # the pack, so the pack is one self-contained bootstrapping unit.
 RUN set -eux; \
+    test -n "${HOST_RUNNER_VERSION}" || { echo "HOST_RUNNER_VERSION is required (set host_runner in the pack spec)" >&2; exit 1; }; \
     base="${GITEA_URL}/${GITEA_OWNER}/host-runner/releases/download/${HOST_RUNNER_VERSION}"; \
     file="praetor-host-runner-linux-${TARGETARCH}"; \
     echo "Downloading $base/$file"; \
