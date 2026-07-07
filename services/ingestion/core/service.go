@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/credentials"
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/inventoryrender"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/objectstore"
 )
@@ -246,6 +247,14 @@ func (s *IngestionService) LatestLogSeq(ctx context.Context, runID uuid.UUID) (i
 	err := s.DB.GetContext(ctx, &seq,
 		`SELECT COALESCE(MAX(seq), -1) FROM job_output_chunks WHERE execution_run_id = $1`, runID)
 	return seq, err
+}
+
+// RenderInventory returns the Ansible INI for an inventory, generated on demand
+// from stored hosts/groups. The executor fetches this at dispatch (the manifest
+// ships only the inventory id) so a large inventory never bloats the outbox row /
+// NATS message (#13).
+func (s *IngestionService) RenderInventory(ctx context.Context, inventoryID int64) (string, error) {
+	return inventoryrender.Render(ctx, s.DB, inventoryID)
 }
 
 // LogCursor returns the authoritative resume point for a run's stdout: the total

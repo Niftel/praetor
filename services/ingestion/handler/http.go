@@ -40,6 +40,24 @@ func (h *IngestionHandler) Runnable(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]bool{"runnable": ok})
 }
 
+// InventoryRendered GET /internal/v1/inventories/{id}/rendered — the executor
+// fetches the rendered INI at dispatch (the manifest ships only the inventory id,
+// #13). Authenticated with the internal token (in-cluster caller).
+func (h *IngestionHandler) InventoryRendered(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	ini, err := h.Service.RenderInventory(r.Context(), id)
+	if err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(ini))
+}
+
 // LogCursor GET /api/v1/runs/{run_id}/logs/cursor — the host-runner's stdout
 // resume point: {"bytes": <total stored>, "seq": <max seq, -1 if none>}. Used to
 // recover after a lost local sync cursor without re-chunking stdout from 0 (#9).
