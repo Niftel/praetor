@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # Headless service backing the StatefulSet (stable per-pod DNS).
+  name: {{ include "praetor.fullname" . }}-executor
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: executor
+spec:
+  clusterIP: None
+  selector:
+    {{- include "praetor.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: executor
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "praetor.fullname" . }}-executor
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: executor
+spec:
+  serviceName: {{ include "praetor.fullname" . }}-executor
+  # Safe to scale >1: shared durable pull consumer + idempotent startup bind. Each
+  # replica keeps its own WAL/packs/ssh PVCs; stable identity is load-bearing for
+  # localhost-run WAL recovery (#45) — a Deployment with a shared PVC would corrupt it.
+  replicas: {{ .Values.executor.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "praetor.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: executor
+  template:
+    metadata:
+      labels:
+        {{- include "praetor.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: executor
+      {{- with .Values.executor.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "praetor.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # NB: no runAsNonRoot — the executor entrypoint starts as root to chown its
+      # PVC mounts, then drops to the praetor user (uid 1000) via gosu.
+      initContainers:
+        - name: wait-for-nats
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ include "praetor.fullname" . }}-nats 4222; do echo "waiting for nats..."; sleep 2; done
+      containers:
+        - name: executor
+          image: {{ include "praetor.image" (dict "root" . "svc" "executor") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "praetor.configMapName" . }}
+            - secretRef:
+                name: {{ include "praetor.secretName" . }}
+          {{- with .Values.executor.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: jobs
+              mountPath: /var/lib/praetor
+            - name: packs
+              mountPath: /opt/praetor/packs
+            - name: ssh
+              mountPath: /home/praetor/.ssh
+            - name: dshm
+              mountPath: /dev/shm
+          {{- with .Values.executor.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.executor.shmSize }}
+  volumeClaimTemplates:
+    - metadata:
+        name: jobs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.executor.persistence.jobs.storageClass }}
+        storageClassName: {{ .Values.executor.persistence.jobs.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.executor.persistence.jobs.size }}
+    - metadata:
+        name: packs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.executor.persistence.packs.storageClass }}
+        storageClassName: {{ .Values.executor.persistence.packs.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.executor.persistence.packs.size }}
+    - metadata:
+        name: ssh
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.executor.persistence.ssh.storageClass }}
+        storageClassName: {{ .Values.executor.persistence.ssh.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.executor.persistence.ssh.size }}

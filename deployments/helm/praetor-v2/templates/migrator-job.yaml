@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Revisioned name: a Job spec is immutable, so each install/upgrade creates a
+  # fresh one. Not a Helm hook — bundled Postgres is a normal resource and wouldn't
+  # exist yet during a pre-install hook. Ordering is instead enforced by each
+  # service's wait-for-migrations initContainer, which blocks until this completes.
+  name: {{ include "praetor.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrator
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "praetor.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrator
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "praetor.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-db
+          image: {{ .Values.database.bundled.image | default "postgres:15" }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -d "$DATABASE_URL"; do echo "waiting for database..."; sleep 2; done
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "praetor.secretName" . }}
+                  key: DATABASE_URL
+      containers:
+        - name: migrator
+          image: {{ include "praetor.image" (dict "root" . "svc" "migrator") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "praetor.configMapName" . }}
+            - secretRef:
+                name: {{ include "praetor.secretName" . }}

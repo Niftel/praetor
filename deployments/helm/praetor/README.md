@@ -24,9 +24,8 @@ writing the chart is missing or wrong in at least these ways:
 
 ## Building a real chart
 
-A production chart is a genuine project, not a patch of this one — it needs
-StatefulSets/PVCs for the stateful pieces, secrets management, the ingress story,
-and validation against an actual cluster. A source-grounded design blueprint for
-that replacement lives in [`../CHART-DESIGN.md`](../CHART-DESIGN.md) (workload
-mapping, config/secrets, the hard parts, and codebase-specific risks). Until the
-chart exists, deploy with docker-compose.
+**A replacement chart now exists** at [`../praetor-v2/`](../praetor-v2/) — built
+from the [`../CHART-DESIGN.md`](../CHART-DESIGN.md) blueprint and validated
+end-to-end on a k3d cluster (all nine service pods reach Ready; executor scale-to-2
+verified). Use that chart, not this one. This directory is retained only so the
+`deprecated: true` marker keeps existing `helm repo` clients from installing it.

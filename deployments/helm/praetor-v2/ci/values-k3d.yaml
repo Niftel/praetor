@@ -1,0 +1,39 @@
+# Values for local validation on k3d (images imported into the cluster, not pulled
+# from a registry). Used by the chart's smoke test — not a production example.
+image:
+  registry: ""      # bare repo:tag; images imported via `k3d image import`
+  tag: dev
+  pullPolicy: IfNotPresent
+
+allowInsecureDefaults: false
+secrets:
+  secretKey: "0123456789abcdef0123456789abcdef"   # exactly 32 bytes
+  jwtSecret: "dev-jwt-secret"
+  internalToken: "dev-internal-token"
+
+database:
+  bundled:
+    storage: 1Gi
+nats:
+  bundled:
+    storage: 1Gi
+    maxFileStore: "512MB"
+
+ingestion:
+  logStoreMaxMB: 128   # must stay below nats maxFileStore (guarded in configmap.yaml)
+
+executor:
+  persistence:
+    jobs:  { size: 512Mi }
+    packs: { size: 512Mi }
+    ssh:   { size: 64Mi }
+  shmSize: 256Mi
+
+# A placeholder callback URL so NOTES doesn't warn; not exercised in the smoke test.
+hostRunner:
+  callbackUrl: "http://ingest.praetor.local"
+
+ingress:
+  enabled: false
+ldap:
+  enabled: false
