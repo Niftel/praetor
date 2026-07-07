@@ -724,41 +724,58 @@ func findFile(fs billy.Filesystem, path string) (billy.File, error) {
 func generateInventoryINI(tx *sqlx.Tx, ctx context.Context, hosts []models.Host, groups []models.Group) string {
 	var sb strings.Builder
 
-	// Build map of host ID to groups
-	hostGroups := make(map[int64][]string)
-	ungroupedHosts := make(map[int64]bool)
-
+	// Index hosts by id once (O(1) lookup) instead of scanning the slice per member
+	// (the old inner loop was O(groups x members x hosts)).
+	hostByID := make(map[int64]models.Host, len(hosts))
+	ungroupedHosts := make(map[int64]bool, len(hosts))
 	for _, h := range hosts {
+		hostByID[h.ID] = h
 		ungroupedHosts[h.ID] = true
 	}
 
-	// Process each group
-	for _, g := range groups {
-		// Get hosts in this group. Membership is stored in host_groups (written by
-		// the API/UI, inventory import and dynamic sync alike — consolidated in
-		// migration 000030).
-		var groupHostIDs []int64
-		tx.SelectContext(ctx, &groupHostIDs, "SELECT host_id FROM host_groups WHERE group_id = $1", g.ID)
-
-		if len(groupHostIDs) > 0 {
-			sb.WriteString(fmt.Sprintf("[%s]\n", g.Name))
-
-			for _, hostID := range groupHostIDs {
-				// Find the host
-				for _, h := range hosts {
-					if h.ID == hostID {
-						sb.WriteString(formatHostLine(h))
-						delete(ungroupedHosts, h.ID)
-						hostGroups[h.ID] = append(hostGroups[h.ID], g.Name)
-						break
-					}
+	// Fetch ALL group memberships in one query rather than one per group (the old
+	// N+1 ran a SELECT per group inside the dispatch transaction, holding the claim
+	// lock longer as the inventory grew). Membership lives in host_groups.
+	membersByGroup := make(map[int64][]int64, len(groups))
+	if len(groups) > 0 {
+		groupIDs := make([]int64, len(groups))
+		for i, g := range groups {
+			groupIDs[i] = g.ID
+		}
+		q, args, err := sqlx.In(`SELECT group_id, host_id FROM host_groups WHERE group_id IN (?)`, groupIDs)
+		if err == nil {
+			q = tx.Rebind(q)
+			rows := []struct {
+				GroupID int64 `db:"group_id"`
+				HostID  int64 `db:"host_id"`
+			}{}
+			if err := tx.SelectContext(ctx, &rows, q, args...); err == nil {
+				for _, r := range rows {
+					membersByGroup[r.GroupID] = append(membersByGroup[r.GroupID], r.HostID)
 				}
+			} else {
+				logger.Error("fetch group memberships failed", "err", err)
 			}
-			sb.WriteString("\n")
 		}
 	}
 
-	// Add ungrouped hosts under [all] if any
+	// Process each group.
+	for _, g := range groups {
+		groupHostIDs := membersByGroup[g.ID]
+		if len(groupHostIDs) == 0 {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("[%s]\n", g.Name))
+		for _, hostID := range groupHostIDs {
+			if h, ok := hostByID[hostID]; ok {
+				sb.WriteString(formatHostLine(h))
+				delete(ungroupedHosts, h.ID)
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Add ungrouped hosts under [ungrouped] if any.
 	if len(ungroupedHosts) > 0 {
 		sb.WriteString("[ungrouped]\n")
 		for _, h := range hosts {
