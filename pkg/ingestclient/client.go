@@ -140,6 +140,38 @@ func (c *Client) ResolveInventory(ctx context.Context, inventoryID int64) (strin
 	return ini, err
 }
 
+// ResolveFacts fetches an inventory's stored host facts (keyed by host name). Used
+// at dispatch for fact-cache jobs so the facts travel by reference, not embedded
+// in the manifest (#48).
+func (c *Client) ResolveFacts(ctx context.Context, inventoryID int64) (map[string]json.RawMessage, error) {
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("ingestclient: no base URL configured")
+	}
+	url := fmt.Sprintf("%s/internal/v1/inventories/%d/facts", c.baseURL, inventoryID)
+	out := map[string]json.RawMessage{}
+	err := c.doRetry(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		c.auth(req)
+		resp, err := c.hc.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			return fmt.Errorf("resolve facts: status %d: %s", resp.StatusCode, string(b))
+		}
+		return json.NewDecoder(resp.Body).Decode(&out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PostEvents delivers a batch of job events for a run.
 func (c *Client) PostEvents(ctx context.Context, runID string, evs []events.JobEvent) error {
 	if c.baseURL == "" {
