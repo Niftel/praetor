@@ -14,7 +14,7 @@ HOST_RUNNER_OS ?= linux
 HOST_RUNNER_ARCH ?= $(shell go env GOHOSTARCH)
 HOST_RUNNER_BINARY=build/$(HOST_RUNNER_OS)/praetor-host-runner
 
-build: host-runner
+build:
 	@echo "Building services..."
 	mkdir -p $(BINARY_DIR)
 	go build -o $(API_BINARY) ./cmd/api
@@ -24,8 +24,11 @@ build: host-runner
 	go build -o $(BINARY_DIR)/praetor-executor ./cmd/executor
 	@echo "Build complete."
 
-# Build the Linux host-runner the executor bootstraps onto target hosts. Served
-# to the executor via the ./build directory mount in docker-compose.yml.
+# Cross-compile the host-runner daemon locally (dev convenience). NOTE: this is
+# NOT how a target gets its daemon — the daemon ships inside the Execution Pack,
+# pinned by the pack spec's `host_runner` field and checksum-verified at pack build
+# (see build/ansible-runtime/Dockerfile). Use `make release-host-runner` to publish
+# a version the pack build then pulls. This target is just for local inspection.
 host-runner:
 	@echo "Building host-runner for $(HOST_RUNNER_OS)/$(HOST_RUNNER_ARCH)..."
 	mkdir -p build/$(HOST_RUNNER_OS)
@@ -52,7 +55,7 @@ mirror-pip:
 
 # Build an Execution Pack (self-contained Python + Ansible pushed to hosts) from a
 # declarative YAML spec — the ExecPack equivalent of ansible-builder. Output goes
-# to build/runtime/. Example: make execpack SPEC=build/execpack/specs/docker.yml
+# to build/runtime/. Example: make execpack SPEC=build/execpack/specs/default.yml
 SPEC ?= build/execpack/specs/default.yml
 execpack:
 	@echo "Building Execution Pack from $(SPEC)..."

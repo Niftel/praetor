@@ -34,7 +34,7 @@ type Spec struct {
 
 	Pip        []string `yaml:"pip,omitempty"`         // module deps (docker, jmespath, ...)
 	Arches     []string `yaml:"arches,omitempty"`      // amd64, arm64
-	HostRunner string   `yaml:"host_runner,omitempty"` // daemon release to bundle, e.g. v0.4.0
+	HostRunner string   `yaml:"host_runner,omitempty"` // REQUIRED daemon release to bundle, e.g. v0.5.0
 }
 
 var (
@@ -84,7 +84,14 @@ func (s *Spec) Validate() error {
 			return fmt.Errorf("arch %q not supported (allowed: amd64, arm64)", a)
 		}
 	}
-	if s.HostRunner != "" && !reHostRunner.MatchString(s.HostRunner) {
+	// host_runner is required and validated: it is the SINGLE source of the daemon
+	// version a pack bundles (the packbuilder passes it as a build-arg and the
+	// download is checksum-verified). No default — an unset version must fail the
+	// build loudly rather than silently bundle a stale release.
+	if s.HostRunner == "" {
+		return fmt.Errorf("host_runner is required (the daemon release to bundle, e.g. v0.5.0)")
+	}
+	if !reHostRunner.MatchString(s.HostRunner) {
 		return fmt.Errorf("host_runner: %q is not a version (e.g. v0.4.0)", s.HostRunner)
 	}
 	return nil
