@@ -1,6 +1,6 @@
-# The pack builder: builds Execution Packs from their YAML spec via the Docker
-# daemon. Needs the docker CLI and (mounted) docker socket. Runs as root for
-# socket access.
+# The pack builder: builds Execution Packs from their YAML spec by driving a
+# dedicated BuildKit daemon over gRPC (issue #46). It mounts NO host Docker socket
+# — it only needs the `buildctl` client (+ git for fetching git-backed specs).
 FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -9,9 +9,9 @@ COPY . .
 RUN go build -o /praetor-packbuilder ./cmd/packbuilder
 
 FROM alpine:3.19
-# docker-cli-buildx: buildPack sets DOCKER_BUILDKIT=1 + --platform (for amd64 via
-# qemu), which needs the buildx component, not just the classic docker CLI.
-RUN apk add --no-cache docker-cli docker-cli-buildx git \
- && git config --global --add safe.directory '*'
+RUN apk add --no-cache git && git config --global --add safe.directory '*'
+# buildctl only (no docker CLI, no host socket). Pinned to the buildkitd image
+# version so client and daemon upgrade in lockstep.
+COPY --from=moby/buildkit:v0.13.2 /usr/bin/buildctl /usr/local/bin/buildctl
 COPY --from=builder /praetor-packbuilder /praetor-packbuilder
 CMD ["/praetor-packbuilder"]
