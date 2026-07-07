@@ -153,6 +153,26 @@ func buildPack(name, specYAML string) (string, error) {
 		addHostsOpt = strings.Join(parts, ",")
 	}
 
+	// buildctl global flags that pin mTLS to the daemon. When BUILDKIT_TLS_CACERT
+	// is set (the docker-compose stack mounts the shared cert volume and points at
+	// it), the client presents its cert and verifies the daemon's — closing the
+	// otherwise-unauthenticated gRPC listener on praetor-net. Empty (e.g. a plain
+	// local run) leaves the connection untouched. These are GLOBAL flags, so they
+	// must precede the `build` subcommand.
+	var tlsPrefix []string
+	if ca := os.Getenv("BUILDKIT_TLS_CACERT"); ca != "" {
+		tlsPrefix = append(tlsPrefix, "--tlscacert", ca)
+		if c := os.Getenv("BUILDKIT_TLS_CERT"); c != "" {
+			tlsPrefix = append(tlsPrefix, "--tlscert", c)
+		}
+		if k := os.Getenv("BUILDKIT_TLS_KEY"); k != "" {
+			tlsPrefix = append(tlsPrefix, "--tlskey", k)
+		}
+		if sn := os.Getenv("BUILDKIT_TLS_SERVERNAME"); sn != "" {
+			tlsPrefix = append(tlsPrefix, "--tlsservername", sn)
+		}
+	}
+
 	var out strings.Builder
 	for _, arch := range spec.Arches {
 		// Per-build context holding only requirements.txt; the Dockerfile is a
@@ -175,7 +195,7 @@ func buildPack(name, specYAML string) (string, error) {
 		// One buildctl invocation builds AND extracts: the Dockerfile's `export`
 		// stage (FROM scratch, COPY /out) is emitted with --output type=local, so
 		// the tarball lands on disk directly — no docker create/cp/rm needed.
-		args := []string{"build",
+		args := append(append([]string{}, tlsPrefix...), "build",
 			"--frontend", "dockerfile.v0",
 			"--local", "context=" + ctx,
 			"--local", "dockerfile=/build/ansible-runtime",
@@ -189,7 +209,7 @@ func buildPack(name, specYAML string) (string, error) {
 			"--opt", "build-arg:GITEA_OWNER=" + giteaOwner,
 			"--opt", "build-arg:HOST_RUNNER_VERSION=" + hostRunnerVersion,
 			"--output", "type=local,dest=" + outDir,
-		}
+		)
 		if addHostsOpt != "" {
 			args = append(args, "--opt", "add-hosts="+addHostsOpt)
 		}
