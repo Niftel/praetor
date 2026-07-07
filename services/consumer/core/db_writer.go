@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/events"
 )
@@ -12,10 +14,33 @@ import (
 type DBWriter struct {
 	DB       *sqlx.DB
 	Notifier *Notifier // optional; fires notifications on newly-projected lifecycle events
+
+	// jobIDByRun caches execution_run_id -> unified_job_id. The consumer (the
+	// Postgres boundary) resolves unified_job_id authoritatively from the run id
+	// rather than trusting the value on the event, so ingestion needs no DB lookup
+	// and stays available while Postgres is down (#16). The mapping is immutable
+	// for a run, so the cache is grow-only and never needs invalidation.
+	jobIDByRun sync.Map // uuid.UUID -> int64
 }
 
 func NewDBWriter(db *sqlx.DB) *DBWriter {
 	return &DBWriter{DB: db}
+}
+
+// resolveJobID returns the unified_job_id owning runID, authoritatively from the
+// DB (cached). This is the single place unified_job_id is trusted, keyed on the
+// token-authenticated run id — not on a client-supplied field.
+func (w *DBWriter) resolveJobID(ctx context.Context, runID uuid.UUID) (int64, error) {
+	if v, ok := w.jobIDByRun.Load(runID); ok {
+		return v.(int64), nil
+	}
+	var id int64
+	if err := w.DB.GetContext(ctx, &id,
+		`SELECT unified_job_id FROM execution_runs WHERE id = $1`, runID); err != nil {
+		return 0, fmt.Errorf("resolve unified_job_id for run %s: %w", runID, err)
+	}
+	w.jobIDByRun.Store(runID, id)
+	return id, nil
 }
 
 // WriteLogChunk indexes a log-chunk reference into job_output_chunks. The chunk
@@ -37,6 +62,16 @@ func (w *DBWriter) WriteLogChunk(ctx context.Context, chunk events.LogChunk) err
 
 // WriteEvent projects a JobEvent into the database.
 func (w *DBWriter) WriteEvent(ctx context.Context, evt events.JobEvent) error {
+	// Resolve unified_job_id authoritatively from the run id (not from the event's
+	// own field, which ingestion no longer sets). This is the DB dependency that
+	// ingestion shed to stay available during a Postgres outage (#16); it lives
+	// here because the consumer is the Postgres boundary anyway.
+	jobID, err := w.resolveJobID(ctx, evt.ExecutionRunID)
+	if err != nil {
+		return err
+	}
+	evt.UnifiedJobID = jobID
+
 	tx, err := w.DB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
