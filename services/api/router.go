@@ -20,6 +20,9 @@ import (
 type Config struct {
 	// IngestionURL is the base URL the API proxies run-log reads to.
 	IngestionURL string
+	// InternalToken is the shared cluster secret the API presents to ingestion's
+	// authenticated log-read endpoint.
+	InternalToken string
 	// LDAPConfigPath is the path to the LDAP config file mounted into the API.
 	LDAPConfigPath string
 }
@@ -207,7 +210,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// =======================================================================
 		// Jobs
 		// =======================================================================
-		jobs := handlers.NewJobsResource(db, cfg.IngestionURL)
+		jobs := handlers.NewJobsResource(db, cfg.IngestionURL, cfg.InternalToken)
 		r.Mount("/jobs", jobs.Routes())
 
 		// =======================================================================

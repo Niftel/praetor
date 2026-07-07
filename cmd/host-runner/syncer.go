@@ -24,6 +24,7 @@ type Syncer struct {
 	JobDir string
 	APIURL string
 	RunID  string
+	Token  string
 	Client *http.Client
 
 	walPath    string
@@ -31,11 +32,12 @@ type Syncer struct {
 	offset     int64
 }
 
-func NewSyncer(jobDir, apiURL, runID string) *Syncer {
+func NewSyncer(jobDir, apiURL, runID, token string) *Syncer {
 	return &Syncer{
 		JobDir:     jobDir,
 		APIURL:     apiURL,
 		RunID:      runID,
+		Token:      token,
 		Client:     &http.Client{Timeout: 5 * time.Second},
 		walPath:    filepath.Join(jobDir, "events.jsonl"),
 		cursorPath: filepath.Join(jobDir, "events.cursor"),
@@ -152,6 +154,9 @@ func (s *Syncer) push(evt *events.JobEvent) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if s.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.Token)
+	}
 
 	resp, err := s.Client.Do(req)
 	if err != nil {

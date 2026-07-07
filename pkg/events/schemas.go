@@ -99,6 +99,14 @@ type JobManifest struct {
 	// GalaxyServers are the Ansible Galaxy / Automation Hub servers to install
 	// project requirements from. Empty means the public galaxy.ansible.com.
 	GalaxyServers []GalaxyServer `json:"galaxy_servers,omitempty"`
+
+	// IngestToken is the per-run bearer token the host-runner presents on its
+	// ingestion calls (events/logs/heartbeat/facts). It is minted at dispatch by
+	// the executor from the shared internal secret + run id (see pkg/runtoken) and
+	// verified by ingestion in constant time. It lives only in the 0600 manifest on
+	// the target — never in argv or the 0644 runner-meta — and is bound to the run
+	// id, so it cannot be replayed against another run.
+	IngestToken string `json:"ingest_token,omitempty"`
 }
 
 // GalaxyServer is a configured Ansible Galaxy / Automation Hub endpoint used to

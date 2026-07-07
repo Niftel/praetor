@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/praetordev/praetor/pkg/events"
 )
 
 var (
@@ -90,8 +92,13 @@ func runJob(jobDir, apiURL, runID string) error {
 	defer cancel()
 
 	if apiURL != "" && runID != "" {
-		syncer := NewSyncer(jobDir, apiURL, runID)
-		logSyncer := NewLogSyncer(jobDir, apiURL, runID)
+		// The per-run ingestion token lives in the 0600 manifest (never in argv or
+		// the world-readable runner-meta). Both fresh runs and boot-time resumes go
+		// through here and the manifest is still on disk, so reading it here covers
+		// both. An empty token (older manifest / no shared secret) sends no header.
+		token := readIngestToken(jobDir)
+		syncer := NewSyncer(jobDir, apiURL, runID, token)
+		logSyncer := NewLogSyncer(jobDir, apiURL, runID, token)
 		done := make(chan bool, 1)
 		logDone := make(chan bool, 1)
 		hbDone := make(chan bool, 1)
@@ -99,7 +106,7 @@ func runJob(jobDir, apiURL, runID string) error {
 		logFinished := make(chan bool, 1)
 		go func() { syncer.Start(done); finished <- true }()
 		go func() { logSyncer.Start(logDone); logFinished <- true }()
-		go runHeartbeat(apiURL, runID, hbDone, cancel)
+		go runHeartbeat(apiURL, runID, token, hbDone, cancel)
 		defer func() {
 			hbDone <- true
 			log.Println("Waiting for syncers to finish...")
@@ -193,6 +200,23 @@ func readRunnerMeta(jobDir string) (runnerMeta, error) {
 		return m, err
 	}
 	return m, json.Unmarshal(data, &m)
+}
+
+// readIngestToken pulls the per-run ingestion bearer token out of the 0600
+// manifest.json in the job dir. Best-effort: a missing/unparseable manifest or
+// absent token yields "" (the syncers then send no Authorization header), so a
+// job whose manifest predates this field still runs — it simply fails auth if
+// ingestion now requires a token, which is the correct fail-closed behaviour.
+func readIngestToken(jobDir string) string {
+	data, err := os.ReadFile(filepath.Join(jobDir, "manifest.json"))
+	if err != nil {
+		return ""
+	}
+	var req events.ExecutionRequest
+	if json.Unmarshal(data, &req) != nil {
+		return ""
+	}
+	return req.JobManifest.IngestToken
 }
 
 // jobLock is an advisory flock on a per-job lock file; it is released when the

@@ -51,17 +51,21 @@ type JobsResource struct {
 	// IngestionURL is the base URL the API proxies run-log reads to. Resolved in
 	// main from env; empty falls back to the in-cluster default.
 	IngestionURL string
-	store        JobStore
-	log          *slog.Logger
+	// internalToken is the shared cluster secret the API presents to ingestion's
+	// authenticated log-read endpoint (the run-scoped GET logs is no longer open).
+	internalToken string
+	store         JobStore
+	log           *slog.Logger
 }
 
-func NewJobsResource(db *sqlx.DB, ingestionURL string) *JobsResource {
+func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string) *JobsResource {
 	return &JobsResource{
-		DB:           db,
-		Authorizer:   NewAuthorizer(db),
-		IngestionURL: ingestionURL,
-		store:        store.NewJobStore(db),
-		log:          plog.New("api.jobs"),
+		DB:            db,
+		Authorizer:    NewAuthorizer(db),
+		IngestionURL:  ingestionURL,
+		internalToken: internalToken,
+		store:         store.NewJobStore(db),
+		log:           plog.New("api.jobs"),
 	}
 }
 
@@ -295,6 +299,11 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
+	}
+	// ingestion's log-read endpoint is authenticated (in-cluster); present the
+	// shared internal token. Edge RBAC already happened above via authorizeRunRead.
+	if rs.internalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+rs.internalToken)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

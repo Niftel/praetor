@@ -12,14 +12,17 @@ import (
 	"github.com/praetordev/praetor/pkg/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"
 	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/praetor/pkg/runtoken"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/ingestion/core"
 	"github.com/praetordev/praetor/services/ingestion/handler"
 )
 
-// internalAuth guards the internal endpoints (credential resolution) with a
-// shared bearer token, compared in constant time. An unset token disables the
-// route entirely (fail closed) rather than allowing unauthenticated access.
+// internalAuth guards the in-cluster endpoints (credential resolution, runnable
+// pre-flight, inventory-sync upsert, log-read proxy) with the shared bearer
+// token, compared in constant time. An unset token disables the route entirely
+// (fail closed) rather than allowing unauthenticated access. Callers are other
+// Praetor services (executor, API), which hold the full secret.
 func internalAuth(token string) func(http.Handler) http.Handler {
 	want := []byte("Bearer " + token)
 	return func(next http.Handler) http.Handler {
@@ -30,6 +33,43 @@ func internalAuth(token string) func(http.Handler) http.Handler {
 				return
 			}
 			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// runTokenAuth guards the host-runner-facing, run-scoped write endpoints
+// (events/logs/heartbeat/facts). It accepts EITHER:
+//
+//   - the full internal secret — for in-cluster callers such as the executor,
+//     which publishes lifecycle events for any run; or
+//   - the per-run token minted for the {run_id} in the request path — what the
+//     host-runner on a managed target presents (see pkg/runtoken).
+//
+// Both comparisons are constant-time. Because the per-run token is an HMAC of the
+// run id, a token for one run does not validate on another: the run id is taken
+// from the routed URL, so an attacker cannot present run A's token against run B.
+// An unset secret fails every request closed.
+func runTokenAuth(secret string) func(http.Handler) http.Handler {
+	internalWant := []byte("Bearer " + secret)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if secret == "" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			got := []byte(r.Header.Get("Authorization"))
+			if subtle.ConstantTimeCompare(got, internalWant) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if runID := chi.URLParam(r, "run_id"); runID != "" {
+				runWant := []byte("Bearer " + runtoken.Mint(secret, runID))
+				if subtle.ConstantTimeCompare(got, runWant) == 1 {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		})
 	}
 }
@@ -79,17 +119,26 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	// Internal, authenticated: just-in-time credential resolution for the executor.
+	// Auth. Every run-scoped and cross-service endpoint requires the shared secret;
+	// an unset secret fails all of them closed.
+	//   - internal:   in-cluster callers (executor, API) presenting the full token.
+	//   - run-scoped: host-runner calls, accepting the full token OR the run's
+	//                 per-run token bound to the {run_id} in the path.
 	internalToken := env.String("PRAETOR_INTERNAL_TOKEN", "")
-	r.With(internalAuth(internalToken)).Get("/internal/v1/runs/{run_id}/credentials", h.ResolveCredentials)
+	internal := internalAuth(internalToken)
+	runScoped := runTokenAuth(internalToken)
 
-	r.Get("/api/v1/runs/{run_id}/runnable", h.Runnable)
-	r.Post("/api/v1/runs/{run_id}/events", h.Ingest)
-	r.Post("/api/v1/runs/{run_id}/logs", h.IngestLog)
-	r.Get("/api/v1/runs/{run_id}/logs", h.StreamLog)
-	r.Post("/api/v1/runs/{run_id}/heartbeat", h.Heartbeat)
-	r.Post("/api/v1/runs/{run_id}/facts", h.IngestFacts)
-	r.Post("/api/v1/inventories/{id}/sync-data", h.IngestInventorySync)
+	// In-cluster only (executor / API): full internal token.
+	r.With(internal).Get("/internal/v1/runs/{run_id}/credentials", h.ResolveCredentials)
+	r.With(internal).Get("/api/v1/runs/{run_id}/runnable", h.Runnable)                 // executor pre-flight
+	r.With(internal).Get("/api/v1/runs/{run_id}/logs", h.StreamLog)                    // API log-read proxy
+	r.With(internal).Post("/api/v1/inventories/{id}/sync-data", h.IngestInventorySync) // executor upsert
+
+	// Host-runner-facing writes: full internal token OR the run's per-run token.
+	r.With(runScoped).Post("/api/v1/runs/{run_id}/events", h.Ingest)
+	r.With(runScoped).Post("/api/v1/runs/{run_id}/logs", h.IngestLog)
+	r.With(runScoped).Post("/api/v1/runs/{run_id}/heartbeat", h.Heartbeat)
+	r.With(runScoped).Post("/api/v1/runs/{run_id}/facts", h.IngestFacts)
 
 	// 5. Start
 	log.Printf("Ingestion listening on port %s", port)

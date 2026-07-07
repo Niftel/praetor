@@ -146,6 +146,9 @@ services:
       PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
       PORT: 8080
       INGESTION_URL: http://ingestion:8081 # for proxying run logs from the object store
+      # Presented to ingestion's authenticated log-read endpoint; must match
+      # ingestion's PRAETOR_INTERNAL_TOKEN.
+      PRAETOR_INTERNAL_TOKEN: "${PRAETOR_INTERNAL_TOKEN:-dev-internal-token}"
       PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
     volumes:
       - ./deployments/ldap/ldap-config.yaml:/etc/praetor/ldap.yaml:ro

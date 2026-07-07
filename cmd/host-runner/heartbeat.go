@@ -20,7 +20,7 @@ const heartbeatInterval = 15 * time.Second
 // reconciler can tell a long-running job from a lost one. On the first cancel
 // signal it invokes onCancel (which stops the play) exactly once, then keeps
 // beating so the run stays live while it winds down. Stops when done is signalled.
-func runHeartbeat(apiURL, runID string, done <-chan bool, onCancel func()) {
+func runHeartbeat(apiURL, runID, token string, done <-chan bool, onCancel func()) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	url := fmt.Sprintf("%s/api/v1/runs/%s/heartbeat", apiURL, runID)
 	canceled := false
@@ -29,6 +29,9 @@ func runHeartbeat(apiURL, runID string, done <-chan bool, onCancel func()) {
 		req, err := http.NewRequest("POST", url, nil)
 		if err != nil {
 			return
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		resp, err := client.Do(req)
 		if err != nil {
