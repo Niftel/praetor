@@ -57,6 +57,38 @@ func Render(ctx context.Context, db *sqlx.DB, inventoryID int64) (string, error)
 	return build(hosts, groups, membersByGroup), nil
 }
 
+// Facts returns the stored ansible_facts for every host in an inventory, keyed by
+// host name — the fact cache the host-runner preloads when a template enables it.
+// Nil when the inventory has no stored facts. Fetched by reference at dispatch
+// (like the INI) so it doesn't bloat the outbox/NATS message (#48).
+func Facts(ctx context.Context, db *sqlx.DB, inventoryID int64) (map[string]json.RawMessage, error) {
+	rows, err := db.QueryxContext(ctx, `
+		SELECT h.name, hf.facts
+		FROM host_facts hf JOIN hosts h ON h.id = hf.host_id
+		WHERE h.inventory_id = $1`, inventoryID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch host facts: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]json.RawMessage{}
+	for rows.Next() {
+		var name string
+		var facts []byte
+		if err := rows.Scan(&name, &facts); err != nil {
+			return nil, err
+		}
+		out[name] = json.RawMessage(facts)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
 // build renders the INI from already-fetched data (pure; O(hosts+members)).
 func build(hosts []models.Host, groups []models.Group, membersByGroup map[int64][]int64) string {
 	var sb strings.Builder

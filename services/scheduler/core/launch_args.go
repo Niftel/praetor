@@ -1,38 +1,8 @@
 package core
 
 import (
-	"context"
 	"encoding/json"
-
-	"github.com/jmoiron/sqlx"
 )
-
-// loadHostFacts returns the stored ansible_facts for every host in an inventory
-// that has them, keyed by host name — what the host-runner preloads into the
-// Ansible fact cache. Returns nil when there are none.
-func loadHostFacts(ctx context.Context, tx *sqlx.Tx, inventoryID int64) map[string]json.RawMessage {
-	rows, err := tx.QueryxContext(ctx, `
-		SELECT h.name, hf.facts
-		FROM host_facts hf JOIN hosts h ON h.id = hf.host_id
-		WHERE h.inventory_id = $1`, inventoryID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	out := map[string]json.RawMessage{}
-	for rows.Next() {
-		var name string
-		var facts []byte
-		if rows.Scan(&name, &facts) == nil {
-			out[name] = json.RawMessage(facts)
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
 
 // launchArgs is the prompt-on-launch override payload stored in
 // unified_jobs.job_args when a job is launched. Fields are pointers/maps so an

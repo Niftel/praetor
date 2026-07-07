@@ -257,6 +257,13 @@ func (s *IngestionService) RenderInventory(ctx context.Context, inventoryID int6
 	return inventoryrender.Render(ctx, s.DB, inventoryID)
 }
 
+// InventoryFacts returns the stored host facts for an inventory, keyed by host
+// name. The executor fetches these at dispatch (by reference) for fact-cache jobs
+// so the facts don't bloat the outbox/NATS message (#48).
+func (s *IngestionService) InventoryFacts(ctx context.Context, inventoryID int64) (map[string]json.RawMessage, error) {
+	return inventoryrender.Facts(ctx, s.DB, inventoryID)
+}
+
 // LogCursor returns the authoritative resume point for a run's stdout: the total
 // bytes already stored and the highest chunk seq (or -1 if none). The host-runner
 // calls this after losing its local sync cursor so it can continue appending new
