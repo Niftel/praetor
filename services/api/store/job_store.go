@@ -22,7 +22,7 @@ import (
 // execution_runs.runner_host_id/reconcile_*/credential_id).
 const (
 	unifiedJobCols   = `id, unified_job_template_id, name, status, current_run_id, created_at, started_at, finished_at, cancel_requested, job_args`
-	executionRunCols = `id, unified_job_id, attempt_number, created_at, started_at, finished_at, state, last_heartbeat_at, last_event_seq, persisted_event_seq`
+	executionRunCols = `id, unified_job_id, created_at, started_at, finished_at, state, last_heartbeat_at, last_event_seq, persisted_event_seq`
 	jobEventCols     = `id, unified_job_id, execution_run_id, seq, event_type, host_id, task_name, play_name, event_data, stdout_snippet, created_at`
 )
 

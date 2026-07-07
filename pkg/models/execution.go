@@ -23,7 +23,6 @@ type UnifiedJob struct {
 type ExecutionRun struct {
 	ID                 uuid.UUID  `json:"id" db:"id"`
 	UnifiedJobID       int64      `json:"unified_job_id" db:"unified_job_id"`
-	AttemptNumber      int        `json:"attempt_number" db:"attempt_number"`
 	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
 	StartedAt          *time.Time `json:"started_at,omitempty" db:"started_at"`
 	FinishedAt         *time.Time `json:"finished_at,omitempty" db:"finished_at"`
