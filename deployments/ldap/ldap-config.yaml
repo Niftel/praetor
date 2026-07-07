@@ -1,11 +1,18 @@
-# Praetor LDAP Configuration for Mock Server
-# This config connects to the OpenLDAP container in docker-compose
+# Praetor LDAP Configuration — DEMO ONLY.
+# Connects to the mock OpenLDAP container in docker-compose. Do NOT copy this file
+# to production as-is: the bind password is sourced from an env var (never commit a
+# real one here), and insecure_skip_verify must be false against a real directory.
 
 server:
   url: "ldap://ldap:389"
   bind_dn: "cn=admin,dc=praetor,dc=local"
-  bind_password: "admin"
+  # Never commit the bind password: read it from this env var (see the API service
+  # in docker-compose). The loader (pkg/auth/config.go) requires one of
+  # bind_password / bind_password_env.
+  bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
   start_tls: false
+  # DEMO ONLY: the mock speaks plaintext ldap:// (no TLS), so there is nothing to
+  # verify here. Against a real ldaps:// directory this MUST be false.
   insecure_skip_verify: true
   timeout: 30s
 

@@ -24,15 +24,21 @@ TAG="v${VERSION#v}"
 GITEA_URL="${GITEA_URL:-http://localhost:3002}"
 GITEA_OWNER="${GITEA_OWNER:-praetor}"
 GITEA_REPO="${GITEA_REPO:-host-runner}"
-GITEA_USER="${GITEA_USER:-praetor}"
-GITEA_PASSWORD="${GITEA_PASSWORD:-praetor}"
+GITEA_USER="${GITEA_USER:-}"
+GITEA_PASSWORD="${GITEA_PASSWORD:-}"
 ARCHES="amd64 arm64"
 API="${GITEA_URL%/}/api/v1"
 
+# Require an explicit credential — no guessable default. Prefer a token; basic
+# auth needs both user and password. Publishing to a real registry with baked-in
+# praetor:praetor creds is a footgun, so fail closed instead.
 if [ -n "${GITEA_TOKEN:-}" ]; then
   AUTH=(-H "Authorization: token ${GITEA_TOKEN}")
-else
+elif [ -n "$GITEA_USER" ] && [ -n "$GITEA_PASSWORD" ]; then
   AUTH=(-u "${GITEA_USER}:${GITEA_PASSWORD}")
+else
+  echo "error: set GITEA_TOKEN (preferred), or both GITEA_USER and GITEA_PASSWORD, to publish" >&2
+  exit 1
 fi
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
