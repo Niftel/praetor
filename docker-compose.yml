@@ -260,7 +260,10 @@ services:
       ANSIBLE_FORKS: 1
     shm_size: 1gb
     volumes:
-      - ./keys:/tmp/keys:ro
+      # The executor no longer mounts ./keys: job connection keys come from each
+      # job's Machine credential (resolved at dispatch to an ephemeral per-run
+      # file), not a shared key staged in the container. The demo targets still
+      # mount ./keys to authorize the demo credential's public key.
       # Fallback source for locally-built Execution Pack tarballs
       # (build/runtime/<pack>-linux-<arch>.tar.gz from `make execpack`), used only
       # when a pack isn't in the Gitea registry. The host-runner daemon is NOT

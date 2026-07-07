@@ -1,24 +1,14 @@
 #!/bin/sh
 set -e
 
-# Copy keys if they exist in /tmp/keys
-if [ -d "/tmp/keys" ]; then
-    echo "Importing SSH keys from legacy mount or /tmp/keys..."
-    
-    # Handle private key
-    if [ -f "/tmp/keys/id_rsa" ]; then
-        cp /tmp/keys/id_rsa /home/praetor/.ssh/id_rsa
-        chmod 600 /home/praetor/.ssh/id_rsa
-    fi
+# NOTE: the executor does NOT stage a shared SSH private key into its home. Each
+# job's connection key comes from its Machine credential, resolved at dispatch and
+# written to a per-run ephemeral file (/tmp/cred-key-<run_id>, removed after the
+# run) — see services/executor/core/bootstrap_runner.go. A job with no Machine
+# credential is rejected, so there is no default-identity fallback to stage here.
+# Keeping the key out of the container's home shrinks the key-exposure surface.
 
-    # Handle public key
-    if [ -f "/tmp/keys/id_rsa.pub" ]; then
-        cp /tmp/keys/id_rsa.pub /home/praetor/.ssh/id_rsa.pub
-        chmod 644 /home/praetor/.ssh/id_rsa.pub
-    fi
-fi
-
-# Ensure ownership is correct
+mkdir -p /home/praetor/.ssh
 chown -R praetor:praetor /home/praetor/.ssh
 
 # SSH host-key policy: trust-on-first-use. accept-new records an unknown host's
