@@ -12,12 +12,32 @@ package objectstore
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/praetordev/praetor/pkg/env"
 )
 
 // DefaultBucket is the JetStream object-store bucket holding job output chunks.
 const DefaultBucket = "PRAETOR_LOGS"
+
+// Log output is large and append-heavy, so the bucket is bounded by default to
+// keep JetStream's file store from growing without limit (issue #17). Both bounds
+// are env-tunable; 0 disables that bound.
+//   - PRAETOR_LOG_STORE_MAX_MB       : hard size cap (MiB). Default 5 GiB.
+//   - PRAETOR_LOG_STORE_MAX_AGE_DAYS : age cap. Default 0 (age is handled by the
+//     scheduler's retention prune, which also removes the DB rows).
+const (
+	defaultLogStoreMaxMB   = 5120 // 5 GiB
+	defaultLogStoreMaxDays = 0
+)
+
+// logStoreBounds resolves the configured (maxBytes, ttl) for the log bucket.
+func logStoreBounds() (int64, time.Duration) {
+	maxBytes := int64(env.Int("PRAETOR_LOG_STORE_MAX_MB", defaultLogStoreMaxMB)) * 1024 * 1024
+	ttl := time.Duration(env.Int("PRAETOR_LOG_STORE_MAX_AGE_DAYS", defaultLogStoreMaxDays)) * 24 * time.Hour
+	return maxBytes, ttl
+}
 
 // LogStore is durable blob storage for job output chunks. Keys are content
 // paths of the form "<execution_run_id>/<seq>".
@@ -41,19 +61,54 @@ func NewJetStreamLogStore(js nats.JetStreamContext, bucket string) (*JetStreamLo
 		bucket = DefaultBucket
 	}
 
+	maxBytes, ttl := logStoreBounds()
+
 	store, err := js.ObjectStore(bucket)
 	if err != nil {
-		// Bucket does not exist yet — create it.
+		// Bucket does not exist yet — create it with the configured bounds.
 		store, err = js.CreateObjectStore(&nats.ObjectStoreConfig{
 			Bucket:      bucket,
 			Description: "Praetor job output chunks",
 			Storage:     nats.FileStorage,
+			MaxBytes:    maxBytes,
+			TTL:         ttl,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("bind/create object store bucket %s: %w", bucket, err)
 		}
+	} else {
+		// Bucket already exists — reconcile the bounds so an older, unbounded
+		// deployment picks up the cap. The object store is backed by the stream
+		// OBJ_<bucket>; update it in place. Best-effort: a failure here must not
+		// stop the service from serving logs.
+		reconcileBucketBounds(js, bucket, maxBytes, ttl)
 	}
 	return &JetStreamLogStore{os: store}, nil
+}
+
+// reconcileBucketBounds sets MaxBytes/MaxAge on the stream backing an existing
+// object-store bucket, so a bucket created before the cap existed becomes bounded
+// without data loss (shrinking MaxBytes drops the oldest chunks, which is the
+// intended retention behaviour).
+func reconcileBucketBounds(js nats.JetStreamContext, bucket string, maxBytes int64, ttl time.Duration) {
+	stream := "OBJ_" + bucket
+	si, err := js.StreamInfo(stream)
+	if err != nil {
+		return
+	}
+	cfg := si.Config
+	changed := false
+	if cfg.MaxBytes != maxBytes {
+		cfg.MaxBytes = maxBytes
+		changed = true
+	}
+	if cfg.MaxAge != ttl {
+		cfg.MaxAge = ttl
+		changed = true
+	}
+	if changed {
+		_, _ = js.UpdateStream(&cfg)
+	}
 }
 
 func (s *JetStreamLogStore) Put(key string, data []byte) error {

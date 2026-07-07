@@ -31,10 +31,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Ansible
-# We can install directly into system python since this is a dedicated container
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir ansible-runner ansible-core PyMySQL
+# Install Ansible into the system python (dedicated container). The executor uses
+# ansible-inventory here for inventory-sync runs; playbook execution happens in the
+# pushed Execution Pack, not this image. Versions are PINNED for reproducible
+# builds (issue #27); ansible-core matches the pack's engine (build/execpack specs).
+RUN pip install --no-cache-dir pip==24.2 \
+    && pip install --no-cache-dir \
+        ansible-core==2.19.11 \
+        ansible-runner==2.4.1 \
+        PyMySQL==1.1.1
 
 WORKDIR /
 

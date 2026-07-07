@@ -50,10 +50,11 @@ func main() {
 	// Base URL embedded in the manifest for the pushed host-runner to report back.
 	sched.APIURL = env.String("API_URL", "")
 
-	// Retention pruning (opt-in). JOB_RETENTION_DAYS=0 (default) keeps everything;
-	// a positive value deletes terminal jobs finished longer ago than that, along
-	// with their events and log blobs.
-	if days := env.Int("JOB_RETENTION_DAYS", 0); days > 0 {
+	// Retention pruning (opt-OUT). JOB_RETENTION_DAYS defaults to 90: terminal jobs
+	// finished longer ago than that are deleted, along with their events and log
+	// blobs, so state doesn't grow without bound by default (issue #17). Set
+	// JOB_RETENTION_DAYS=0 to disable pruning and keep everything.
+	if days := env.Int("JOB_RETENTION_DAYS", 90); days > 0 {
 		sched.RetentionDays = days
 		if ls, err := objectstore.NewJetStreamLogStore(bus.JS, ""); err == nil {
 			sched.Logs = ls
@@ -61,6 +62,8 @@ func main() {
 			log.Printf("retention: object store unavailable, blobs won't be pruned: %v", err)
 		}
 		log.Printf("retention: pruning terminal jobs finished > %d day(s) ago", days)
+	} else {
+		log.Printf("retention: pruning disabled (JOB_RETENTION_DAYS=0); job history and log blobs are kept indefinitely")
 	}
 
 	// 3. Start loop in background; ctx cancellation is the stop signal.
