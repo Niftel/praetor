@@ -26,5 +26,7 @@ writing the chart is missing or wrong in at least these ways:
 
 A production chart is a genuine project, not a patch of this one — it needs
 StatefulSets/PVCs for the stateful pieces, secrets management, the ingress story,
-and validation against an actual cluster. Until that exists, deploy with
-docker-compose.
+and validation against an actual cluster. A source-grounded design blueprint for
+that replacement lives in [`../CHART-DESIGN.md`](../CHART-DESIGN.md) (workload
+mapping, config/secrets, the hard parts, and codebase-specific risks). Until the
+chart exists, deploy with docker-compose.
