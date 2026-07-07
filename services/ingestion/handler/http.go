@@ -58,6 +58,25 @@ func (h *IngestionHandler) InventoryRendered(w http.ResponseWriter, r *http.Requ
 	_, _ = w.Write([]byte(ini))
 }
 
+// InventoryFacts GET /internal/v1/inventories/{id}/facts — stored host facts for a
+// fact-cache job, fetched by reference at dispatch (#48). Internal-token auth.
+func (h *IngestionHandler) InventoryFacts(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		praetorRender.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	facts, err := h.Service.InventoryFacts(r.Context(), id)
+	if err != nil {
+		praetorRender.ErrInternal(err).Render(w, r)
+		return
+	}
+	if facts == nil {
+		facts = map[string]json.RawMessage{}
+	}
+	render.JSON(w, r, facts)
+}
+
 // LogCursor GET /api/v1/runs/{run_id}/logs/cursor — the host-runner's stdout
 // resume point: {"bytes": <total stored>, "seq": <max seq, -1 if none>}. Used to
 // recover after a lost local sync cursor without re-chunking stdout from 0 (#9).

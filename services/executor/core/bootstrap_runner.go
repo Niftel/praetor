@@ -186,6 +186,18 @@ func (r *BootstrapRunner) Run(req *events.ExecutionRequest, eventChan chan<- eve
 			return fmt.Errorf("resolve inventory %d for run %s: %w", req.JobManifest.InventoryID, req.ExecutionRunID, ierr)
 		}
 		req.JobManifest.Inventory = ini
+
+		// Fact cache also travels by reference: fetch the inventory's stored facts
+		// only when the job uses the cache, and fill them into this manifest copy
+		// for the host-runner to preload (#48). Best-effort — a fact-cache miss
+		// just means the play gathers facts fresh, so don't fail the run on it.
+		if req.JobManifest.UseFactCache && len(req.JobManifest.CachedFacts) == 0 {
+			if facts, ferr := r.ingest.ResolveFacts(context.Background(), req.JobManifest.InventoryID); ferr != nil {
+				logger.Warn("resolve fact cache failed (play will gather facts)", "inventory_id", req.JobManifest.InventoryID, "run_id", req.ExecutionRunID, "err", ferr)
+			} else if len(facts) > 0 {
+				req.JobManifest.CachedFacts = facts
+			}
+		}
 	}
 
 	logger.Info("starting deployment", "run_id", req.ExecutionRunID)
