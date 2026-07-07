@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -26,6 +28,19 @@ func newFakeLogIngestion() *fakeLogIngestion {
 		defer f.mu.Unlock()
 		if f.fail {
 			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		// Resume-point endpoint: total stored bytes + max seq (-1 if none).
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/logs/cursor") {
+			var bytes int64
+			maxSeq := int64(-1)
+			for seq, c := range f.chunks {
+				bytes += int64(len(c))
+				if seq > maxSeq {
+					maxSeq = seq
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]int64{"bytes": bytes, "seq": maxSeq})
 			return
 		}
 		seq, _ := strconv.ParseInt(r.URL.Query().Get("seq"), 10, 64)
@@ -137,5 +152,57 @@ func TestLogSyncerChunkSizeCap(t *testing.T) {
 	}
 	if got := fake.reassemble(); string(got) != string(big) {
 		t.Fatalf("chunked upload did not reassemble to original (%d vs %d bytes)", len(got), len(big))
+	}
+}
+
+// TestLogSyncerRecoversFromCursorLoss is the #9 regression: if the local cursor
+// vanishes mid-run while stdout.log still holds output, the syncer must recover
+// its position from the server and append only the new bytes — NOT re-read from
+// offset 0 (which would overwrite stored chunks and strand others, corrupting the
+// reassembled log). Before the fix, loadCursor gave (0,0) and flush re-chunked
+// from 0, producing duplicated/garbled output.
+func TestLogSyncerRecoversFromCursorLoss(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stdout.log")
+
+	fake := newFakeLogIngestion()
+	defer fake.server.Close()
+
+	// Simulate progress already stored before the cursor was lost: two chunks the
+	// server has, plus more bytes now on disk that were never pushed.
+	fake.mu.Lock()
+	fake.chunks[0] = []byte("PLAY [all] ***\n")  // seq 0
+	fake.chunks[1] = []byte("TASK [ping] ***\n") // seq 1
+	fake.mu.Unlock()
+
+	appended := []byte("ok: [web-01]\nPLAY RECAP ***\n")
+	full := append(append([]byte{}, []byte("PLAY [all] ***\nTASK [ping] ***\n")...), appended...)
+	if err := os.WriteFile(logPath, full, 0644); err != nil {
+		t.Fatalf("write stdout: %v", err)
+	}
+
+	// No cursor file on disk -> loadCursor must flag a resync (not start at 0).
+	s := NewLogSyncer(dir, fake.server.URL, "run-x", "")
+	s.loadCursor()
+	if !s.needResync {
+		t.Fatal("expected needResync after losing the cursor with data on disk")
+	}
+
+	s.flush() // recovers offset/seq from the server, then appends only new bytes
+
+	// The full stdout must reassemble exactly — no duplication, no gap.
+	if got := fake.reassemble(); string(got) != string(full) {
+		t.Fatalf("after cursor-loss recovery, reassembled:\n got %q\nwant %q", got, full)
+	}
+	// Existing chunks must be untouched (write-once), and the new bytes land in a
+	// fresh seq starting exactly where the server left off.
+	if string(fake.chunks[0]) != "PLAY [all] ***\n" || string(fake.chunks[1]) != "TASK [ping] ***\n" {
+		t.Fatal("existing stored chunks must not be overwritten on recovery")
+	}
+	if string(fake.chunks[2]) != string(appended) {
+		t.Fatalf("appended bytes should be a new chunk seq2=%q, got %q", appended, fake.chunks[2])
+	}
+	if s.offset != int64(len(full)) {
+		t.Fatalf("offset after recovery = %d, want %d", s.offset, len(full))
 	}
 }
