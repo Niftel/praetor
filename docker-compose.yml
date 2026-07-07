@@ -3,10 +3,13 @@ services:
     # Pinned + alpine variant (has a shell/wget for the healthcheck below).
     image: nats:2.10-alpine
     restart: unless-stopped
-    # Enable JetStream with file-based persistence so job events survive a
-    # consumer/DB outage (and a NATS restart) and can be replayed; -m 8222 turns
-    # on the monitoring endpoint used by the healthcheck.
-    command: ["-js", "-sd", "/data", "-m", "8222"]
+    # JetStream with file-based persistence (job events survive a consumer/DB
+    # outage or NATS restart and can be replayed). Driven by a config file rather
+    # than inline args so the file store can be BOUNDED (max_file_store) — there is
+    # no CLI flag for that. store_dir /data/jetstream matches the previous `-sd
+    # /data`, so existing streams are preserved; http_port 8222 keeps the
+    # monitoring endpoint the healthcheck uses.
+    command: ["-c", "/etc/nats/nats.conf"]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz || exit 1"]
       interval: 5s
@@ -20,6 +23,7 @@ services:
       - "127.0.0.1:8222:8222"
     volumes:
       - nats-data:/data
+      - ./deployments/nats/nats.conf:/etc/nats/nats.conf:ro
     networks:
       - praetor-net
 
@@ -222,9 +226,10 @@ services:
       PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
       PRAETOR_SECRET_KEY_OLD: "${PRAETOR_SECRET_KEY_OLD:-}"
       API_URL: http://api:8080
-      # Retention pruning: 0 (default) keeps job history forever; a positive value
-      # deletes terminal jobs (rows + events + log blobs) finished that many days ago.
-      JOB_RETENTION_DAYS: "${JOB_RETENTION_DAYS:-0}"
+      # Retention pruning (opt-out): defaults to 90 days so job history (rows +
+      # events + log blobs) doesn't grow without bound (issue #17). Set
+      # JOB_RETENTION_DAYS=0 to keep everything forever.
+      JOB_RETENTION_DAYS: "${JOB_RETENTION_DAYS:-90}"
     depends_on:
       migrator:
         condition: service_completed_successfully
