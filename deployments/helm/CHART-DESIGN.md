@@ -1,11 +1,11 @@
 # Praetor Helm Chart — Design Blueprint
 
-> **Status: design artifact, not an implementation.** The existing chart under
-> [`praetor/`](praetor/) is deprecated and unsupported (see its README). This
-> document is the source-grounded plan for a *replacement* chart. Building it is a
-> genuine project and must be validated against a real cluster — nothing here has
-> been. Until it exists, deploy with [`docker-compose.yml`](../../docker-compose.yml),
-> which remains the source of truth for topology.
+> **Status: implemented.** This blueprint has been built as the chart under
+> [`praetor-v2/`](praetor-v2/) and validated end-to-end on a k3d cluster (all nine
+> service pods Ready; executor scale-to-2 with per-replica PVCs verified). The doc
+> is kept as the design rationale. Where the implementation deviated, it's noted
+> inline (e.g. bundled datastores instead of subcharts — see §3). The old chart
+> under [`praetor/`](praetor/) remains deprecated.
 >
 > Produced by a Fable-5 design consult grounded in: `docker-compose.yml`,
 > `build/package/*.Dockerfile`, `cmd/*/main.go`, `pkg/transport/nats/bus.go`,
@@ -209,5 +209,36 @@ networkPolicy: { enabled: false }
 5. **Baked-in compose DNS in the ui image** (`web/nginx.conf`: `resolver 127.0.0.11`, `http://api:8080`). This isn't env-overridable — it must be a ConfigMap override of `default.conf` (or Ingress-path routing for `/api`). Related second-order item: every Go service falls back to compose hostnames (`ingestion:8081`, `gitea-host:3000`, `db`, `nats`) when env is unset, which *masks* missing env in a namespace that happens to have similarly-named services — set every URL env explicitly in the chart and set `PRAETOR_ALLOW_INSECURE_DEFAULTS=false` so misconfiguration fails loudly instead of running on the dev key.
 
 Honorable mention: the Gitea pack registry is deliberately teardown-proof in compose (`external: true` volume + backup scripts) — preserve that intent with `helm.sh/resource-policy: keep` on its PVC if bundled, or better, keep it external entirely.
-</content>
-</invoke>
+
+---
+
+## Implementation notes (as built in `praetor-v2/`)
+
+Deviations from the blueprint above, and what the k3d validation surfaced:
+
+- **Bundled datastores instead of subcharts.** Postgres and NATS are shipped as
+  optional in-chart StatefulSets (matching compose's `postgres:15` /
+  `nats:2.10-alpine`), gated by `database.bundled.enabled` / `nats.bundled.enabled`,
+  with `database.external.url` / `nats.external.url` overrides. Rationale: a
+  self-contained chart with no external chart-repo dependency is more reliable to
+  install and sidesteps bitnami's 2025 image-gating. The official subcharts remain
+  the documented production alternative.
+- **Ordering without hooks.** Because the bundled Postgres is a normal resource, a
+  pre-install-hook migrator couldn't reach it. Instead the migrator is a revisioned
+  Job (waits for the DB) and every schema-dependent service has a
+  `wait-for-migrations` init container that blocks on the `organizations` table.
+  No deadlock with `--wait`, no hook/config ordering trap.
+- **Log-store coupling is enforced at render time.** Risk #4 (NATS `max_file_store`
+  vs `PRAETOR_LOG_STORE_MAX_MB`) was hit live — ingestion crash-looped with
+  `insufficient storage resources` when the object-store cap exceeded the file
+  store. `configmap.yaml` now `fail`s the render when `ingestion.logStoreMaxMB >=
+  nats.bundled.maxFileStore`, turning a runtime crash into a clear template error.
+- **UI `/api` proxy uses a static upstream.** Risk #5 — the baked nginx config is
+  overridden by a ConfigMap. The blueprint's `resolver <kube-dns-name>` form is
+  invalid (nginx `resolver` needs an IP, not a name); since K8s Service VIPs are
+  stable, a plain `proxy_pass http://<fullname>-api:8080` is correct and portable.
+- **executor.replicas > 1 is validated, not just claimed.** Scaled to 2 on k3d:
+  per-replica `jobs`/`packs`/`ssh` PVCs all bound, the second replica bound the
+  shared durable pull consumer without disrupting the first (the idempotent-bind
+  fix from PR #18) — so risk #2 is closed in practice.
+

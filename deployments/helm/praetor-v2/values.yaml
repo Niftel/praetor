@@ -1,0 +1,174 @@
+# Default values for the Praetor chart.
+# See CHART-DESIGN.md for the reasoning behind every workload choice.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # Registry + repo prefix for the seven service images. Empty registry means the
+  # image is referenced bare (repo:tag) — used by the local/k3d flow where images
+  # are imported into the cluster rather than pulled from a registry.
+  registry: ghcr.io/praetordev
+  # Tag shared by all service images. Empty → defaults to .Chart.appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Per-service image repositories (joined with image.registry + image.tag).
+images:
+  api: praetor-api
+  ingestion: praetor-ingestion
+  scheduler: praetor-scheduler
+  consumer: praetor-consumer
+  reconciler: praetor-reconciler
+  executor: praetor-executor
+  ui: praetor-ui
+  migrator: praetor-migrator
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# When false (the production default), a missing PRAETOR_SECRET_KEY/JWT_SECRET
+# makes services fail hard instead of running on a built-in dev key. Set true only
+# for throwaway installs where you don't provide secrets.
+allowInsecureDefaults: false
+
+secrets:
+  # If set, all secret values below are ignored and this pre-existing Secret is
+  # used instead (bring your own ExternalSecrets/sealed-secrets). It must contain:
+  # DATABASE_URL, PRAETOR_SECRET_KEY, PRAETOR_SECRET_KEY_OLD, JWT_SECRET,
+  # PRAETOR_INTERNAL_TOKEN, PRAETOR_LDAP_BIND_PASSWORD.
+  existingSecret: ""
+  secretKey: ""            # exactly 32 bytes; required unless allowInsecureDefaults
+  secretKeyOld: ""         # previous key during rotation
+  jwtSecret: ""            # api token signing
+  internalToken: ""        # shared api<->ingestion<->executor auth; must be identical
+  ldapBindPassword: ""     # only used when ldap.enabled
+
+database:
+  # External managed Postgres wins when url is set (recommended for production).
+  external:
+    url: ""                # e.g. postgres://user:pw@host:5432/praetor?sslmode=require
+  bundled:
+    enabled: true
+    image: postgres:15
+    user: postgres
+    password: postgres
+    database: praetor
+    storage: 8Gi
+    storageClass: ""
+    resources: {}
+
+nats:
+  external:
+    url: ""                # e.g. nats://nats.example:4222
+  bundled:
+    enabled: true
+    image: nats:2.10-alpine
+    storage: 12Gi          # must exceed maxFileStore (JetStream is a datastore here)
+    storageClass: ""
+    maxFileStore: "10GB"   # bounds the JetStream file store (run logs + streams)
+    resources: {}
+
+# Gitea pack registry (the executor pulls Execution Packs from it). Kept external:
+# the in-repo Gitea image is demo-grade. Empty is allowed (executor still boots;
+# pack pulls just fail until set).
+gitea:
+  internalUrl: ""          # e.g. http://gitea.internal:3000
+  owner: praetor
+
+hostRunner:
+  # URL managed hosts call back to (ingestion). MUST be routable FROM the targets,
+  # i.e. the external ingestion address — never a cluster-internal *.svc name.
+  # Required for remote runs; validated in NOTES.txt. Defaults to the ingestion
+  # ingress host when ingress is enabled and this is left empty.
+  callbackUrl: ""
+
+ldap:
+  enabled: false
+  # Rendered verbatim into /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml
+  # for the shape). Leave empty to disable LDAP auth/sync entirely.
+  config: {}
+
+api:
+  replicas: 1
+  resources: {}
+  service:
+    port: 8080
+  podAnnotations: {}
+  extraEnv: []
+
+ingestion:
+  replicas: 1
+  resources: {}
+  service:
+    port: 8081
+  logStoreMaxMB: 5120
+  logStoreMaxAgeDays: 0
+  podAnnotations: {}
+  extraEnv: []
+
+scheduler:
+  replicas: 1
+  jobRetentionDays: 90     # 0 = keep forever
+  resources: {}
+  podAnnotations: {}
+  extraEnv: []
+
+consumer:
+  replicas: 1
+  resources: {}
+  podAnnotations: {}
+  extraEnv: []
+
+reconciler:
+  replicas: 1
+  interval: "30s"
+  resources: {}
+  podAnnotations: {}
+  extraEnv: []
+
+executor:
+  # Safe to scale >1: the durable pull consumer is shared and the startup bind is
+  # idempotent. Each replica keeps its own WAL/packs/ssh PVCs (StatefulSet).
+  replicas: 1
+  workers: 2
+  ansibleForks: 1
+  shmSize: 1Gi
+  persistence:
+    jobs:  { size: 5Gi,   storageClass: "" }   # /var/lib/praetor  (localhost-run WAL)
+    packs: { size: 10Gi,  storageClass: "" }   # /opt/praetor/packs (extracted packs)
+    ssh:   { size: 100Mi, storageClass: "" }   # /home/praetor/.ssh (TOFU known_hosts)
+  resources: {}
+  podAnnotations: {}
+  extraEnv: []
+
+ui:
+  replicas: 1
+  resources: {}
+  service:
+    port: 80
+  podAnnotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: praetor.example.com          # ui
+  apiHost: ""                        # optional dedicated api host; empty → /api path on host
+  ingestionHost: ingest.example.com  # host-runner callback endpoint (external!)
+  tls:
+    enabled: false
+    secretName: ""
+
+metrics:
+  serviceMonitor:
+    enabled: false
+
+networkPolicy:
+  enabled: false
+
+# Applied to every pod (pods that must start as root, e.g. executor, override this).
+podSecurityContext: {}

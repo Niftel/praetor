@@ -1,0 +1,106 @@
+{{- if and .Values.nats.bundled.enabled (not .Values.nats.external.url) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "praetor.fullname" . }}-nats
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+data:
+  nats.conf: |
+    port: 4222
+    http_port: 8222
+    # JetStream with a BOUNDED file store — NATS is a datastore here (run-log object
+    # store + durable event/request streams), so cap it to keep the PVC from filling.
+    jetstream {
+      store_dir: /data/jetstream
+      max_file_store: {{ .Values.nats.bundled.maxFileStore }}
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "praetor.fullname" . }}-nats
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+spec:
+  clusterIP: None
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+    - name: monitor
+      port: 8222
+      targetPort: monitor
+  selector:
+    {{- include "praetor.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "praetor.fullname" . }}-nats
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+spec:
+  serviceName: {{ include "praetor.fullname" . }}-nats
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "praetor.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nats
+  template:
+    metadata:
+      labels:
+        {{- include "praetor.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nats
+    spec:
+      containers:
+        - name: nats
+          image: {{ .Values.nats.bundled.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["nats-server", "-c", "/etc/nats/nats.conf"]
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: monitor
+              containerPort: 8222
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats
+            - name: data
+              mountPath: /data
+          {{- with .Values.nats.bundled.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "praetor.fullname" . }}-nats
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.nats.bundled.storageClass }}
+        storageClassName: {{ .Values.nats.bundled.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.nats.bundled.storage }}
+{{- end }}

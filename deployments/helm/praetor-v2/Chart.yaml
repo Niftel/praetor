@@ -1,0 +1,24 @@
+apiVersion: v2
+name: praetor
+description: >-
+  Praetor — an Ansible Automation Platform. This chart deploys the in-cluster
+  control plane (api, ingestion, scheduler, consumer, reconciler, executor, ui)
+  plus optional bundled Postgres and NATS/JetStream datastores. Managed target
+  hosts and the host-runner are out of cluster by design (they live in the
+  Execution Pack / inventory, not as K8s objects). See CHART-DESIGN.md.
+type: application
+# Chart is self-contained: Postgres and NATS are bundled as optional in-chart
+# workloads (matching docker-compose's postgres:15 / nats:2.10-alpine) so a
+# default install needs no external chart repos. For production you can point at
+# an external managed Postgres (database.external.url) and NATS (nats.external.url),
+# or swap in the official bitnami/postgresql and nats-io/nats subcharts — see
+# CHART-DESIGN.md §3. No `dependencies:` here on purpose.
+version: 0.2.0
+appVersion: "1.0.0"
+keywords:
+  - ansible
+  - automation
+  - aap
+home: https://github.com/praetordev/praetor
+sources:
+  - https://github.com/praetordev/praetor
