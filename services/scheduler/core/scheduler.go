@@ -550,6 +550,7 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	lostHeartbeatGrace := 2 * time.Minute // ~4 missed heartbeats
 	startGrace := 5 * time.Minute         // running but never heartbeated
 	queuedTimeout := 10 * time.Minute     // never picked up by an executor
+	localRecoveryGrace := 10 * time.Minute // window for the executor to resume a local run before true-loss (#45)
 
 	// 1a. Reconcilable runs: a REMOTE run (has a snapshotted runner host) whose
 	// heartbeat went stale is NOT declared failed — the host may have finished the
@@ -582,29 +583,49 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 		QueueDepth.Set(depth)
 	}
 
-	// 1b. Lost runs: a LOCAL run (no runner host — ran on the executor itself)
-	// whose heartbeat went stale can't be pulled back over SSH, so it is genuinely
-	// lost. Mark the run 'lost' and its job 'error' in one statement.
+	// 1b. Stale LOCAL runs (no runner host — ran on the executor itself). These
+	// can't be pulled back over SSH, but the executor persists the same WAL to
+	// /var/lib/praetor/jobs and resumes interrupted local runs on startup (#45), so
+	// a stale local run is NOT immediately lost: park it in 'reconciling' with a
+	// recovery deadline (reconcile_after) and leave its job untouched, giving the
+	// executor time to resume it (a resumed runner's heartbeat revives it). The SSH
+	// reconciler ignores these (it JOINs on runner_host_id), so parking is safe.
+	rl, err := s.DB.ExecContext(ctx, `
+		UPDATE execution_runs er
+		SET state = 'reconciling', reconcile_after = now() + $3::interval
+		WHERE er.state = 'running' AND er.runner_host_id IS NULL AND `+staleCond,
+		fmt.Sprintf("%d seconds", int(lostHeartbeatGrace.Seconds())),
+		fmt.Sprintf("%d seconds", int(startGrace.Seconds())),
+		fmt.Sprintf("%d seconds", int(localRecoveryGrace.Seconds())),
+	)
+	if err != nil {
+		logger.Error("park stale local runs for recovery failed", "err", err)
+	} else if rows, _ := rl.RowsAffected(); rows > 0 {
+		RunsReconciling.Add(float64(rows))
+		logger.Info("parked stale local runs for executor recovery", "count", rows)
+	}
+
+	// 1c. True loss: a local run still in 'reconciling' past its recovery deadline
+	// was never resumed (executor gone for good / WAL unrecoverable). Now declare
+	// it lost and its job errored — the delayed form of the old 1b semantics.
 	result, err := s.DB.ExecContext(ctx, `
 		WITH lost AS (
 			UPDATE execution_runs er
 			SET state = 'lost', finished_at = now()
-			WHERE er.state = 'running' AND er.runner_host_id IS NULL AND `+staleCond+`
+			WHERE er.state = 'reconciling' AND er.runner_host_id IS NULL
+			  AND er.reconcile_after IS NOT NULL AND er.reconcile_after < now()
 			RETURNING er.unified_job_id
 		)
 		UPDATE unified_jobs uj
 		SET status = 'error', finished_at = now()
 		FROM lost
 		WHERE uj.id = lost.unified_job_id
-		  AND uj.status NOT IN ('successful', 'failed', 'canceled', 'error')`,
-		fmt.Sprintf("%d seconds", int(lostHeartbeatGrace.Seconds())),
-		fmt.Sprintf("%d seconds", int(startGrace.Seconds())),
-	)
+		  AND uj.status NOT IN ('successful', 'failed', 'canceled', 'error')`)
 	if err != nil {
-		logger.Error("reconcile lost runs failed", "err", err)
+		logger.Error("reconcile lost local runs failed", "err", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
 		RunsLost.Add(float64(rows))
-		logger.Warn("marked local runs as lost (stale/absent heartbeat)", "count", rows)
+		logger.Warn("marked local runs as lost (recovery deadline passed)", "count", rows)
 	}
 
 	// 2. Queued too long: never picked up by an executor. With the durable
