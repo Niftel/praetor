@@ -607,6 +607,7 @@ member: uid=pnair,ou=users,dc=praetor,dc=local
 member: uid=alice,ou=users,dc=praetor,dc=local
 member: uid=bob,ou=users,dc=praetor,dc=local
 member: uid=eve,ou=users,dc=praetor,dc=local
+member: uid=mwarburton,ou=users,dc=praetor,dc=local
 
 dn: cn=backend-team,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
