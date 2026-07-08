@@ -106,16 +106,20 @@ team_map:                                         # keyed by team NAME
 
 Independent of LDAP, a user row with a local password and `ldap_dn NULL` always
 authenticates locally and is **never** LDAP-managed — so a misconfigured or
-unreachable directory can't lock you out. Seed one (also the way to get a first
-superuser before any LDAP group grants one):
+unreachable directory can't lock you out. It's also the way to get a first
+superuser before any LDAP group grants one. Enable it in the chart:
 
 ```sh
-HASH=$(go run ./cmd/genhash)   # bcrypt hash of the literal "password"
-kubectl -n praetor exec -it praetor-postgresql-0 -- psql -U postgres -d praetor -c \
-  "INSERT INTO users (username,password_hash,email,first_name,last_name,is_superuser)
-   VALUES ('admin','$HASH','admin@example.com','Admin','User',true);"
-# then log in as admin / password — change it immediately
+helm install praetor deployments/helm/praetor-v2 -n praetor \
+  --set bootstrapAdmin.enabled=true \
+  --set bootstrapAdmin.username=admin \
+  --set bootstrapAdmin.password=<strong-password>   # or supply PRAETOR_BOOTSTRAP_ADMIN_PASSWORD via secrets.existingSecret
 ```
+
+The migrator creates (or, on upgrade, resets to the configured password) this local
+superuser — the chart is the source of truth, so a redeploy always restores access.
+A same-named LDAP user is never overwritten. Log in with the username/password
+above; rotate it by changing the value and upgrading.
 
 ## Local validation (k3d)
 
