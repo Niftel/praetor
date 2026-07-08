@@ -3,16 +3,18 @@ import { api, unwrap } from '../services/api';
 import { Project } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
+import { Input, Select } from '../components/ui/Input';
 import { RefreshCw, Plus, Trash2, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
 const ProjectsPage = () => {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [orgs, setOrgs] = useState<{ id: number; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [newUrl, setNewUrl] = useState('');
   const [newName, setNewName] = useState('');
+  const [newOrg, setNewOrg] = useState<number | ''>('');
   const [syncing, setSyncing] = useState<number | null>(null);
 
   const fetchProjects = async () => {
@@ -28,6 +30,13 @@ const ProjectsPage = () => {
 
   useEffect(() => {
     fetchProjects();
+    // Load the orgs the user can see so the create form can target one they
+    // administer (rather than a hardcoded org).
+    api.getOrganizations().then(d => {
+      const list = unwrap<{ id: number; name: string }>(d);
+      setOrgs(list);
+      if (list.length) setNewOrg(list[0].id);
+    }).catch(() => setOrgs([]));
   }, []);
 
   const handleSync = async (id: number) => {
@@ -45,12 +54,13 @@ const ProjectsPage = () => {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUrl || !newName) return;
+    if (!newOrg) { toast.error('Select an organization'); return; }
     try {
       await api.createProject({
         name: newName,
         scm_url: newUrl,
         scm_type: 'git',
-        organization_id: 1
+        organization_id: newOrg
       });
       setNewUrl('');
       setNewName('');
@@ -73,6 +83,15 @@ const ProjectsPage = () => {
 
       <Card title="Add New Project" className="mb-6">
         <form onSubmit={handleAdd} className="flex flex-col md:flex-row gap-4 items-end">
+          <Select
+            wrapperClassName="flex-1 w-full"
+            label="Organization"
+            value={newOrg}
+            onChange={e => setNewOrg(e.target.value ? Number(e.target.value) : '')}
+          >
+            <option value="">Select organization…</option>
+            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </Select>
           <Input
             wrapperClassName="flex-1 w-full"
             label="Name"
