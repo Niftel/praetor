@@ -19,6 +19,7 @@ import TeamsPage from './pages/TeamsPage';
 import ActivityPage from './pages/ActivityPage';
 import OrganizationsPage from './pages/OrganizationsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
+import SettingsPage from './pages/SettingsPage';
 import { getAuthToken, removeAuthToken } from './services/api';
 
 const App = () => {
@@ -61,7 +62,12 @@ const App = () => {
           <Route path="users" element={<UsersPage />} />
           <Route path="teams" element={<TeamsPage />} />
           <Route path="activity" element={<ActivityPage />} />
-          <Route path="auth-providers" element={<AuthProvidersPage />} />
+
+          {/* Settings */}
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings/auth-providers" element={<AuthProvidersPage />} />
+          {/* Back-compat: the old top-level path now lives under Settings */}
+          <Route path="auth-providers" element={<Navigate to="/settings/auth-providers" replace />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
