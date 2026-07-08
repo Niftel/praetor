@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Schedule, Template, Workflow, EventTrigger, WebhookTrigger } from '../types';
 import Card from '../components/ui/Card';
@@ -6,7 +7,7 @@ import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { Input, Select } from '../components/ui/Input';
-import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy, Pencil } from 'lucide-react';
+import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy, Pencil, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
@@ -19,6 +20,9 @@ const EVENT_LABEL: Record<string, string> = {
 };
 
 const SchedulesPage = () => {
+  const { orgId: orgIdStr } = useParams();
+  const orgId = Number(orgIdStr);
+  const [orgName, setOrgName] = useState('');
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -36,18 +40,20 @@ const SchedulesPage = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [s, t, wf, et, wh] = await Promise.all([
+      const [s, t, wf, et, wh, orgsData] = await Promise.all([
         api.getSchedules().catch(() => []),
         api.getTemplates().catch(() => ({})),
         api.getWorkflows().catch(() => []),
         api.getEventTriggers().catch(() => []),
         api.getWebhookTriggers().catch(() => []),
+        api.getOrganizations().catch(() => []),
       ]);
-      setSchedules(s || []);
+      setSchedules(unwrap(s));
       setTemplates(unwrap(t));
-      setWorkflows(wf || []);
-      setEventTriggers(et || []);
-      setWebhookTriggers(wh || []);
+      setWorkflows(unwrap(wf));
+      setEventTriggers(unwrap(et));
+      setWebhookTriggers(unwrap(wh));
+      setOrgName(unwrap<{ id: number; name: string }>(orgsData).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
     } catch (err) {
       console.error('Failed to load triggers', err);
     } finally {
@@ -55,7 +61,8 @@ const SchedulesPage = () => {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(); }, [orgId]);
 
   const templateUjt = (t: Template) => (t as any).unified_job_template_id || t.id;
   const templateNameByUjt = (ujt?: number | null) => templates.find(t => templateUjt(t) === ujt)?.name || (ujt ? `template ${ujt}` : '—');
@@ -63,6 +70,23 @@ const SchedulesPage = () => {
 
   const scheduleTarget = (s: Schedule) =>
     s.workflow_template_id ? `Workflow: ${workflowName(s.workflow_template_id)}` : `Template: ${templateNameByUjt(s.unified_job_template_id)}`;
+
+  // Resolve each item's owning org (schedules/webhooks derive it from their
+  // target) so the view can be scoped to the org from the route.
+  const scheduleOrgId = (s: Schedule): number | undefined => s.workflow_template_id
+    ? workflows.find(w => w.id === s.workflow_template_id)?.organization_id
+    : (templates.find(t => templateUjt(t) === s.unified_job_template_id) as any)?.organization_id;
+  const webhookOrgId = (t: WebhookTrigger): number | undefined => t.kind === 'workflow'
+    ? workflows.find(w => w.id === t.id)?.organization_id
+    : t.kind === 'job_template' ? (templates.find(x => x.id === t.id) as any)?.organization_id : undefined;
+
+  // Target pickers only offer this org's templates/workflows.
+  const orgTemplates = templates.filter(t => (t as any).organization_id === orgId);
+  const orgWorkflows = workflows.filter(w => (w as any).organization_id === orgId);
+  // Lists scoped to this org.
+  const shownSchedules = schedules.filter(s => scheduleOrgId(s) === orgId);
+  const shownEventTriggers = eventTriggers.filter(t => t.organization_id === orgId);
+  const shownWebhooks = webhookTriggers.filter(t => webhookOrgId(t) === orgId);
 
   // --- Schedules ---
   const toggleSchedule = async (id: number) => {
@@ -107,11 +131,9 @@ const SchedulesPage = () => {
   };
   const saveEventTrigger = async () => {
     if (!evt.name || !evt.target) return;
-    // Org is derived from the target so there's no separate org picker.
-    const org = evt.targetType === 'workflow'
-      ? workflows.find(w => w.id === evt.target)?.organization_id
-      : (templates.find(t => templateUjt(t) === evt.target) as any)?.organization_id;
-    const body: any = { name: evt.name, event_type: evt.event_type, organization_id: org || 1, enabled: true };
+    // The target is chosen from this org's templates/workflows, so the trigger
+    // belongs to the org from the route.
+    const body: any = { name: evt.name, event_type: evt.event_type, organization_id: orgId, enabled: true };
     if (evt.source) body.source_ujt_id = evt.source;
     if (evt.targetType === 'workflow') body.workflow_template_id = evt.target;
     else body.unified_job_template_id = evt.target;
@@ -152,7 +174,10 @@ const SchedulesPage = () => {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Schedules &amp; Triggers</h1>
+        <Link to="/schedules" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
+          <ArrowLeft size={14} /> Organizations
+        </Link>
+        <h1 className="text-2xl font-bold text-gray-900 mt-1">{orgName} · Schedules &amp; Triggers</h1>
         <p className="text-sm text-gray-500 mt-1">Launch a workflow or job template on a time schedule, when a job finishes, or from an inbound webhook.</p>
       </div>
 
@@ -164,7 +189,7 @@ const SchedulesPage = () => {
         </div>
         <Card>
           <div className="divide-y divide-gray-100">
-            {schedules.map(s => (
+            {shownSchedules.map(s => (
               <div key={s.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
                 <div>
                   <h3 className="text-base font-medium text-gray-900">{s.name}</h3>
@@ -182,7 +207,7 @@ const SchedulesPage = () => {
                 </div>
               </div>
             ))}
-            {schedules.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No schedules yet.</p>}
+            {shownSchedules.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No schedules yet.</p>}
           </div>
         </Card>
       </section>
@@ -195,7 +220,7 @@ const SchedulesPage = () => {
         </div>
         <Card>
           <div className="divide-y divide-gray-100">
-            {eventTriggers.map(t => (
+            {shownEventTriggers.map(t => (
               <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
                 <div>
                   <h3 className="text-base font-medium text-gray-900">{t.name}</h3>
@@ -213,7 +238,7 @@ const SchedulesPage = () => {
                 </div>
               </div>
             ))}
-            {eventTriggers.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No event triggers yet. Chain automation on job outcomes.</p>}
+            {shownEventTriggers.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No event triggers yet. Chain automation on job outcomes.</p>}
           </div>
         </Card>
       </section>
@@ -223,7 +248,7 @@ const SchedulesPage = () => {
         <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-3"><Webhook size={18} className="text-cyan-600" /> Webhook triggers <span className="text-sm font-normal text-gray-400">(inbound)</span></h2>
         <Card>
           <div className="divide-y divide-gray-100">
-            {webhookTriggers.map((t, i) => (
+            {shownWebhooks.map((t, i) => (
               <div key={i} className="p-4 flex items-center justify-between hover:bg-gray-50">
                 <div className="min-w-0">
                   <h3 className="text-base font-medium text-gray-900">{t.name} <span className="text-xs text-gray-400">({t.kind === 'workflow' ? 'workflow' : t.kind === 'execution_pack' ? 'execution pack (build on push)' : 'template'} · {t.service})</span></h3>
@@ -232,7 +257,7 @@ const SchedulesPage = () => {
                 <button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}${t.url}`)} className="p-2 rounded-full text-gray-400 hover:text-brand-600 hover:bg-brand-50 shrink-0" title="Copy URL"><Copy size={18} /></button>
               </div>
             ))}
-            {webhookTriggers.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No webhook triggers. Enable one on a workflow or job template to have a remote event launch it.</p>}
+            {shownWebhooks.length === 0 && <p className="p-6 text-gray-500 text-center text-sm">No webhook triggers. Enable one on a workflow or job template to have a remote event launch it.</p>}
           </div>
         </Card>
       </section>
@@ -249,8 +274,8 @@ const SchedulesPage = () => {
             <Select label={sched.targetType === 'workflow' ? 'Workflow' : 'Template'} value={sched.target} onChange={e => setSched({ ...sched, target: Number(e.target.value) })}>
               <option value={0}>Select…</option>
               {sched.targetType === 'workflow'
-                ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
-                : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+                ? orgWorkflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
+                : orgTemplates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
             </Select>
           </div>
           <Input label="RRule" className="font-mono text-sm" value={sched.rrule} onChange={e => setSched({ ...sched, rrule: e.target.value })} placeholder="FREQ=DAILY;INTERVAL=1" />
@@ -273,7 +298,7 @@ const SchedulesPage = () => {
             </Select>
             <Select label="For template (optional)" value={evt.source} onChange={e => setEvt({ ...evt, source: Number(e.target.value) })}>
               <option value={0}>Any template</option>
-              {templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+              {orgTemplates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -284,8 +309,8 @@ const SchedulesPage = () => {
             <Select label={evt.targetType === 'workflow' ? 'Workflow' : 'Template'} value={evt.target} onChange={e => setEvt({ ...evt, target: Number(e.target.value) })}>
               <option value={0}>Select…</option>
               {evt.targetType === 'workflow'
-                ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
-                : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+                ? orgWorkflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
+                : orgTemplates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
             </Select>
           </div>
           <div className="flex justify-end gap-2">

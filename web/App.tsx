@@ -20,7 +20,7 @@ import ActivityPage from './pages/ActivityPage';
 import OrganizationsPage from './pages/OrganizationsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
 import SettingsPage from './pages/SettingsPage';
-import { ProjectsLanding, InventoriesLanding, TemplatesLanding, WorkflowsLanding, CredentialsLanding } from './pages/landings';
+import { ProjectsLanding, InventoriesLanding, TemplatesLanding, WorkflowsLanding, CredentialsLanding, SchedulesLanding } from './pages/landings';
 import { ToastHost } from './components/ui/toast';
 import { getAuthToken, removeAuthToken } from './services/api';
 
@@ -64,7 +64,8 @@ const App = () => {
           <Route path="credentials/org/:orgId" element={<CredentialsPage />} />
           <Route path="tokens" element={<TokensPage />} />
           <Route path="execution-packs" element={<ExecutionPacksPage />} />
-          <Route path="schedules" element={<SchedulesPage />} />
+          <Route path="schedules" element={<SchedulesLanding />} />
+          <Route path="schedules/org/:orgId" element={<SchedulesPage />} />
 
           {/* RBAC Routes */}
           <Route path="organizations" element={<OrganizationsPage />} />
