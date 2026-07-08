@@ -42,7 +42,10 @@ const JobDetailPage = () => {
   // scroll to and flash it — tying the narration to the real output.
   const renderedLines = useMemo(() => logs.split('\n').map((line) => {
     const m = line.match(/^TASK \[(.+?)\]/);
-    return { task: m ? m[1].toLowerCase() : null, html: line ? Anser.ansiToHtml(line, { use_classes: false }) : '&nbsp;' };
+    // Escape HTML BEFORE converting ANSI — playbook stdout is untrusted (a
+    // debug msg / remote host output could carry <script>/<img onerror>), and
+    // the result is injected via dangerouslySetInnerHTML below.
+    return { task: m ? m[1].toLowerCase() : null, html: line ? Anser.ansiToHtml(Anser.escapeForHtml(line), { use_classes: false }) : '&nbsp;' };
   }), [logs]);
 
   const locateTask = useCallback((taskName: string) => {

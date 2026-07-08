@@ -32,6 +32,7 @@ const TemplatesPage = () => {
   const [launchLimit, setLaunchLimit] = useState('');
   const [launchAnswers, setLaunchAnswers] = useState<Record<string, string>>({});
   const [launchMsg, setLaunchMsg] = useState('');
+  const [formMsg, setFormMsg] = useState('');
 
   const blankQuestion = (): SurveyQuestion => ({ variable: '', question_name: '', type: 'text', required: false, default: '' });
   const updateQ = (i: number, patch: Partial<SurveyQuestion>) =>
@@ -70,6 +71,7 @@ const TemplatesPage = () => {
     setFormData({});
     setVarsText('');
     setSurvey([]);
+    setFormMsg('');
     setIsModalOpen(true);
   };
 
@@ -82,6 +84,7 @@ const TemplatesPage = () => {
         : ''
     );
     setSurvey(template.survey_spec?.spec || []);
+    setFormMsg('');
     setNewNotif({ name: '', notification_type: 'webhook', url: '' });
     if (template.organization_id) {
       api.getNotificationTemplates(template.organization_id).then(d => setNotifTargets(d || [])).catch(() => setNotifTargets([]));
@@ -109,12 +112,13 @@ const TemplatesPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormMsg('');
     let extra_vars: any = {};
     if (varsText.trim()) {
       try { extra_vars = JSON.parse(varsText); }
-      catch { alert('Variables must be valid JSON'); return; }
+      catch { setFormMsg('Variables must be valid JSON'); return; }
     }
-    if (!editingTemplate && !formData.organization_id) { alert('Select an organization'); return; }
+    if (!editingTemplate && !formData.organization_id) { setFormMsg('Select an organization'); return; }
     const payload = {
       ...formData,
       extra_vars,
@@ -129,8 +133,9 @@ const TemplatesPage = () => {
         setTemplates([...templates, newTemplate]);
       }
       setIsModalOpen(false);
-    } catch (err) {
-      console.error('Failed to save template', err);
+    } catch (err: any) {
+      // Surface the failure in the modal instead of failing silently.
+      setFormMsg(err?.message || 'Failed to save template');
     }
   };
 
@@ -178,11 +183,13 @@ const TemplatesPage = () => {
   };
 
   const handleDelete = async (id: number) => {
+    const t = templates.find(t => t.id === id);
+    if (!confirm(`Delete template "${t?.name ?? id}"? This cannot be undone.`)) return;
     try {
       await api.deleteTemplate(id);
       setTemplates(templates.filter(t => t.id !== id));
-    } catch (err) {
-      console.error('Failed to delete template', err);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to delete template');
     }
   };
 
@@ -352,17 +359,6 @@ const TemplatesPage = () => {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Inline Playbook (YAML)</label>
-            <p className="text-xs text-gray-500 mb-1">Paste a playbook to run directly — use this when you have no project / source control. If set, it overrides the Project and Playbook path above.</p>
-            <textarea
-              rows={8}
-              placeholder={'- hosts: all\n  gather_facts: false\n  tasks:\n    - name: Ping\n      ansible.builtin.ping:'}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2 font-mono text-sm"
-              value={formData.playbook_content || ''}
-              onChange={e => setFormData({ ...formData, playbook_content: e.target.value || undefined })}
-            />
-          </div>
-          <div>
             <label className="block text-sm font-medium text-gray-700">Default Variables (JSON)</label>
             <textarea
               rows={4}
@@ -525,6 +521,7 @@ const TemplatesPage = () => {
               </div>
             )}
           </div>
+          {formMsg && <p className="mt-4 text-sm text-red-600">{formMsg}</p>}
           <div className="mt-5 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button type="submit">Save Template</Button>
