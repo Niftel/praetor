@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { Template, Project, Inventory, Credential, PaginatedResponse, SurveyQuestion } from '../types';
 import Card from '../components/ui/Card';
+import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Plus, Edit2, Play, Trash2, Loader } from 'lucide-react';
@@ -271,116 +272,87 @@ const TemplatesPage = () => {
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Organization</label>
-            <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2 disabled:bg-gray-100"
-              value={formData.organization_id || ''}
-              disabled={!!editingTemplate}
-              onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
+          <Select
+            label="Organization"
+            value={formData.organization_id || ''}
+            disabled={!!editingTemplate}
+            onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
+          >
+            <option value="">Select organization…</option>
+            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </Select>
+          <Input
+            label="Name"
+            type="text"
+            required
+            value={formData.name || ''}
+            onChange={e => setFormData({ ...formData, name: e.target.value })}
+          />
+          <Input
+            label="Description"
+            type="text"
+            value={formData.description || ''}
+            onChange={e => setFormData({ ...formData, description: e.target.value })}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="Project"
+              value={formData.project_id || ''}
+              onChange={e => setFormData({ ...formData, project_id: Number(e.target.value) })}
             >
-              <option value="">Select organization…</option>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
-            <input
-              type="text"
-              required
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-              value={formData.name || ''}
-              onChange={e => setFormData({ ...formData, name: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Description</label>
-            <input
-              type="text"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-              value={formData.description || ''}
-              onChange={e => setFormData({ ...formData, description: e.target.value })}
-            />
+              <option value="">Select Project</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+            <Select
+              label="Inventory"
+              value={formData.inventory_id || ''}
+              onChange={e => setFormData({ ...formData, inventory_id: Number(e.target.value) })}
+            >
+              <option value="">Select Inventory</option>
+              {inventories.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Project</label>
-              <select
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-                value={formData.project_id || ''}
-                onChange={e => setFormData({ ...formData, project_id: Number(e.target.value) })}
-              >
-                <option value="">Select Project</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Inventory</label>
-              <select
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-                value={formData.inventory_id || ''}
-                onChange={e => setFormData({ ...formData, inventory_id: Number(e.target.value) })}
-              >
-                <option value="">Select Inventory</option>
-                {inventories.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Playbook</label>
-              <input
-                type="text"
-                placeholder="site.yml"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-                value={formData.playbook || ''}
-                onChange={e => setFormData({ ...formData, playbook: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Credential</label>
-              <select
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-                value={formData.credential_id || ''}
-                onChange={e => setFormData({ ...formData, credential_id: Number(e.target.value) })}
-              >
-                <option value="">Select Credential</option>
-                {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Execution Pack</label>
-            <p className="text-xs text-gray-500 mb-1">The self-contained Python+Ansible runtime this job runs in (pushed to the host). Default = the standard pack.</p>
-            <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-              value={formData.execution_pack_id || ''}
-              onChange={e => setFormData({ ...formData, execution_pack_id: e.target.value ? Number(e.target.value) : undefined })}
-            >
-              <option value="">Default</option>
-              {executionPacks.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Default Variables (JSON)</label>
-            <textarea
-              rows={4}
-              placeholder={'{\n  "key": "value"\n}'}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2 font-mono text-sm"
-              value={varsText}
-              onChange={e => setVarsText(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Limit (default host pattern)</label>
-            <input
+            <Input
+              label="Playbook"
               type="text"
-              placeholder="e.g. web* or host1:host2"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 border p-2"
-              value={formData.limit || ''}
-              onChange={e => setFormData({ ...formData, limit: e.target.value })}
+              placeholder="site.yml"
+              value={formData.playbook || ''}
+              onChange={e => setFormData({ ...formData, playbook: e.target.value })}
             />
+            <Select
+              label="Credential"
+              value={formData.credential_id || ''}
+              onChange={e => setFormData({ ...formData, credential_id: Number(e.target.value) })}
+            >
+              <option value="">Select Credential</option>
+              {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
           </div>
+          <Select
+            label="Execution Pack"
+            hint="The self-contained Python+Ansible runtime this job runs in (pushed to the host). Default = the standard pack."
+            value={formData.execution_pack_id || ''}
+            onChange={e => setFormData({ ...formData, execution_pack_id: e.target.value ? Number(e.target.value) : undefined })}
+          >
+            <option value="">Default</option>
+            {executionPacks.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+          <Textarea
+            label="Default Variables (JSON)"
+            rows={4}
+            placeholder={'{\n  "key": "value"\n}'}
+            className="font-mono text-sm"
+            value={varsText}
+            onChange={e => setVarsText(e.target.value)}
+          />
+          <Input
+            label="Limit (default host pattern)"
+            type="text"
+            placeholder="e.g. web* or host1:host2"
+            value={formData.limit || ''}
+            onChange={e => setFormData({ ...formData, limit: e.target.value })}
+          />
           <div className="border-t pt-3">
             <p className="text-sm font-medium text-gray-700 mb-2">Prompt on launch</p>
             <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -543,54 +515,35 @@ const TemplatesPage = () => {
             {!launchTpl.survey_enabled && !launchTpl.ask_variables_on_launch && !launchTpl.ask_limit_on_launch && (
               <p className="text-sm text-gray-500">This template runs with its saved configuration.</p>
             )}
-            {launchTpl.survey_enabled && (launchTpl.survey_spec?.spec || []).map((q, i) => (
-              <div key={i}>
-                <label className="block text-sm font-medium text-gray-700">
-                  {q.question_name || q.variable}{q.required && <span className="text-red-500"> *</span>}
-                </label>
-                {q.type === 'textarea' ? (
-                  <textarea rows={3} className="mt-1 block w-full rounded-md border-gray-300 border p-2 text-sm"
-                    value={launchAnswers[q.variable] || ''}
-                    onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
-                ) : q.type === 'multiplechoice' ? (
-                  <select className="mt-1 block w-full rounded-md border-gray-300 border p-2 text-sm"
-                    value={launchAnswers[q.variable] || ''}
-                    onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })}>
-                    <option value="">Select…</option>
-                    {(q.choices || '').split('\n').map(c => c.trim()).filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                ) : (
-                  <input
-                    type={q.type === 'password' ? 'password' : q.type === 'integer' ? 'number' : 'text'}
-                    className="mt-1 block w-full rounded-md border-gray-300 border p-2 text-sm"
-                    value={launchAnswers[q.variable] || ''}
-                    onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
-                )}
-              </div>
-            ))}
+            {launchTpl.survey_enabled && (launchTpl.survey_spec?.spec || []).map((q, i) => {
+              const label = q.question_name || q.variable;
+              if (q.type === 'textarea') return (
+                <Textarea key={i} label={label} required={q.required} rows={3}
+                  value={launchAnswers[q.variable] || ''}
+                  onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
+              );
+              if (q.type === 'multiplechoice') return (
+                <Select key={i} label={label} required={q.required}
+                  value={launchAnswers[q.variable] || ''}
+                  onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })}>
+                  <option value="">Select…</option>
+                  {(q.choices || '').split('\n').map(c => c.trim()).filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
+                </Select>
+              );
+              return (
+                <Input key={i} label={label} required={q.required}
+                  type={q.type === 'password' ? 'password' : q.type === 'integer' ? 'number' : 'text'}
+                  value={launchAnswers[q.variable] || ''}
+                  onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
+              );
+            })}
             {!launchTpl.survey_enabled && launchTpl.ask_variables_on_launch && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Variables (JSON)</label>
-                <textarea
-                  rows={4}
-                  placeholder={'{\n  "key": "value"\n}'}
-                  className="mt-1 block w-full rounded-md border-gray-300 border p-2 font-mono text-sm"
-                  value={launchVars}
-                  onChange={e => setLaunchVars(e.target.value)}
-                />
-              </div>
+              <Textarea label="Variables (JSON)" rows={4} placeholder={'{\n  "key": "value"\n}'} className="font-mono text-sm"
+                value={launchVars} onChange={e => setLaunchVars(e.target.value)} />
             )}
             {launchTpl.ask_limit_on_launch && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Limit</label>
-                <input
-                  type="text"
-                  placeholder="host pattern"
-                  className="mt-1 block w-full rounded-md border-gray-300 border p-2"
-                  value={launchLimit}
-                  onChange={e => setLaunchLimit(e.target.value)}
-                />
-              </div>
+              <Input label="Limit" type="text" placeholder="host pattern"
+                value={launchLimit} onChange={e => setLaunchLimit(e.target.value)} />
             )}
             {launchMsg && <p className="text-sm text-red-600">{launchMsg}</p>}
             <div className="mt-5 flex justify-end gap-3">
