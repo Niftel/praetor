@@ -36,3 +36,8 @@ data:
   {{- if .Values.ldap.enabled }}
   PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
   {{- end }}
+  {{- if .Values.bootstrapAdmin.enabled }}
+  # Break-glass local superuser (the migrator reads these + the password secret).
+  PRAETOR_BOOTSTRAP_ADMIN_USERNAME: {{ .Values.bootstrapAdmin.username | quote }}
+  PRAETOR_BOOTSTRAP_ADMIN_EMAIL: {{ .Values.bootstrapAdmin.email | quote }}
+  {{- end }}
