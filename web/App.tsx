@@ -20,6 +20,7 @@ import ActivityPage from './pages/ActivityPage';
 import OrganizationsPage from './pages/OrganizationsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
 import SettingsPage from './pages/SettingsPage';
+import { ToastHost } from './components/ui/toast';
 import { getAuthToken, removeAuthToken } from './services/api';
 
 const App = () => {
@@ -34,6 +35,7 @@ const App = () => {
 
   return (
     <BrowserRouter>
+      <ToastHost />
       <Routes>
         <Route
           path="/login"
