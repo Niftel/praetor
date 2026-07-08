@@ -196,9 +196,6 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Route("/ldap", func(r chi.Router) {
 			r.Get("/config", ldapHandler.GetConfig)
 			r.Post("/test-connection", ldapHandler.TestConnection)
-			r.Post("/sync", ldapHandler.TriggerSync)
-			r.Get("/sync/status", ldapHandler.GetSyncStatus)
-			r.Get("/sync/{id}", ldapHandler.GetSyncDetails)
 		})
 
 		// =======================================================================
