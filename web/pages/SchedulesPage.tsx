@@ -5,6 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import { Input, Select } from '../components/ui/Input';
 import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy, Pencil } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 
@@ -238,32 +239,20 @@ const SchedulesPage = () => {
       {/* Create schedule modal */}
       <Modal isOpen={showSchedule} onClose={() => setShowSchedule(false)} title="New Schedule">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input className="w-full border border-gray-300 rounded-md p-2" value={sched.name} onChange={e => setSched({ ...sched, name: e.target.value })} placeholder="Nightly deploy" />
-          </div>
+          <Input label="Name" value={sched.name} onChange={e => setSched({ ...sched, name: e.target.value })} placeholder="Nightly deploy" />
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Launch</label>
-              <select className="w-full border border-gray-300 rounded-md p-2" value={sched.targetType} onChange={e => setSched({ ...sched, targetType: e.target.value as TargetType, target: 0 })}>
-                <option value="job">Job template</option>
-                <option value="workflow">Workflow</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{sched.targetType === 'workflow' ? 'Workflow' : 'Template'}</label>
-              <select className="w-full border border-gray-300 rounded-md p-2" value={sched.target} onChange={e => setSched({ ...sched, target: Number(e.target.value) })}>
-                <option value={0}>Select…</option>
-                {sched.targetType === 'workflow'
-                  ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
-                  : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
-              </select>
-            </div>
+            <Select label="Launch" value={sched.targetType} onChange={e => setSched({ ...sched, targetType: e.target.value as TargetType, target: 0 })}>
+              <option value="job">Job template</option>
+              <option value="workflow">Workflow</option>
+            </Select>
+            <Select label={sched.targetType === 'workflow' ? 'Workflow' : 'Template'} value={sched.target} onChange={e => setSched({ ...sched, target: Number(e.target.value) })}>
+              <option value={0}>Select…</option>
+              {sched.targetType === 'workflow'
+                ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
+                : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+            </Select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">RRule</label>
-            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-sm" value={sched.rrule} onChange={e => setSched({ ...sched, rrule: e.target.value })} placeholder="FREQ=DAILY;INTERVAL=1" />
-          </div>
+          <Input label="RRule" className="font-mono text-sm" value={sched.rrule} onChange={e => setSched({ ...sched, rrule: e.target.value })} placeholder="FREQ=DAILY;INTERVAL=1" />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowSchedule(false)}>Cancel</Button>
             <Button onClick={createSchedule}>Create</Button>
@@ -274,44 +263,29 @@ const SchedulesPage = () => {
       {/* Create event trigger modal */}
       <Modal isOpen={showEvent} onClose={() => setShowEvent(false)} title={editingEvtId ? 'Edit Event Trigger' : 'New Event Trigger'}>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input className="w-full border border-gray-300 rounded-md p-2" value={evt.name} onChange={e => setEvt({ ...evt, name: e.target.value })} placeholder="On deploy failure, run rollback" />
+          <Input label="Name" value={evt.name} onChange={e => setEvt({ ...evt, name: e.target.value })} placeholder="On deploy failure, run rollback" />
+          <div className="grid grid-cols-2 gap-3">
+            <Select label="When" value={evt.event_type} onChange={e => setEvt({ ...evt, event_type: e.target.value })}>
+              <option value="job_finished">A job finishes</option>
+              <option value="job_succeeded">A job succeeds</option>
+              <option value="job_failed">A job fails</option>
+            </Select>
+            <Select label="For template (optional)" value={evt.source} onChange={e => setEvt({ ...evt, source: Number(e.target.value) })}>
+              <option value={0}>Any template</option>
+              {templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">When</label>
-              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.event_type} onChange={e => setEvt({ ...evt, event_type: e.target.value })}>
-                <option value="job_finished">A job finishes</option>
-                <option value="job_succeeded">A job succeeds</option>
-                <option value="job_failed">A job fails</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">For template (optional)</label>
-              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.source} onChange={e => setEvt({ ...evt, source: Number(e.target.value) })}>
-                <option value={0}>Any template</option>
-                {templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Then launch</label>
-              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.targetType} onChange={e => setEvt({ ...evt, targetType: e.target.value as TargetType, target: 0 })}>
-                <option value="workflow">Workflow</option>
-                <option value="job">Job template</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{evt.targetType === 'workflow' ? 'Workflow' : 'Template'}</label>
-              <select className="w-full border border-gray-300 rounded-md p-2" value={evt.target} onChange={e => setEvt({ ...evt, target: Number(e.target.value) })}>
-                <option value={0}>Select…</option>
-                {evt.targetType === 'workflow'
-                  ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
-                  : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
-              </select>
-            </div>
+            <Select label="Then launch" value={evt.targetType} onChange={e => setEvt({ ...evt, targetType: e.target.value as TargetType, target: 0 })}>
+              <option value="workflow">Workflow</option>
+              <option value="job">Job template</option>
+            </Select>
+            <Select label={evt.targetType === 'workflow' ? 'Workflow' : 'Template'} value={evt.target} onChange={e => setEvt({ ...evt, target: Number(e.target.value) })}>
+              <option value={0}>Select…</option>
+              {evt.targetType === 'workflow'
+                ? workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)
+                : templates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+            </Select>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowEvent(false)}>Cancel</Button>
