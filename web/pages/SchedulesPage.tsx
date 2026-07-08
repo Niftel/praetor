@@ -6,6 +6,7 @@ import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy, Pencil } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 type TargetType = 'job' | 'workflow';
 
@@ -80,10 +81,10 @@ const SchedulesPage = () => {
       setShowSchedule(false);
       setSched({ name: '', targetType: 'job', target: 0, rrule: 'FREQ=DAILY;INTERVAL=1' });
       fetchData();
-    } catch (err) { console.error(err); alert('Failed to create schedule'); }
+    } catch (err) { console.error(err); toast.error('Failed to create schedule'); }
   };
   const deleteSchedule = async (id: number) => {
-    if (!confirm('Delete this schedule?')) return;
+    if (!(await confirmDialog('Delete this schedule?'))) return;
     try { await api.deleteSchedule(id); fetchData(); } catch (err) { console.error(err); }
   };
 
@@ -123,7 +124,7 @@ const SchedulesPage = () => {
       setShowEvent(false); setEditingEvtId(null);
       setEvt({ name: '', event_type: 'job_finished', source: 0, targetType: 'workflow', target: 0 });
       fetchData();
-    } catch (err) { console.error(err); alert(`Failed to ${editingEvtId ? 'update' : 'create'} event trigger`); }
+    } catch (err) { console.error(err); toast.error(`Failed to ${editingEvtId ? 'update' : 'create'} event trigger`); }
   };
   const toggleEventTrigger = async (t: EventTrigger) => {
     const body: any = { name: t.name, event_type: t.event_type, organization_id: t.organization_id, enabled: !t.enabled };
@@ -136,7 +137,7 @@ const SchedulesPage = () => {
     } catch (err) { console.error(err); }
   };
   const deleteEventTrigger = async (id: number) => {
-    if (!confirm('Delete this event trigger?')) return;
+    if (!(await confirmDialog('Delete this event trigger?'))) return;
     try { await api.deleteEventTrigger(id); fetchData(); } catch (err) { console.error(err); }
   };
   const eventTriggerTarget = (t: EventTrigger) =>

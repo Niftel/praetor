@@ -6,6 +6,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import { Play, Terminal, ChevronRight, X } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 const JobsPage = () => {
   const navigate = useNavigate();
@@ -40,7 +41,7 @@ const JobsPage = () => {
       loadData();
     } catch (error) {
       console.error('Launch failed', error);
-      alert('Failed to launch job');
+      toast.error('Failed to launch job');
     }
   };
 
@@ -49,12 +50,12 @@ const JobsPage = () => {
   const isActive = (s: string) => ['pending', 'queued', 'running', 'waiting'].includes(s);
   const handleCancel = async (e: React.MouseEvent, job: Job) => {
     e.stopPropagation();
-    if (!confirm(`Cancel job "${job.name}"?`)) return;
+    if (!(await confirmDialog(`Cancel job "${job.name}"?`))) return;
     try {
       await api.cancelJob(job.id);
       loadData();
     } catch {
-      alert('Failed to cancel job');
+      toast.error('Failed to cancel job');
     }
   };
 

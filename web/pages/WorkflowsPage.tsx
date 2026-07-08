@@ -8,6 +8,7 @@ import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import WorkflowDag from '../components/WorkflowDag';
 import { Plus, Trash2, Rocket, Workflow as WorkflowIcon, RefreshCw, Eye, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 const EDGE_TYPES: WorkflowEdgeType[] = ['success', 'failure', 'always'];
 
@@ -108,7 +109,7 @@ const WorkflowsPage = () => {
       setAllowSim(!!full.allow_simultaneous);
       setWhKey(''); // never returned; blank keeps the existing secret
       setBuilderOpen(true);
-    } catch (e: any) { alert(e.message || 'Failed to load workflow for editing.'); }
+    } catch (e: any) { toast.error(e.message || 'Failed to load workflow for editing.'); }
   };
   const addNode = () => {
     const key = `n${nodeSeq}`;
@@ -168,14 +169,14 @@ const WorkflowsPage = () => {
     try { setViewWf({ ...wf, ...(await api.getWorkflow(wf.id)) }); } catch { /* ignore */ }
   };
   const onDelete = async (wf: Workflow) => {
-    if (!confirm(`Delete workflow "${wf.name}"?`)) return;
+    if (!(await confirmDialog(`Delete workflow "${wf.name}"?`))) return;
     try { await api.deleteWorkflow(wf.id); setWorkflows(ws => ws.filter(w => w.id !== wf.id)); } catch { /* ignore */ }
   };
   const onLaunch = async (wf: Workflow) => {
     try {
       const res = await api.launchWorkflow(wf.id);
       navigate(`/workflows/runs/${res.workflow_job_id}`); // go straight to the persistent run page
-    } catch (e: any) { alert(e.message || 'Launch failed.'); }
+    } catch (e: any) { toast.error(e.message || 'Launch failed.'); }
   };
 
   return (

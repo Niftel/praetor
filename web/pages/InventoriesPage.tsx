@@ -7,6 +7,7 @@ import Modal from '../components/ui/Modal';
 import ResourceAccess from '../components/ResourceAccess';
 import { splitConnection, mergeConnection, emptyConnection, HostConnection } from '../lib/hostConnection';
 import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock, Plug, Save, ChevronDown, ChevronRight } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 const InventoriesPage = () => {
   const [inventories, setInventories] = useState<Inventory[]>([]);
@@ -159,7 +160,7 @@ const InventoriesPage = () => {
       setHosts(prev => prev.map(h => (h.id === host.id ? updated : h)));
     } catch (err) {
       console.error('Failed to save host connection', err);
-      alert('Failed to save connection. You need admin on this inventory.');
+      toast.error('Failed to save connection. You need admin on this inventory.');
     } finally {
       setSavingHost(false);
     }
@@ -179,13 +180,13 @@ const InventoriesPage = () => {
       fetchInventories();
     } catch (err) {
       console.error('Failed to create inventory', err);
-      alert('Failed to create inventory');
+      toast.error('Failed to create inventory');
     }
   };
 
   // Delete Inventory
   const handleDeleteInventory = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this inventory?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this inventory?'))) return;
     try {
       await api.deleteInventory(id);
       if (selectedInventoryId === id) {
@@ -214,7 +215,7 @@ const InventoriesPage = () => {
       setHosts(hostsData || []);
     } catch (err) {
       console.error('Failed to create host', err);
-      alert('Failed to create host');
+      toast.error('Failed to create host');
     }
   };
 
@@ -223,7 +224,7 @@ const InventoriesPage = () => {
     if (!selectedInventoryId || !importContent.trim()) return;
     try {
       const result = await api.importInventory(selectedInventoryId, importContent, importFormat);
-      alert(`Import complete! Created ${result.hosts_created} hosts, ${result.groups_created} groups.${result.errors?.length > 0 ? `\nErrors: ${result.errors.join(', ')}` : ''}`);
+      toast.success(`Import complete! Created ${result.hosts_created} hosts, ${result.groups_created} groups.${result.errors?.length > 0 ? `\nErrors: ${result.errors.join(', ')}` : ''}`);
       setShowImportModal(false);
       setImportContent('');
       // Refresh hosts and groups
@@ -235,13 +236,13 @@ const InventoriesPage = () => {
       setGroups(groupsData || []);
     } catch (err) {
       console.error('Failed to import inventory', err);
-      alert('Failed to import inventory');
+      toast.error('Failed to import inventory');
     }
   };
 
   // Delete Host
   const handleDeleteHost = async (hostId: number) => {
-    if (!confirm('Are you sure you want to delete this host?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this host?'))) return;
     try {
       await api.deleteHost(hostId);
       if (selectedHostId === hostId) {
@@ -267,7 +268,7 @@ const InventoriesPage = () => {
       setGroups(groupsData || []);
     } catch (err) {
       console.error('Failed to create group', err);
-      alert('Failed to create group');
+      toast.error('Failed to create group');
     }
   };
 
@@ -284,7 +285,7 @@ const InventoriesPage = () => {
       setSelectedHostId(hostId);
     } catch (err) {
       console.error('Failed to set runner host', err);
-      alert('Failed to set runner host');
+      toast.error('Failed to set runner host');
     } finally {
       setSettingRunner(false);
     }
