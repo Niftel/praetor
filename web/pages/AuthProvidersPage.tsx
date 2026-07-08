@@ -103,7 +103,7 @@ const AuthProvidersPage: React.FC = () => {
             <div className="flex items-center justify-between">
                 <div>
                     <Link to="/settings" className="text-sm text-gray-500 hover:text-brand-600">← Settings</Link>
-                    <h1 className="text-2xl font-bold text-gray-900 mt-1">Authentication Providers</h1>
+                    <h1 className="text-2xl font-bold text-gray-900 mt-1">Auth Settings</h1>
                     <p className="text-gray-600 mt-1">Configure LDAP, SAML, GitHub, and OAuth2 authentication</p>
                 </div>
             </div>
