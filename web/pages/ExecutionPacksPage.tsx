@@ -86,7 +86,7 @@ const ExecutionPacksPage = () => {
     } catch (e) { toast.error(`Failed to ${editingId ? 'update' : 'create'} pack (name may already exist).`); }
   };
   const rebuild = async (id: number) => {
-    try { await api.rebuildExecutionPack(id); load(); } catch { toast.error('Nothing to rebuild (pack has no spec or git source).'); }
+    try { await api.rebuildExecutionPack(id); load(); } catch (e: any) { toast.error(e?.message || 'Rebuild failed'); }
   };
   const remove = async (id: number) => {
     if (!(await confirmDialog('Delete this Execution Pack registration? (does not delete the built artifact)'))) return;
@@ -150,8 +150,12 @@ const ExecutionPacksPage = () => {
                 <td className="px-6 py-4 text-sm text-gray-500">{p.description || '—'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right">
                   <div className="inline-flex items-center gap-1">
-                    <button onClick={() => rebuild(p.id)} disabled={p.status === 'building' || p.status === 'pending'}
-                      className="text-gray-400 hover:text-brand-600 disabled:opacity-30 p-1" title="Rebuild now"><RefreshCw size={16} /></button>
+                    {/* Rebuild only applies to packs Praetor builds (a spec or a git source);
+                        pre-built artifacts have nothing to rebuild. */}
+                    {(p.spec || p.scm_url) && (
+                      <button onClick={() => rebuild(p.id)} disabled={p.status === 'building' || p.status === 'pending'}
+                        className="text-gray-400 hover:text-brand-600 disabled:opacity-30 p-1" title="Rebuild now"><RefreshCw size={16} /></button>
+                    )}
                     <button onClick={() => openEdit(p)} className="text-gray-400 hover:text-brand-600 p-1" title="Edit"><Pencil size={16} /></button>
                     <button onClick={() => remove(p.id)} className="text-gray-400 hover:text-red-600 p-1" title="Delete"><Trash2 size={16} /></button>
                   </div>
