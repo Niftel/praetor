@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { Job, Template } from '../types';
 import Card from '../components/ui/Card';
+import { Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import { Play, Terminal, ChevronRight, X } from 'lucide-react';
@@ -74,8 +75,9 @@ const JobsPage = () => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Jobs</h1>
         <div className="flex gap-2 w-full sm:w-auto">
-          <select
-            className="border-gray-300 rounded-md shadow-sm focus:ring-brand-500 focus:border-brand-500 sm:text-sm px-3 py-2 border w-full sm:w-64"
+          <Select
+            aria-label="Launch template"
+            wrapperClassName="w-full sm:w-64"
             value={selectedTemplate}
             onChange={(e) => setSelectedTemplate(e.target.value)}
           >
@@ -83,7 +85,7 @@ const JobsPage = () => {
             {templates.map((t: Template) => (
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
-          </select>
+          </Select>
           <Button onClick={handleLaunch} disabled={!selectedTemplate} icon={<Play size={16} />}>
             Launch
           </Button>

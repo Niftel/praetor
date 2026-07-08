@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { Credential, CredentialType } from '../types';
 import Card from '../components/ui/Card';
+import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -105,33 +106,25 @@ const CredentialsPage = () => {
       // PEM key into a single-line password box is unusable. Keys are pasted
       // visibly (as in AWX), so a secret textarea still renders as a textarea.
       const isTextarea = field.type === 'textarea' || field.multiline;
-      return (
-        <div key={field.id}>
-          <label className="block text-sm font-medium text-gray-700">{field.label || field.id}</label>
-          {isTextarea ? (
-            <textarea
-              rows={6}
-              placeholder={field.secret ? '-----BEGIN OPENSSH PRIVATE KEY-----\n...' : ''}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500 font-mono text-xs"
-              value={formFields[field.id] || ''}
-              onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-            />
-          ) : field.secret ? (
-            <input
-              type="password"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={formFields[field.id] || ''}
-              onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-            />
-          ) : (
-            <input
-              type="text"
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={formFields[field.id] || ''}
-              onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-            />
-          )}
-        </div>
+      const label = field.label || field.id;
+      return isTextarea ? (
+        <Textarea
+          key={field.id}
+          label={label}
+          rows={6}
+          placeholder={field.secret ? '-----BEGIN OPENSSH PRIVATE KEY-----\n...' : ''}
+          className="font-mono text-xs"
+          value={formFields[field.id] || ''}
+          onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
+        />
+      ) : (
+        <Input
+          key={field.id}
+          label={label}
+          type={field.secret ? 'password' : 'text'}
+          value={formFields[field.id] || ''}
+          onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
+        />
       );
     });
   };
@@ -181,42 +174,33 @@ const CredentialsPage = () => {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="New Credential">
         <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Organization</label>
-            <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={orgId}
-              onChange={e => setOrgId(Number(e.target.value))}
-            >
-              <option value="">Select organization…</option>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
-            <input
-              type="text"
-              required
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={newCred.name || ''}
-              onChange={e => setNewCred({ ...newCred, name: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Type</label>
-            <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={selectedTypeId || ''}
-              onChange={e => {
-                setSelectedTypeId(Number(e.target.value));
-                setFormFields({}); // Reset fields when type changes
-              }}
-            >
-              {credentialTypes.map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </div>
+          <Select
+            label="Organization"
+            value={orgId}
+            onChange={e => setOrgId(Number(e.target.value))}
+          >
+            <option value="">Select organization…</option>
+            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </Select>
+          <Input
+            label="Name"
+            type="text"
+            required
+            value={newCred.name || ''}
+            onChange={e => setNewCred({ ...newCred, name: e.target.value })}
+          />
+          <Select
+            label="Type"
+            value={selectedTypeId || ''}
+            onChange={e => {
+              setSelectedTypeId(Number(e.target.value));
+              setFormFields({}); // Reset fields when type changes
+            }}
+          >
+            {credentialTypes.map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </Select>
 
           <div className="pt-2 border-t border-gray-100 space-y-4">
             {renderFields()}

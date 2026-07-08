@@ -3,7 +3,8 @@ import { api } from '../services/api';
 import { Project } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import { RefreshCw, GitBranch, Plus, Trash2, Loader } from 'lucide-react';
+import { Input } from '../components/ui/Input';
+import { RefreshCw, Plus, Trash2, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 
 const ProjectsPage = () => {
@@ -73,29 +74,20 @@ const ProjectsPage = () => {
 
       <Card title="Add New Project" className="mb-6">
         <form onSubmit={handleAdd} className="flex flex-col md:flex-row gap-4 items-end">
-          <div className="flex-1 w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input
-              className="w-full rounded-md border border-gray-300 p-2 focus:ring-brand-500 focus:border-brand-500"
-              placeholder="e.g. Core Infrastructure"
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-            />
-          </div>
-          <div className="flex-[2] w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-1">SCM URL</label>
-            <div className="relative rounded-md shadow-sm">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <GitBranch className="h-4 w-4 text-gray-400" />
-              </div>
-              <input
-                className="w-full rounded-md border border-gray-300 pl-10 p-2 focus:ring-brand-500 focus:border-brand-500"
-                placeholder="https://github.com/..."
-                value={newUrl}
-                onChange={e => setNewUrl(e.target.value)}
-              />
-            </div>
-          </div>
+          <Input
+            wrapperClassName="flex-1 w-full"
+            label="Name"
+            placeholder="e.g. Core Infrastructure"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+          />
+          <Input
+            wrapperClassName="flex-[2] w-full"
+            label="SCM URL"
+            placeholder="https://github.com/..."
+            value={newUrl}
+            onChange={e => setNewUrl(e.target.value)}
+          />
           <Button type="submit" icon={<Plus size={16} />}>Add</Button>
         </form>
       </Card>

@@ -5,6 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import { Input, Textarea, Select } from '../components/ui/Input';
 import ResourceAccess from '../components/ResourceAccess';
 import { Building2, Users, ShieldCheck, UserPlus, Trash2, Loader, Eye, Key, Package, Plus } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
@@ -374,24 +375,18 @@ const OrganizationsPage = () => {
             {/* Create Organization Modal */}
             <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Create Organization">
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                        <input
-                            type="text"
-                            className="w-full border border-gray-300 rounded-md p-2"
-                            value={formData.name}
-                            onChange={e => setFormData({ ...formData, name: e.target.value })}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                        <textarea
-                            className="w-full border border-gray-300 rounded-md p-2"
-                            rows={3}
-                            value={formData.description}
-                            onChange={e => setFormData({ ...formData, description: e.target.value })}
-                        />
-                    </div>
+                    <Input
+                        label="Name"
+                        type="text"
+                        value={formData.name}
+                        onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    />
+                    <Textarea
+                        label="Description"
+                        rows={3}
+                        value={formData.description}
+                        onChange={e => setFormData({ ...formData, description: e.target.value })}
+                    />
                     <div className="flex justify-end gap-2">
                         <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
                         <Button onClick={handleCreate}>Create</Button>
@@ -402,19 +397,16 @@ const OrganizationsPage = () => {
             {/* Add Member Modal */}
             <Modal isOpen={showAddMemberModal} onClose={() => setShowAddMemberModal(false)} title="Add Member">
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Select User</label>
-                        <select
-                            className="w-full border border-gray-300 rounded-md p-2"
-                            value={selectedUserId}
-                            onChange={e => setSelectedUserId(Number(e.target.value))}
-                        >
-                            <option value={0}>-- Select a user --</option>
-                            {allUsers.filter(u => !orgMembers.find(m => m.id === u.id)).map(user => (
-                                <option key={user.id} value={user.id}>{user.username}</option>
-                            ))}
-                        </select>
-                    </div>
+                    <Select
+                        label="Select User"
+                        value={selectedUserId}
+                        onChange={e => setSelectedUserId(Number(e.target.value))}
+                    >
+                        <option value={0}>-- Select a user --</option>
+                        {allUsers.filter(u => !orgMembers.find(m => m.id === u.id)).map(user => (
+                            <option key={user.id} value={user.id}>{user.username}</option>
+                        ))}
+                    </Select>
                     <div className="flex justify-end gap-2">
                         <Button variant="secondary" onClick={() => setShowAddMemberModal(false)}>Cancel</Button>
                         <Button onClick={handleAddMember}>Add</Button>
@@ -425,19 +417,16 @@ const OrganizationsPage = () => {
             {/* Add Admin Modal */}
             <Modal isOpen={showAddAdminModal} onClose={() => setShowAddAdminModal(false)} title="Add Administrator">
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Select User</label>
-                        <select
-                            className="w-full border border-gray-300 rounded-md p-2"
-                            value={selectedUserId}
-                            onChange={e => setSelectedUserId(Number(e.target.value))}
-                        >
-                            <option value={0}>-- Select a user --</option>
-                            {allUsers.filter(u => !orgAdmins.find(a => a.id === u.id)).map(user => (
-                                <option key={user.id} value={user.id}>{user.username}</option>
-                            ))}
-                        </select>
-                    </div>
+                    <Select
+                        label="Select User"
+                        value={selectedUserId}
+                        onChange={e => setSelectedUserId(Number(e.target.value))}
+                    >
+                        <option value={0}>-- Select a user --</option>
+                        {allUsers.filter(u => !orgAdmins.find(a => a.id === u.id)).map(user => (
+                            <option key={user.id} value={user.id}>{user.username}</option>
+                        ))}
+                    </Select>
                     <div className="flex justify-end gap-2">
                         <Button variant="secondary" onClick={() => setShowAddAdminModal(false)}>Cancel</Button>
                         <Button onClick={handleAddAdmin}>Add</Button>
@@ -449,9 +438,8 @@ const OrganizationsPage = () => {
             <Modal isOpen={showAddGalaxyModal} onClose={() => setShowAddGalaxyModal(false)} title="Attach Galaxy Credential">
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Galaxy / Automation Hub Credential</label>
-                        <select
-                            className="w-full border border-gray-300 rounded-md p-2"
+                        <Select
+                            label="Galaxy / Automation Hub Credential"
                             value={selectedGalaxyCredId}
                             onChange={e => setSelectedGalaxyCredId(Number(e.target.value))}
                         >
@@ -459,7 +447,7 @@ const OrganizationsPage = () => {
                             {availableGalaxyCreds().map(c => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
-                        </select>
+                        </Select>
                         {availableGalaxyCreds().length === 0 && (
                             <p className="text-xs text-gray-500 mt-2">
                                 No unattached Galaxy credentials in this organization. Create one on the Credentials page using the
