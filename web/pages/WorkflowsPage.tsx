@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Workflow, WorkflowNode, WorkflowEdge, WorkflowNodeType, WorkflowEdgeType, WorkflowRunSummary } from '../types';
 import Card from '../components/ui/Card';
@@ -8,7 +8,7 @@ import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import WorkflowDag from '../components/WorkflowDag';
-import { Plus, Trash2, Rocket, Workflow as WorkflowIcon, RefreshCw, Eye, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
+import { Plus, Trash2, Rocket, Workflow as WorkflowIcon, RefreshCw, Eye, ChevronDown, ChevronRight, Pencil, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 
 const EDGE_TYPES: WorkflowEdgeType[] = ['success', 'failure', 'always'];
@@ -22,17 +22,18 @@ const statusVariant = (s: string): 'success' | 'error' | 'info' | 'neutral' => {
 
 const WorkflowsPage = () => {
   const navigate = useNavigate();
+  const { orgId: orgIdStr } = useParams();
+  const orgId = Number(orgIdStr);
+  const [orgName, setOrgName] = useState('');
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
-  const [orgs, setOrgs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Builder state
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState('');
-  const [orgId, setOrgId] = useState<number | ''>('');
   const [nodes, setNodes] = useState<WorkflowNode[]>([]);
   const [edges, setEdges] = useState<WorkflowEdge[]>([]);
   const [nodeSeq, setNodeSeq] = useState(1);
@@ -64,7 +65,6 @@ const WorkflowsPage = () => {
     const t = templates.find(t => t.id === id);
     return t ? t.name : (id ? `template ${id}` : 'no template');
   };
-  const orgName = (id: number) => orgs.find(o => o.id === id)?.name || id;
 
   const load = () => {
     setLoading(true);
@@ -74,18 +74,19 @@ const WorkflowsPage = () => {
       api.getTemplates().catch(() => ({})),
       api.getOrganizations().catch(() => ({})),
     ]).then(([wf, rs, tpls, o]) => {
-      setWorkflows(wf || []);
+      setWorkflows(unwrap<Workflow>(wf).filter(w => (w as any).organization_id === orgId));
       setRuns(rs || []);
       setTemplates(unwrap(tpls));
-      setOrgs(unwrap(o));
+      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
     }).finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [orgId]);
 
   // Builder helpers
   const openBuilder = () => {
     setEditingId(null);
-    setName(''); setOrgId(orgs[0]?.id ?? ''); setNodes([]); setEdges([]); setNodeSeq(1); setError('');
+    setName(''); setNodes([]); setEdges([]); setNodeSeq(1); setError('');
     setWhEnabled(false); setWhService('generic'); setWhKey(''); setAllowSim(false);
     setBuilderOpen(true);
   };
@@ -95,7 +96,6 @@ const WorkflowsPage = () => {
       const full = await api.getWorkflow(wf.id);
       setEditingId(wf.id);
       setName(full.name ?? wf.name);
-      setOrgId(full.organization_id ?? wf.organization_id);
       const ns: WorkflowNode[] = (full.nodes || []).map((n: any) => ({
         node_key: n.node_key, node_type: n.node_type, name: n.name || '',
         job_template_id: n.job_template_id ?? null, webhook_url: n.webhook_url || '', webhook_body: n.webhook_body || '',
@@ -132,7 +132,6 @@ const WorkflowsPage = () => {
   const save = async () => {
     setError('');
     if (!name.trim()) return setError('Name is required.');
-    if (orgId === '') return setError('Organization is required.');
     if (nodes.length === 0) return setError('Add at least one node.');
     for (const n of nodes) {
       if (!n.name.trim()) return setError('Every node needs a name.');
@@ -184,8 +183,11 @@ const WorkflowsPage = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><WorkflowIcon size={24} /> Workflows</h1>
-          <p className="text-sm text-gray-500 mt-1">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps — call out to a URL, or pause until a remote event. Trigger whole workflows from inbound webhooks.</p>
+          <Link to="/workflows" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
+            <ArrowLeft size={14} /> Organizations
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2 mt-1"><WorkflowIcon size={24} /> {orgName} · Workflows</h1>
+          <p className="text-sm text-gray-500 mt-1">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={load} disabled={loading} className="text-gray-600 hover:text-gray-900 p-2 rounded-lg hover:bg-gray-100" title="Refresh">
@@ -202,7 +204,6 @@ const WorkflowsPage = () => {
           <thead className="bg-gray-50">
             <tr>
               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Org</th>
               <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
           </thead>
@@ -210,7 +211,6 @@ const WorkflowsPage = () => {
             {workflows.map(wf => (
               <tr key={wf.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onView(wf)}>
                 <td className="px-4 py-2 text-sm font-medium text-brand-600 hover:underline">{wf.name}</td>
-                <td className="px-4 py-2 text-sm text-gray-500">{orgName(wf.organization_id)}</td>
                 <td className="px-4 py-2 text-right space-x-1 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                   <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => onView(wf)}>View</Button>
                   <Button variant="ghost" size="sm" icon={<Pencil size={14} />} onClick={() => openEdit(wf)}>Edit</Button>
@@ -220,7 +220,7 @@ const WorkflowsPage = () => {
               </tr>
             ))}
             {workflows.length === 0 && !loading && (
-              <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-500">No workflows yet. Create one to chain templates together.</td></tr>
+              <tr><td colSpan={2} className="px-4 py-6 text-center text-sm text-gray-500">No workflows in this organization yet. Create one to chain templates together.</td></tr>
             )}
           </tbody>
         </table>
@@ -270,15 +270,9 @@ const WorkflowsPage = () => {
       </Card>
 
       {/* Builder */}
-      <Modal isOpen={builderOpen} onClose={() => setBuilderOpen(false)} title={editingId ? 'Edit Workflow' : 'New Workflow'} size="full">
+      <Modal isOpen={builderOpen} onClose={() => setBuilderOpen(false)} title={editingId ? 'Edit Workflow' : `New Workflow in ${orgName}`} size="full">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="nightly-deploy" />
-            <Select label="Organization" value={orgId} onChange={e => setOrgId(Number(e.target.value))}>
-              <option value="">Select…</option>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </Select>
-          </div>
+          <Input label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="nightly-deploy" />
 
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={allowSim} onChange={e => setAllowSim(e.target.checked)} />

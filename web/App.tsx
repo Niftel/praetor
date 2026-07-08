@@ -20,6 +20,7 @@ import ActivityPage from './pages/ActivityPage';
 import OrganizationsPage from './pages/OrganizationsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
 import SettingsPage from './pages/SettingsPage';
+import { ProjectsLanding, InventoriesLanding, TemplatesLanding, WorkflowsLanding, CredentialsLanding } from './pages/landings';
 import { ToastHost } from './components/ui/toast';
 import { getAuthToken, removeAuthToken } from './services/api';
 
@@ -49,12 +50,18 @@ const App = () => {
           <Route index element={<DashboardPage />} />
           <Route path="jobs" element={<JobsPage />} />
           <Route path="jobs/:jobId" element={<JobDetailPage />} />
-          <Route path="templates" element={<TemplatesPage />} />
-          <Route path="workflows" element={<WorkflowsPage />} />
+          {/* Org-first: each resource opens to the user's orgs, then drills in. */}
+          <Route path="templates" element={<TemplatesLanding />} />
+          <Route path="templates/org/:orgId" element={<TemplatesPage />} />
+          <Route path="workflows" element={<WorkflowsLanding />} />
+          <Route path="workflows/org/:orgId" element={<WorkflowsPage />} />
           <Route path="workflows/runs/:jobId" element={<WorkflowRunPage />} />
-          <Route path="projects" element={<ProjectsPage />} />
-          <Route path="inventories" element={<InventoriesPage />} />
-          <Route path="credentials" element={<CredentialsPage />} />
+          <Route path="projects" element={<ProjectsLanding />} />
+          <Route path="projects/org/:orgId" element={<ProjectsPage />} />
+          <Route path="inventories" element={<InventoriesLanding />} />
+          <Route path="inventories/org/:orgId" element={<InventoriesPage />} />
+          <Route path="credentials" element={<CredentialsLanding />} />
+          <Route path="credentials/org/:orgId" element={<CredentialsPage />} />
           <Route path="tokens" element={<TokensPage />} />
           <Route path="execution-packs" element={<ExecutionPacksPage />} />
           <Route path="schedules" element={<SchedulesPage />} />
