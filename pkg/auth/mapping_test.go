@@ -89,9 +89,9 @@ func TestDecideRole(t *testing.T) {
 		matched, configured, remove bool
 		grant, revoke               bool
 	}{
-		{true, true, true, true, false},   // match → grant
-		{true, true, false, true, false},  // match → grant (remove irrelevant)
-		{false, true, true, false, true},  // no match + configured + remove → revoke
+		{true, true, true, true, false},    // match → grant
+		{true, true, false, true, false},   // match → grant (remove irrelevant)
+		{false, true, true, false, true},   // no match + configured + remove → revoke
 		{false, true, false, false, false}, // no match, remove off → grant-only, no-op
 		{false, false, true, false, false}, // unconfigured → never revoke
 	}
