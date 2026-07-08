@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/praetordev/praetor/pkg/auth"
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/services/api/render"
@@ -18,6 +19,11 @@ func getJWTSecret() string {
 	secret, _ := crypto.JWTSecret()
 	return secret
 }
+
+// dummyPasswordHash is compared against on every failed/non-local login so the
+// LDAP and local paths take comparable time — "user not found" must not be
+// distinguishable from "bad password" (no enumeration/timing oracle).
+var dummyPasswordHash, _ = bcrypt.GenerateFromPassword([]byte("praetor-login-timing-floor"), bcrypt.DefaultCost)
 
 type LoginRequest struct {
 	Username string `json:"username"`
@@ -38,6 +44,13 @@ type AuthClaims struct {
 }
 
 // Login POST /api/v1/auth/login
+//
+// Two account kinds, in order:
+//  1. Break-glass LOCAL account — a row with a non-empty password_hash and
+//     ldap_dn IS NULL — always authenticates locally, regardless of LDAP. It is
+//     never LDAP-managed, so a broken/unreachable directory can't lock it out.
+//  2. Everything else, when LDAP is configured — bind to the directory and apply
+//     the AAP group→role mapping (auth.Authenticate). No fallback to a local hash.
 func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -45,27 +58,47 @@ func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user including password_hash
+	// Look up the local row (may not exist). ByUsernameWithHash includes ldap_dn.
 	user, err := h.users.ByUsernameWithHash(r.Context(), req.Username)
-	if err != nil {
-		// Generic error for security
-		render.ErrUnauthorized(nil).Render(w, r)
+	isLocalAccount := err == nil && user.PasswordHash != "" && user.LdapDN == nil
+
+	// 1. Local break-glass account.
+	if isLocalAccount {
+		if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
+			render.ErrUnauthorized(nil).Render(w, r)
+			return
+		}
+		if !user.IsActive {
+			render.ErrUnauthorized(nil).Render(w, r)
+			return
+		}
+		h.issueToken(w, r, user)
 		return
 	}
 
-	// Verify Password
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
-	if err != nil {
-		render.ErrUnauthorized(nil).Render(w, r)
-		return
+	// 2. LDAP path (only when the AAP login mapping is configured).
+	if h.LDAPConfigPath != "" {
+		if cfg, cerr := auth.LoadConfig(h.LDAPConfigPath); cerr == nil && cfg.UsesLoginMapping() {
+			ldapUser, lerr := auth.Authenticate(r.Context(), h.DB, cfg, auth.NewLDAPClient(cfg), req.Username, req.Password)
+			if lerr == nil {
+				if !ldapUser.IsActive {
+					render.ErrUnauthorized(nil).Render(w, r)
+					return
+				}
+				h.issueToken(w, r, *ldapUser)
+				return
+			}
+			// Fall through to the generic failure below (never leak the reason).
+		}
 	}
 
-	if !user.IsActive {
-		render.ErrUnauthorized(nil).Render(w, r) // Account inactive
-		return
-	}
+	// Constant-time floor, then a generic 401 for all failures.
+	_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(req.Password))
+	render.ErrUnauthorized(nil).Render(w, r)
+}
 
-	// Generate JWT
+// issueToken signs a JWT for an authenticated user and writes the login response.
+func (h *ContentHandler) issueToken(w http.ResponseWriter, r *http.Request, user models.User) {
 	claims := AuthClaims{
 		UserID:          user.ID,
 		Username:        user.Username,
@@ -85,11 +118,6 @@ func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clear hash before returning
 	user.PasswordHash = ""
-
-	render.JSON(w, r, LoginResponse{
-		Token: tokenString,
-		User:  user,
-	})
+	render.JSON(w, r, LoginResponse{Token: tokenString, User: user})
 }
