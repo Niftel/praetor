@@ -1,16 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Settings, RefreshCw, CheckCircle, XCircle, AlertCircle, Clock, Plus, Trash2, Edit2, Key, Users, Building, Github } from 'lucide-react';
-
-interface AuthProvider {
-    id: number;
-    name: string;
-    type: 'ldap' | 'saml' | 'github' | 'oauth2';
-    enabled: boolean;
-    config: any;
-    created_at: string;
-    modified_at: string;
-}
+import { RefreshCw, CheckCircle, XCircle, AlertCircle, Key, Users, Building, Github } from 'lucide-react';
 
 interface LdapConfig {
     configured: boolean;
@@ -27,66 +17,24 @@ interface LdapConfig {
         search_filter: string;
         search_scope: string;
     };
-    organizations?: {
-        enabled: boolean;
+    group_type?: {
+        type: string;
         search_base: string;
-        search_filter: string;
     };
-    teams?: {
-        enabled: boolean;
-        search_base: string;
-        search_filter: string;
+    user_flags_by_group?: {
+        is_superuser: string[] | null;
+        is_system_auditor: string[] | null;
     };
-    sync?: {
-        interval: string;
-        create_users: boolean;
-        create_orgs: boolean;
-        create_teams: boolean;
-        remove_stale: boolean;
-        dry_run: boolean;
-    };
-}
-
-interface SyncLogEntry {
-    id: number;
-    sync_type: string;
-    started_at: string;
-    finished_at?: string;
-    status: string;
-    items_processed: number;
-    items_created: number;
-    items_updated: number;
-    items_failed: number;
-    error_message?: string;
-}
-
-interface SyncItem {
-    id: number;
-    entity_type: string;
-    entity_name: string;
-    entity_id?: number;
-    ldap_dn: string;
-    ldap_attributes?: Record<string, string[]>;
-    action: string;
-    error_message?: string;
-    created_at: string;
-}
-
-interface SyncDetails {
-    log: SyncLogEntry;
-    items: SyncItem[];
+    organization_map?: Record<string, { admins: string[] | null; users: string[] | null; auditors: string[] | null }>;
+    team_map?: Record<string, { organization: string; users: string[] | null }>;
 }
 
 const AuthProvidersPage: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'ldap' | 'saml' | 'github' | 'oauth2'>('ldap');
     const [ldapConfig, setLdapConfig] = useState<LdapConfig | null>(null);
-    const [syncLogs, setSyncLogs] = useState<SyncLogEntry[]>([]);
     const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
     const [testing, setTesting] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message?: string; error?: string } | null>(null);
-    const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
-    const [expandedItems, setExpandedItems] = useState<SyncItem[]>([]);
 
     useEffect(() => {
         loadData();
@@ -95,34 +43,12 @@ const AuthProvidersPage: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [configData, syncData] = await Promise.all([
-                api.getLdapConfig(),
-                api.getLdapSyncStatus(),
-            ]);
+            const configData = await api.getLdapConfig();
             setLdapConfig(configData);
-            setSyncLogs(syncData.results || []);
         } catch (error) {
             console.error('Failed to load LDAP data:', error);
         } finally {
             setLoading(false);
-        }
-    };
-
-    const toggleSyncDetails = async (id: number) => {
-        if (expandedLogId === id) {
-            // Collapse if clicking same row
-            setExpandedLogId(null);
-            setExpandedItems([]);
-            return;
-        }
-
-        setExpandedLogId(id);
-        try {
-            const details = await api.getLdapSyncDetails(id);
-            setExpandedItems(details.items || []);
-        } catch (error) {
-            console.error('Failed to load sync details:', error);
-            setExpandedItems([]);
         }
     };
 
@@ -139,54 +65,24 @@ const AuthProvidersPage: React.FC = () => {
         }
     };
 
-    const handleSync = async () => {
-        setSyncing(true);
-        try {
-            await api.triggerLdapSync();
-            await loadData();
-        } catch (error) {
-            console.error('Sync failed:', error);
-        } finally {
-            setSyncing(false);
-        }
-    };
-
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case 'success':
-                return <CheckCircle className="text-green-500" size={16} />;
-            case 'failed':
-                return <XCircle className="text-red-500" size={16} />;
-            case 'partial':
-                return <AlertCircle className="text-yellow-500" size={16} />;
-            case 'running':
-                return <Clock className="text-blue-500 animate-pulse" size={16} />;
-            default:
-                return <AlertCircle className="text-gray-500" size={16} />;
-        }
-    };
-
-    const getProviderIcon = (type: string) => {
-        switch (type) {
-            case 'ldap':
-                return <Users size={24} />;
-            case 'saml':
-                return <Key size={24} />;
-            case 'github':
-                return <Github size={24} />;
-            case 'oauth2':
-                return <Building size={24} />;
-            default:
-                return <Settings size={24} />;
-        }
-    };
-
     const tabs = [
         { id: 'ldap', name: 'LDAP', icon: <Users size={16} /> },
         { id: 'saml', name: 'SAML', icon: <Key size={16} /> },
         { id: 'github', name: 'GitHub', icon: <Github size={16} /> },
         { id: 'oauth2', name: 'OAuth2 / OIDC', icon: <Building size={16} /> },
     ];
+
+    // Render a labelled list of group DNs, or an em dash when empty.
+    const dnList = (dns?: string[] | null) => {
+        if (!dns || dns.length === 0) return <span className="text-gray-400">—</span>;
+        return (
+            <div className="space-y-0.5">
+                {dns.map((dn) => (
+                    <div key={dn} className="text-gray-900 font-mono text-xs">{dn}</div>
+                ))}
+            </div>
+        );
+    };
 
     if (loading) {
         return (
@@ -195,6 +91,9 @@ const AuthProvidersPage: React.FC = () => {
             </div>
         );
     }
+
+    const orgMap = ldapConfig?.organization_map || {};
+    const teamMap = ldapConfig?.team_map || {};
 
     return (
         <div className="p-6 space-y-6">
@@ -233,25 +132,18 @@ const AuthProvidersPage: React.FC = () => {
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <Users className="text-brand-600" size={24} />
-                                    <h2 className="text-lg font-semibold text-gray-900">LDAP Configuration</h2>
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-900">LDAP Configuration</h2>
+                                        <p className="text-sm text-gray-500">Group→role mapping is applied at login (read-only here).</p>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={handleTestConnection}
-                                        disabled={!ldapConfig?.configured || testing}
-                                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        {testing ? 'Testing...' : 'Test Connection'}
-                                    </button>
-                                    <button
-                                        onClick={handleSync}
-                                        disabled={!ldapConfig?.configured || syncing}
-                                        className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                                    >
-                                        <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-                                        {syncing ? 'Syncing...' : 'Sync Now'}
-                                    </button>
-                                </div>
+                                <button
+                                    onClick={handleTestConnection}
+                                    disabled={!ldapConfig?.configured || testing}
+                                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {testing ? 'Testing...' : 'Test Connection'}
+                                </button>
                             </div>
                         </div>
 
@@ -275,7 +167,7 @@ const AuthProvidersPage: React.FC = () => {
                                         Create a configuration file at <code className="bg-gray-100 px-2 py-1 rounded">{ldapConfig?.config_path}</code>
                                     </p>
                                     <p className="text-sm text-gray-500">
-                                        See <code className="bg-gray-100 px-1 rounded">playbooks/ldap-config.example.yaml</code> for an example.
+                                        See <code className="bg-gray-100 px-1 rounded">deployments/ldap/ldap-config.yaml</code> for an example.
                                     </p>
                                 </div>
                             ) : ldapConfig.config_error ? (
@@ -289,157 +181,117 @@ const AuthProvidersPage: React.FC = () => {
                                     </div>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
-                                        <h4 className="font-medium text-gray-900 mb-3">Server</h4>
-                                        <dl className="space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <dt className="text-gray-500">URL</dt>
-                                                <dd className="text-gray-900 font-mono">{ldapConfig.server?.url}</dd>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <dt className="text-gray-500">Bind DN</dt>
-                                                <dd className="text-gray-900 font-mono text-xs">{ldapConfig.server?.bind_dn}</dd>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <dt className="text-gray-500">StartTLS</dt>
-                                                <dd className="text-gray-900">{ldapConfig.server?.start_tls ? 'Yes' : 'No'}</dd>
-                                            </div>
-                                        </dl>
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <h4 className="font-medium text-gray-900 mb-3">Server</h4>
+                                            <dl className="space-y-2 text-sm">
+                                                <div className="flex justify-between gap-4">
+                                                    <dt className="text-gray-500">URL</dt>
+                                                    <dd className="text-gray-900 font-mono">{ldapConfig.server?.url}</dd>
+                                                </div>
+                                                <div className="flex justify-between gap-4">
+                                                    <dt className="text-gray-500">Bind DN</dt>
+                                                    <dd className="text-gray-900 font-mono text-xs">{ldapConfig.server?.bind_dn}</dd>
+                                                </div>
+                                                <div className="flex justify-between gap-4">
+                                                    <dt className="text-gray-500">StartTLS</dt>
+                                                    <dd className="text-gray-900">{ldapConfig.server?.start_tls ? 'Yes' : 'No'}</dd>
+                                                </div>
+                                            </dl>
+                                        </div>
+                                        <div>
+                                            <h4 className="font-medium text-gray-900 mb-3">Users</h4>
+                                            <dl className="space-y-2 text-sm">
+                                                <div className="flex justify-between gap-4">
+                                                    <dt className="text-gray-500">Search Base</dt>
+                                                    <dd className="text-gray-900 font-mono text-xs">{ldapConfig.users?.search_base}</dd>
+                                                </div>
+                                                <div className="flex justify-between gap-4">
+                                                    <dt className="text-gray-500">Filter</dt>
+                                                    <dd className="text-gray-900 font-mono text-xs">{ldapConfig.users?.search_filter}</dd>
+                                                </div>
+                                            </dl>
+                                        </div>
+                                        <div>
+                                            <h4 className="font-medium text-gray-900 mb-3">Group Membership</h4>
+                                            <dl className="space-y-2 text-sm">
+                                                <div className="flex justify-between gap-4">
+                                                    <dt className="text-gray-500">Type</dt>
+                                                    <dd className="text-gray-900 font-mono">{ldapConfig.group_type?.type || '—'}</dd>
+                                                </div>
+                                                <div className="flex justify-between gap-4">
+                                                    <dt className="text-gray-500">Search Base</dt>
+                                                    <dd className="text-gray-900 font-mono text-xs">{ldapConfig.group_type?.search_base || '—'}</dd>
+                                                </div>
+                                            </dl>
+                                        </div>
+                                        <div>
+                                            <h4 className="font-medium text-gray-900 mb-3">Platform Flags by Group</h4>
+                                            <dl className="space-y-2 text-sm">
+                                                <div>
+                                                    <dt className="text-gray-500 mb-1">Superuser</dt>
+                                                    <dd>{dnList(ldapConfig.user_flags_by_group?.is_superuser)}</dd>
+                                                </div>
+                                                <div>
+                                                    <dt className="text-gray-500 mb-1">System Auditor</dt>
+                                                    <dd>{dnList(ldapConfig.user_flags_by_group?.is_system_auditor)}</dd>
+                                                </div>
+                                            </dl>
+                                        </div>
                                     </div>
+
+                                    {/* Organization map */}
                                     <div>
-                                        <h4 className="font-medium text-gray-900 mb-3">Users</h4>
-                                        <dl className="space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <dt className="text-gray-500">Search Base</dt>
-                                                <dd className="text-gray-900 font-mono text-xs">{ldapConfig.users?.search_base}</dd>
+                                        <h4 className="font-medium text-gray-900 mb-3">Organization Map ({Object.keys(orgMap).length})</h4>
+                                        {Object.keys(orgMap).length === 0 ? (
+                                            <p className="text-sm text-gray-400">No organizations mapped.</p>
+                                        ) : (
+                                            <div className="grid gap-3 md:grid-cols-2">
+                                                {Object.entries(orgMap).map(([name, roles]) => (
+                                                    <div key={name} className="border border-gray-200 rounded-lg p-4">
+                                                        <div className="font-medium text-gray-900 mb-2">{name}</div>
+                                                        <dl className="space-y-2 text-sm">
+                                                            <div><dt className="text-gray-500 mb-1">Admins</dt><dd>{dnList(roles.admins)}</dd></div>
+                                                            <div><dt className="text-gray-500 mb-1">Members</dt><dd>{dnList(roles.users)}</dd></div>
+                                                            <div><dt className="text-gray-500 mb-1">Auditors</dt><dd>{dnList(roles.auditors)}</dd></div>
+                                                        </dl>
+                                                    </div>
+                                                ))}
                                             </div>
-                                            <div className="flex justify-between">
-                                                <dt className="text-gray-500">Filter</dt>
-                                                <dd className="text-gray-900 font-mono text-xs">{ldapConfig.users?.search_filter}</dd>
-                                            </div>
-                                        </dl>
+                                        )}
                                     </div>
+
+                                    {/* Team map */}
                                     <div>
-                                        <h4 className="font-medium text-gray-900 mb-3">Organizations</h4>
-                                        <dl className="space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <dt className="text-gray-500">Enabled</dt>
-                                                <dd className="text-gray-900">{ldapConfig.organizations?.enabled ? 'Yes' : 'No'}</dd>
+                                        <h4 className="font-medium text-gray-900 mb-3">Team Map ({Object.keys(teamMap).length})</h4>
+                                        {Object.keys(teamMap).length === 0 ? (
+                                            <p className="text-sm text-gray-400">No teams mapped.</p>
+                                        ) : (
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-sm">
+                                                    <thead className="bg-gray-50">
+                                                        <tr>
+                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Team</th>
+                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Organization</th>
+                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Member Groups</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-200">
+                                                        {Object.entries(teamMap).map(([name, t]) => (
+                                                            <tr key={name}>
+                                                                <td className="px-4 py-2 font-medium text-gray-900">{name}</td>
+                                                                <td className="px-4 py-2 text-gray-900">{t.organization}</td>
+                                                                <td className="px-4 py-2">{dnList(t.users)}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
                                             </div>
-                                        </dl>
-                                    </div>
-                                    <div>
-                                        <h4 className="font-medium text-gray-900 mb-3">Teams</h4>
-                                        <dl className="space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <dt className="text-gray-500">Enabled</dt>
-                                                <dd className="text-gray-900">{ldapConfig.teams?.enabled ? 'Yes' : 'No'}</dd>
-                                            </div>
-                                        </dl>
+                                        )}
                                     </div>
                                 </div>
                             )}
-                        </div>
-                    </div>
-
-                    {/* Sync History */}
-                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                            <h2 className="text-lg font-semibold text-gray-900">Sync History</h2>
-                            <p className="text-sm text-gray-500 mt-1">Click a row to view sync details</p>
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Processed</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Updated</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200">
-                                    {syncLogs.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={7} className="px-6 py-8 text-center text-gray-500">No sync history yet</td>
-                                        </tr>
-                                    ) : (
-                                        syncLogs.map((log) => (
-                                            <React.Fragment key={log.id}>
-                                                <tr
-                                                    className={`hover:bg-gray-50 cursor-pointer transition-colors ${expandedLogId === log.id ? 'bg-blue-50' : ''}`}
-                                                    onClick={() => toggleSyncDetails(log.id)}
-                                                >
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="flex items-center gap-2">
-                                                            {getStatusIcon(log.status)}
-                                                            <span className="text-sm capitalize">{log.status}</span>
-                                                            {expandedLogId === log.id ? '▼' : '▶'}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">{log.sync_type}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(log.started_at).toLocaleString()}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{log.items_processed}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">{log.items_created}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-blue-600">{log.items_updated}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{log.items_failed}</td>
-                                                </tr>
-                                                {expandedLogId === log.id && (
-                                                    <tr>
-                                                        <td colSpan={7} className="px-6 py-4 bg-gray-50">
-                                                            {expandedItems.length === 0 ? (
-                                                                <div className="text-center py-4 text-gray-500">
-                                                                    <RefreshCw className="animate-spin mx-auto mb-2" size={20} />
-                                                                    Loading details...
-                                                                </div>
-                                                            ) : (
-                                                                <div className="space-y-4">
-                                                                    <h4 className="font-medium text-gray-900">Synced Items ({expandedItems.length})</h4>
-                                                                    <div className="grid gap-3">
-                                                                        {expandedItems.map((item) => (
-                                                                            <div key={item.id} className={`border rounded-lg p-4 ${item.action === 'created' ? 'border-green-200 bg-green-50' : item.action === 'updated' ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white'}`}>
-                                                                                <div className="flex items-center gap-3 mb-2">
-                                                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${item.action === 'created' ? 'bg-green-100 text-green-800' :
-                                                                                            item.action === 'updated' ? 'bg-blue-100 text-blue-800' :
-                                                                                                item.action === 'unchanged' ? 'bg-gray-100 text-gray-800' :
-                                                                                                    'bg-red-100 text-red-800'
-                                                                                        }`}>
-                                                                                        {item.action}
-                                                                                    </span>
-                                                                                    <span className="text-xs uppercase text-gray-500">{item.entity_type}</span>
-                                                                                    <span className="font-medium text-gray-900">{item.entity_name}</span>
-                                                                                </div>
-                                                                                <div className="text-xs font-mono text-gray-500 mb-2">{item.ldap_dn}</div>
-                                                                                {item.ldap_attributes && Object.keys(item.ldap_attributes).length > 0 && (
-                                                                                    <div className="mt-2 border-t pt-2">
-                                                                                        <div className="text-xs font-medium text-gray-700 mb-1">LDAP Attributes:</div>
-                                                                                        <div className="grid grid-cols-2 gap-1 text-xs">
-                                                                                            {Object.entries(item.ldap_attributes).map(([key, values]) => (
-                                                                                                <div key={key} className="flex">
-                                                                                                    <span className="font-mono text-gray-600 mr-1">{key}:</span>
-                                                                                                    <span className="text-gray-900">{Array.isArray(values) ? values.join(', ') : values}</span>
-                                                                                                </div>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </React.Fragment>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
                         </div>
                     </div>
                 </div>
