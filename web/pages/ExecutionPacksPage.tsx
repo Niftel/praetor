@@ -4,6 +4,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Package, Plus, Trash2, Loader, GitBranch, Copy, Pencil, RefreshCw } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 interface Pack {
   id: number;
@@ -80,13 +81,13 @@ const ExecutionPacksPage = () => {
       if (editingId) await api.updateExecutionPack(editingId, body);
       else await api.createExecutionPack(body);
       setShowModal(false); setForm(blank); setEditingId(null); load();
-    } catch (e) { alert(`Failed to ${editingId ? 'update' : 'create'} pack (name may already exist).`); }
+    } catch (e) { toast.error(`Failed to ${editingId ? 'update' : 'create'} pack (name may already exist).`); }
   };
   const rebuild = async (id: number) => {
-    try { await api.rebuildExecutionPack(id); load(); } catch { alert('Nothing to rebuild (pack has no spec or git source).'); }
+    try { await api.rebuildExecutionPack(id); load(); } catch { toast.error('Nothing to rebuild (pack has no spec or git source).'); }
   };
   const remove = async (id: number) => {
-    if (!confirm('Delete this Execution Pack registration? (does not delete the built artifact)')) return;
+    if (!(await confirmDialog('Delete this Execution Pack registration? (does not delete the built artifact)'))) return;
     await api.deleteExecutionPack(id).catch(() => { });
     load();
   };

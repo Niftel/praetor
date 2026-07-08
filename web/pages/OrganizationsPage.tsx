@@ -7,6 +7,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ResourceAccess from '../components/ResourceAccess';
 import { Building2, Users, ShieldCheck, UserPlus, Trash2, Loader, Eye, Key, Package, Plus } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 const OrganizationsPage = () => {
     const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -62,12 +63,12 @@ const OrganizationsPage = () => {
             fetchOrganizations();
         } catch (err) {
             console.error('Failed to create organization', err);
-            alert('Failed to create organization');
+            toast.error('Failed to create organization');
         }
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm('Delete this organization? This will remove all associated data.')) return;
+        if (!(await confirmDialog('Delete this organization? This will remove all associated data.'))) return;
         try {
             await api.deleteOrganization(id);
             fetchOrganizations();
@@ -105,7 +106,7 @@ const OrganizationsPage = () => {
             setShowAddGalaxyModal(false);
             setSelectedGalaxyCredId(0);
         } catch (err) {
-            alert('Failed to attach Galaxy credential');
+            toast.error('Failed to attach Galaxy credential');
         }
     };
 
@@ -134,7 +135,7 @@ const OrganizationsPage = () => {
             setShowAddMemberModal(false);
             setSelectedUserId(0);
         } catch (err) {
-            alert('Failed to add member');
+            toast.error('Failed to add member');
         }
     };
 
@@ -156,7 +157,7 @@ const OrganizationsPage = () => {
             setShowAddAdminModal(false);
             setSelectedUserId(0);
         } catch (err) {
-            alert('Failed to add admin');
+            toast.error('Failed to add admin');
         }
     };
 

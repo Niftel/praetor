@@ -5,6 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Plus, Edit2, Play, Trash2, Loader } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 const TemplatesPage = () => {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -184,12 +185,12 @@ const TemplatesPage = () => {
 
   const handleDelete = async (id: number) => {
     const t = templates.find(t => t.id === id);
-    if (!confirm(`Delete template "${t?.name ?? id}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete template "${t?.name ?? id}"? This cannot be undone.`))) return;
     try {
       await api.deleteTemplate(id);
       setTemplates(templates.filter(t => t.id !== id));
     } catch (err: any) {
-      alert(err?.message || 'Failed to delete template');
+      toast.error(err?.message || 'Failed to delete template');
     }
   };
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Button from '../components/ui/Button';
 import { Lock } from 'lucide-react';
 import { api, setAuthToken } from '../services/api';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -21,7 +22,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       onLogin();
     } catch (err) {
       console.error(err);
-      alert('Login failed. Please check your credentials.');
+      toast.error('Login failed. Please check your credentials.');
     } finally {
       setIsLoading(false);
     }

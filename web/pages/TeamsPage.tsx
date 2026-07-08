@@ -5,6 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Users, Plus, Trash2, Loader } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 interface TeamWithMembers extends Team {
   members?: User[];
@@ -58,12 +59,12 @@ const TeamsPage = () => {
       fetchTeams();
     } catch (err) {
       console.error('Failed to create team', err);
-      alert('Failed to create team');
+      toast.error('Failed to create team');
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this team?')) return;
+    if (!(await confirmDialog('Delete this team?'))) return;
     try {
       await api.deleteTeam(id);
       fetchTeams();

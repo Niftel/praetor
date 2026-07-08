@@ -4,6 +4,7 @@ import { Project } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { RefreshCw, GitBranch, Plus, Trash2, Loader } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 const ProjectsPage = () => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -54,7 +55,7 @@ const ProjectsPage = () => {
       fetchProjects();
     } catch (err: any) {
       console.error('Failed to create project', err);
-      alert(err.message || 'Failed to create project');
+      toast.error(err.message || 'Failed to create project');
     }
   };
 
