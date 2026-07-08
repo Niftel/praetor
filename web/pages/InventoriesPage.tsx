@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { Inventory, Host, Group } from '../types';
 import Card from '../components/ui/Card';
+import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import ResourceAccess from '../components/ResourceAccess';
@@ -589,27 +590,21 @@ const InventoriesPage = () => {
       {/* New Inventory Modal */}
       <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title="New Inventory">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Organization</label>
-            <select
-              className="w-full border border-gray-300 rounded-md p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={newInventoryOrg}
-              onChange={(e) => setNewInventoryOrg(Number(e.target.value))}
-            >
-              <option value="">Select organization…</option>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={newInventoryName}
-              onChange={(e) => setNewInventoryName(e.target.value)}
-              placeholder="My Inventory"
-            />
-          </div>
+          <Select
+            label="Organization"
+            value={newInventoryOrg}
+            onChange={(e) => setNewInventoryOrg(Number(e.target.value))}
+          >
+            <option value="">Select organization…</option>
+            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </Select>
+          <Input
+            label="Name"
+            type="text"
+            value={newInventoryName}
+            onChange={(e) => setNewInventoryName(e.target.value)}
+            placeholder="My Inventory"
+          />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowInventoryModal(false)}>Cancel</Button>
             <Button onClick={handleCreateInventory}>Create</Button>
@@ -620,16 +615,13 @@ const InventoriesPage = () => {
       {/* New Host Modal */}
       <Modal isOpen={showHostModal} onClose={() => setShowHostModal(false)} title="New Host">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Hostname</label>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={newHostName}
-              onChange={(e) => setNewHostName(e.target.value)}
-              placeholder="web-server-01"
-            />
-          </div>
+          <Input
+            label="Hostname"
+            type="text"
+            value={newHostName}
+            onChange={(e) => setNewHostName(e.target.value)}
+            placeholder="web-server-01"
+          />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2"><Plug size={14} className="inline mr-1" /> Connection <span className="text-gray-400 font-normal">(optional)</span></label>
             <div className="grid grid-cols-2 gap-3 bg-gray-50 border border-gray-200 rounded-md p-3">
@@ -661,16 +653,13 @@ const InventoriesPage = () => {
       {/* New Group Modal */}
       <Modal isOpen={showGroupModal} onClose={() => setShowGroupModal(false)} title="New Group">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Group Name</label>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={newGroupName}
-              onChange={(e) => setNewGroupName(e.target.value)}
-              placeholder="webservers"
-            />
-          </div>
+          <Input
+            label="Group Name"
+            type="text"
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            placeholder="webservers"
+          />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowGroupModal(false)}>Cancel</Button>
             <Button onClick={handleCreateGroup}>Create</Button>
@@ -681,23 +670,18 @@ const InventoriesPage = () => {
       {/* Import Inventory Modal */}
       <Modal isOpen={showImportModal} onClose={() => setShowImportModal(false)} title="Import Inventory">
         <div className="space-y-4">
+          <Select
+            label="Format"
+            value={importFormat}
+            onChange={(e) => setImportFormat(e.target.value as 'ini' | 'yaml')}
+          >
+            <option value="ini">INI (Ansible format)</option>
+            <option value="yaml">YAML</option>
+          </Select>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Format</label>
-            <select
-              className="w-full border border-gray-300 rounded-md p-2 focus:ring-brand-500 focus:border-brand-500"
-              value={importFormat}
-              onChange={(e) => setImportFormat(e.target.value as 'ini' | 'yaml')}
-            >
-              <option value="ini">INI (Ansible format)</option>
-              <option value="yaml">YAML</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Inventory Content
-            </label>
-            <textarea
-              className="w-full h-64 font-mono text-sm border border-gray-300 rounded-md p-3 focus:ring-brand-500 focus:border-brand-500"
+            <Textarea
+              label="Inventory Content"
+              className="h-64 font-mono text-sm"
               placeholder={importFormat === 'ini' ? `# INI format example
 [webservers]
 web1.example.com
@@ -727,34 +711,22 @@ all:
 
       <Modal isOpen={showSourceModal} onClose={() => setShowSourceModal(false)} title="New Inventory Source">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
-            <input type="text" className="mt-1 block w-full rounded-md border-gray-300 border p-2"
-              value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Kind</label>
-            <select className="mt-1 block w-full rounded-md border-gray-300 border p-2"
-              value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
-              <option value="inventory">Inventory / plugin (YAML)</option>
-              <option value="script">Script (executable)</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Credential <span className="text-gray-400 font-normal">(optional)</span></label>
-            <p className="text-xs text-gray-400 mb-1">A cloud credential (e.g. AWS) whose injectors set the env vars / files the inventory plugin needs to authenticate.</p>
-            <select className="mt-1 block w-full rounded-md border-gray-300 border p-2"
-              value={newSource.credential_id} onChange={e => setNewSource({ ...newSource, credential_id: e.target.value === '' ? '' : Number(e.target.value) })}>
-              <option value="">None</option>
-              {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Source</label>
-            <p className="text-xs text-gray-400 mb-1">A YAML inventory/plugin config, or a script that outputs Ansible inventory JSON. `ansible-inventory --list` is run against it on sync.</p>
-            <textarea rows={8} className="mt-1 block w-full rounded-md border-gray-300 border p-2 font-mono text-xs"
-              value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} />
-          </div>
+          <Input label="Name" type="text"
+            value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
+          <Select label="Kind"
+            value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
+            <option value="inventory">Inventory / plugin (YAML)</option>
+            <option value="script">Script (executable)</option>
+          </Select>
+          <Select label="Credential (optional)"
+            hint="A cloud credential (e.g. AWS) whose injectors set the env vars / files the inventory plugin needs to authenticate."
+            value={newSource.credential_id} onChange={e => setNewSource({ ...newSource, credential_id: e.target.value === '' ? '' : Number(e.target.value) })}>
+            <option value="">None</option>
+            {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+          <Textarea label="Source" rows={8} className="font-mono text-xs"
+            hint="A YAML inventory/plugin config, or a script that outputs Ansible inventory JSON. `ansible-inventory --list` is run against it on sync."
+            value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} />
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setShowSourceModal(false)}>Cancel</Button>
             <Button onClick={handleCreateSource}>Create</Button>
