@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -158,6 +159,23 @@ func (h *ContentHandler) AddRoleUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Org fence (AWX rule): a user may only be granted a role on an org-scoped
+	// resource if they are a member of that resource's organization. Org roles
+	// themselves are skipped — that grant IS the membership.
+	if role.ContentType != nil && role.ObjectID != nil && rbac.ContentType(*role.ContentType) != rbac.ContentTypeOrganization {
+		if orgID, ok := h.Access.OrgForContent(r.Context(), rbac.ContentType(*role.ContentType), *role.ObjectID); ok {
+			member, err := h.Access.UserIsOrgMember(r.Context(), req.UserID, orgID)
+			if err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+			if !member {
+				render.ErrForbidden(fmt.Errorf("user must be a member of the resource's organization before being granted a role on it")).Render(w, r)
+				return
+			}
+		}
+	}
+
 	err = h.Access.AddUserToRole(r.Context(), roleID, req.UserID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -281,6 +299,18 @@ func (h *ContentHandler) AddRoleTeam(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
+	}
+
+	// Org fence: a team may only be granted a role on a resource in its OWN
+	// organization (AWX rule). Org roles themselves are skipped.
+	if role.ContentType != nil && role.ObjectID != nil && rbac.ContentType(*role.ContentType) != rbac.ContentTypeOrganization {
+		if resOrg, ok := h.Access.OrgForContent(r.Context(), rbac.ContentType(*role.ContentType), *role.ObjectID); ok {
+			teamOrg, ok2 := h.Access.OrgForContent(r.Context(), rbac.ContentTypeTeam, req.TeamID)
+			if !ok2 || teamOrg != resOrg {
+				render.ErrForbidden(fmt.Errorf("team must belong to the resource's organization")).Render(w, r)
+				return
+			}
+		}
 	}
 
 	err = h.Access.AddTeamToRole(r.Context(), roleID, req.TeamID)

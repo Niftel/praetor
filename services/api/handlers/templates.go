@@ -249,6 +249,27 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		input.WebhookKey = genWebhookKey()
 	}
 
+	// Re-check use-on-reference for any project/inventory/credential the update
+	// ATTACHES or CHANGES — admin on the template alone must not let a user point
+	// it at a resource they lack `use` on (AWX validates use on changed relations).
+	existing, err := rs.store.Get(r.Context(), id)
+	if err != nil {
+		render.Render(w, r, render.ErrNotFound(nil))
+		return
+	}
+	changed := func(newV, oldV *int64) bool {
+		return newV != nil && (oldV == nil || *newV != *oldV)
+	}
+	if changed(input.ProjectID, existing.ProjectID) && !rs.authorize(w, r, rbac.ContentTypeProject, *input.ProjectID, actUse) {
+		return
+	}
+	if changed(input.InventoryID, existing.InventoryID) && !rs.authorize(w, r, rbac.ContentTypeInventory, *input.InventoryID, actUse) {
+		return
+	}
+	if changed(input.CredentialID, existing.CredentialID) && !rs.authorize(w, r, rbac.ContentTypeCredential, *input.CredentialID, actUse) {
+		return
+	}
+
 	updated, err := rs.store.Update(r.Context(), id, input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
