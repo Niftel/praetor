@@ -193,7 +193,9 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	// Launching a workflow is an execute action: the org execute_role (which org
+	// admins inherit) may run any executable in the org, workflows included.
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actExecute) {
 		return
 	}
 
