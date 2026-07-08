@@ -25,8 +25,10 @@ interface LdapConfig {
         is_superuser: string[] | null;
         is_system_auditor: string[] | null;
     };
-    organization_map?: Record<string, { admins: string[] | null; users: string[] | null; auditors: string[] | null }>;
-    team_map?: Record<string, { organization: string; users: string[] | null }>;
+    // Rendered as the raw AUTH_LDAP_*_MAP config: each role value is a group DN,
+    // a list of DNs, or a bool ("all"/"none"), plus its remove_* flag.
+    organization_map?: Record<string, Record<string, string | string[] | boolean>>;
+    team_map?: Record<string, Record<string, string | string[] | boolean>>;
 }
 
 const AuthProvidersPage: React.FC = () => {
@@ -241,53 +243,28 @@ const AuthProvidersPage: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* Organization map */}
+                                    {/* Organization map — shown as the raw AUTH_LDAP_ORGANIZATION_MAP
+                                        query: every organization in one block. */}
                                     <div>
                                         <h4 className="font-medium text-gray-900 mb-3">Organization Map ({Object.keys(orgMap).length})</h4>
                                         {Object.keys(orgMap).length === 0 ? (
                                             <p className="text-sm text-gray-400">No organizations mapped.</p>
                                         ) : (
-                                            <div className="grid gap-3 md:grid-cols-2">
-                                                {Object.entries(orgMap).map(([name, roles]) => (
-                                                    <div key={name} className="border border-gray-200 rounded-lg p-4">
-                                                        <div className="font-medium text-gray-900 mb-2">{name}</div>
-                                                        <dl className="space-y-2 text-sm">
-                                                            <div><dt className="text-gray-500 mb-1">Admins</dt><dd>{dnList(roles.admins)}</dd></div>
-                                                            <div><dt className="text-gray-500 mb-1">Members</dt><dd>{dnList(roles.users)}</dd></div>
-                                                            <div><dt className="text-gray-500 mb-1">Auditors</dt><dd>{dnList(roles.auditors)}</dd></div>
-                                                        </dl>
-                                                    </div>
-                                                ))}
-                                            </div>
+                                            <pre className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs font-mono text-gray-800 overflow-x-auto whitespace-pre">
+                                                {JSON.stringify(orgMap, null, 2)}
+                                            </pre>
                                         )}
                                     </div>
 
-                                    {/* Team map */}
+                                    {/* Team map — raw AUTH_LDAP_TEAM_MAP query, all teams in one block. */}
                                     <div>
                                         <h4 className="font-medium text-gray-900 mb-3">Team Map ({Object.keys(teamMap).length})</h4>
                                         {Object.keys(teamMap).length === 0 ? (
                                             <p className="text-sm text-gray-400">No teams mapped.</p>
                                         ) : (
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full text-sm">
-                                                    <thead className="bg-gray-50">
-                                                        <tr>
-                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Team</th>
-                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Organization</th>
-                                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Member Groups</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-gray-200">
-                                                        {Object.entries(teamMap).map(([name, t]) => (
-                                                            <tr key={name}>
-                                                                <td className="px-4 py-2 font-medium text-gray-900">{name}</td>
-                                                                <td className="px-4 py-2 text-gray-900">{t.organization}</td>
-                                                                <td className="px-4 py-2">{dnList(t.users)}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
+                                            <pre className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs font-mono text-gray-800 overflow-x-auto whitespace-pre">
+                                                {JSON.stringify(teamMap, null, 2)}
+                                            </pre>
                                         )}
                                     </div>
                                 </div>

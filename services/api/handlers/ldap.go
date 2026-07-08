@@ -77,21 +77,47 @@ func (h *LDAPHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Summarize the maps without leaking secrets. DN lists are safe to show.
+	// Render the maps as the operator wrote them (the AUTH_LDAP_*_MAP config), so
+	// the UI can show the raw LDAP query. matchJSON reproduces the original
+	// bool / single-DN / list-of-DNs shape; each configured role also carries its
+	// remove_* flag. Unconfigured roles are omitted (no group bound to them). No
+	// secrets are involved — these are group DNs.
+	matchJSON := func(m auth.GroupMatch) interface{} {
+		if m.All != nil {
+			return *m.All
+		}
+		if len(m.DNs) == 1 {
+			return m.DNs[0]
+		}
+		return m.DNs
+	}
 	orgMap := make(map[string]interface{}, len(cfg.OrganizationMap))
 	for name, e := range cfg.OrganizationMap {
-		orgMap[name] = map[string]interface{}{
-			"admins":   e.Admins.DNs,
-			"users":    e.Users.DNs,
-			"auditors": e.Auditors.DNs,
+		entry := map[string]interface{}{}
+		if e.Admins.Configured() {
+			entry["admins"] = matchJSON(e.Admins)
+			entry["remove_admins"] = e.RemoveAdmins
 		}
+		if e.Users.Configured() {
+			entry["users"] = matchJSON(e.Users)
+			entry["remove_users"] = e.RemoveUsers
+		}
+		if e.Auditors.Configured() {
+			entry["auditors"] = matchJSON(e.Auditors)
+			entry["remove_auditors"] = e.RemoveAuditors
+		}
+		orgMap[name] = entry
 	}
 	teamMap := make(map[string]interface{}, len(cfg.TeamMap))
 	for name, e := range cfg.TeamMap {
-		teamMap[name] = map[string]interface{}{
+		entry := map[string]interface{}{
 			"organization": e.Organization,
-			"users":        e.Users.DNs,
 		}
+		if e.Users.Configured() {
+			entry["users"] = matchJSON(e.Users)
+			entry["remove"] = e.Remove
+		}
+		teamMap[name] = entry
 	}
 
 	render.JSON(w, r, map[string]interface{}{
