@@ -81,39 +81,6 @@ func (c *LDAPConfig) applyDefaults() {
 		c.Users.Attributes.LastName = "sn"
 	}
 
-	// Org search defaults
-	if c.Organizations.Enabled && c.Organizations.SearchScope == "" {
-		c.Organizations.SearchScope = SearchScopeOne
-	}
-	if c.Organizations.Enabled && c.Organizations.SearchFilter == "" {
-		c.Organizations.SearchFilter = "(objectClass=organizationalUnit)"
-	}
-	if c.Organizations.Enabled && c.Organizations.Attributes.Name == "" {
-		c.Organizations.Attributes.Name = "ou"
-	}
-	if c.Organizations.Enabled && c.Organizations.MemberAttribute == "" {
-		c.Organizations.MemberAttribute = "member"
-	}
-
-	// Team search defaults
-	if c.Teams.Enabled && c.Teams.SearchScope == "" {
-		c.Teams.SearchScope = SearchScopeSub
-	}
-	if c.Teams.Enabled && c.Teams.SearchFilter == "" {
-		c.Teams.SearchFilter = "(objectClass=groupOfNames)"
-	}
-	if c.Teams.Enabled && c.Teams.Attributes.Name == "" {
-		c.Teams.Attributes.Name = "cn"
-	}
-	if c.Teams.Enabled && c.Teams.MemberAttribute == "" {
-		c.Teams.MemberAttribute = "member"
-	}
-
-	// Sync defaults
-	if c.Sync.Interval == 0 {
-		c.Sync.Interval = time.Hour
-	}
-
 	// Group-type (AAP login-mapping) defaults, applied only when a type is set.
 	if c.GroupType.Type != "" {
 		if c.GroupType.SearchFilter == "" {
@@ -161,26 +128,6 @@ func (c *LDAPConfig) Validate() error {
 
 	if err := validateSearchScope(c.Users.SearchScope); err != nil {
 		errs = append(errs, fmt.Sprintf("users.search_scope: %v", err))
-	}
-
-	// Organization validation
-	if c.Organizations.Enabled {
-		if c.Organizations.SearchBase == "" {
-			errs = append(errs, "organizations.search_base is required when organizations.enabled is true")
-		}
-		if err := validateSearchScope(c.Organizations.SearchScope); err != nil {
-			errs = append(errs, fmt.Sprintf("organizations.search_scope: %v", err))
-		}
-	}
-
-	// Team validation
-	if c.Teams.Enabled {
-		if c.Teams.SearchBase == "" {
-			errs = append(errs, "teams.search_base is required when teams.enabled is true")
-		}
-		if err := validateSearchScope(c.Teams.SearchScope); err != nil {
-			errs = append(errs, fmt.Sprintf("teams.search_scope: %v", err))
-		}
 	}
 
 	// AAP login-mapping validation (only when the new model is configured).

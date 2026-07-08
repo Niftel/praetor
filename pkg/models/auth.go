@@ -6,13 +6,11 @@ import (
 )
 
 type Organization struct {
-	ID           int64      `json:"id" db:"id"`
-	Name         string     `json:"name" db:"name"`
-	Description  *string    `json:"description,omitempty" db:"description"`
-	LdapDN       *string    `json:"ldap_dn,omitempty" db:"ldap_dn"`
-	LdapSyncedAt *time.Time `json:"ldap_synced_at,omitempty" db:"ldap_synced_at"`
-	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-	ModifiedAt   time.Time  `json:"modified_at" db:"modified_at"`
+	ID          int64     `json:"id" db:"id"`
+	Name        string    `json:"name" db:"name"`
+	Description *string   `json:"description,omitempty" db:"description"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	ModifiedAt  time.Time `json:"modified_at" db:"modified_at"`
 }
 
 type User struct {
@@ -32,14 +30,12 @@ type User struct {
 }
 
 type Team struct {
-	ID             int64      `json:"id" db:"id"`
-	OrganizationID int64      `json:"organization_id" db:"organization_id"`
-	Name           string     `json:"name" db:"name"`
-	Description    *string    `json:"description,omitempty" db:"description"`
-	LdapDN         *string    `json:"ldap_dn,omitempty" db:"ldap_dn"`
-	LdapSyncedAt   *time.Time `json:"ldap_synced_at,omitempty" db:"ldap_synced_at"`
-	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
-	ModifiedAt     time.Time  `json:"modified_at" db:"modified_at"`
+	ID             int64     `json:"id" db:"id"`
+	OrganizationID int64     `json:"organization_id" db:"organization_id"`
+	Name           string    `json:"name" db:"name"`
+	Description    *string   `json:"description,omitempty" db:"description"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	ModifiedAt     time.Time `json:"modified_at" db:"modified_at"`
 }
 
 type Role struct {

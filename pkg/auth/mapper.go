@@ -267,3 +267,12 @@ func nullBytes(b []byte) interface{} {
 	}
 	return b
 }
+
+// nullString maps "" to a SQL NULL so empty attributes aren't stored as empty
+// strings.
+func nullString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}

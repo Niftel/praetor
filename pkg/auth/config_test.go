@@ -22,34 +22,6 @@ users:
     email: "mail"
     first_name: "givenName"
     last_name: "sn"
-
-organizations:
-  enabled: true
-  search_base: "ou=departments,dc=example,dc=com"
-  search_filter: "(objectClass=organizationalUnit)"
-  search_scope: "one"
-  attributes:
-    name: "ou"
-    description: "description"
-
-teams:
-  enabled: true
-  search_base: "ou=teams,dc=example,dc=com"
-  search_filter: "(objectClass=groupOfNames)"
-  search_scope: "sub"
-  attributes:
-    name: "cn"
-    description: "description"
-  member_attribute: "member"
-  organization_attribute: "ou"
-
-sync:
-  interval: 1h
-  create_users: true
-  create_orgs: true
-  create_teams: true
-  remove_stale: false
-  dry_run: false
 `
 
 	cfg, err := ParseConfig([]byte(yaml))
@@ -74,27 +46,6 @@ sync:
 	}
 	if cfg.Users.SearchScope != SearchScopeSub {
 		t.Errorf("expected search_scope sub, got %s", cfg.Users.SearchScope)
-	}
-
-	// Verify organization settings
-	if !cfg.Organizations.Enabled {
-		t.Error("expected organizations.enabled to be true")
-	}
-
-	// Verify team settings
-	if !cfg.Teams.Enabled {
-		t.Error("expected teams.enabled to be true")
-	}
-	if cfg.Teams.MemberAttribute != "member" {
-		t.Errorf("expected member_attribute member, got %s", cfg.Teams.MemberAttribute)
-	}
-
-	// Verify sync settings
-	if cfg.Sync.Interval != time.Hour {
-		t.Errorf("expected sync interval 1h, got %v", cfg.Sync.Interval)
-	}
-	if !cfg.Sync.CreateUsers {
-		t.Error("expected create_users to be true")
 	}
 }
 
@@ -191,9 +142,6 @@ users:
 	}
 	if cfg.Users.Attributes.Username != "uid" {
 		t.Errorf("expected default username attr uid, got %s", cfg.Users.Attributes.Username)
-	}
-	if cfg.Sync.Interval != time.Hour {
-		t.Errorf("expected default sync interval 1h, got %v", cfg.Sync.Interval)
 	}
 }
 
