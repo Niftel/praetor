@@ -59,6 +59,51 @@ The seven service images must be reachable from the cluster (built + pushed to
 - **Ingress** is off by default. Enable with `ingress.enabled=true` and set `host`
   (ui) + `ingestionHost` (callbacks). The ui pod proxies `/api/` to the api Service.
 
+## Authentication
+
+Praetor authenticates users against an **LDAP/Active Directory** directory — that
+is the intended production model, and it's why there is no built-in first-admin
+bootstrap: users, organizations, and teams sync in from the directory, so the
+first real login "just works". Configure it with:
+
+```sh
+helm install praetor deployments/helm/praetor-v2 -n praetor \
+  --set ldap.enabled=true \
+  --set-file ldap.config=my-ldap.yaml \
+  --set secrets.ldapBindPassword=<bind-password>   # stays in the Secret, never in the file
+```
+
+`ldap.config` is rendered verbatim to `/etc/praetor/ldap.yaml`; point it at your
+real endpoint (see `../../ldap/ldap-config.yaml` for the full shape):
+
+```yaml
+server:
+  url: "ldaps://ldap.corp.example.com:636"
+  bind_dn: "cn=svc-praetor,ou=svc,dc=corp,dc=example,dc=com"
+  bind_password_env: PRAETOR_LDAP_BIND_PASSWORD   # sourced from secrets.ldapBindPassword
+  start_tls: false
+  insecure_skip_verify: false                     # verify TLS against a real directory
+users:         { search_base: "ou=users,dc=corp,dc=example,dc=com", ... }
+organizations: { enabled: true, search_base: "...", ... }
+teams:         { enabled: true, search_base: "...", ... }
+```
+
+> The `ldap` container in `docker-compose.yml` (osixia/openldap) is a **local-dev
+> mock only** — a stand-in for a real directory. Do not model production on it;
+> point `ldap.config` at your own LDAP/AD instead. `insecure_skip_verify: true` in
+> the demo config exists solely because the mock speaks plaintext `ldap://`.
+
+**Demo / kick-the-tires without LDAP.** With `ldap.enabled=false` there is no auth
+source, so seed one superuser directly (the only case that needs it):
+
+```sh
+HASH=$(go run ./cmd/genhash)   # bcrypt hash of the literal "password"
+kubectl -n praetor exec -it praetor-postgresql-0 -- psql -U postgres -d praetor -c \
+  "INSERT INTO users (username,password_hash,email,first_name,last_name,is_superuser)
+   VALUES ('admin','$HASH','admin@example.com','Admin','User',true);"
+# then log in as admin / password — change it immediately
+```
+
 ## Local validation (k3d)
 
 The chart is smoke-tested end-to-end on k3d with locally-built images:
