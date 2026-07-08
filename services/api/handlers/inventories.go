@@ -121,8 +121,9 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Creating an inventory requires admin on its parent organization.
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+	// Creating an inventory requires the org's inventory_admin_role (org admins
+	// and superusers inherit it through the role hierarchy).
+	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldInventoryAdmin) {
 		return
 	}
 

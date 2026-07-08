@@ -166,9 +166,10 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		input.WebhookKey = genWebhookKey()
 	}
 
-	// Creating a template requires admin on its org, plus use access on any
-	// project/inventory/credential it attaches (AWX attach semantics).
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+	// Creating a template requires the org's job_template_admin_role, plus use
+	// access on any project/inventory/credential it attaches (AWX attach
+	// semantics). Org admins/superusers inherit job_template_admin_role.
+	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldJobTemplateAdmin) {
 		return
 	}
 	if input.ProjectID != nil && !rs.authorize(w, r, rbac.ContentTypeProject, *input.ProjectID, actUse) {
