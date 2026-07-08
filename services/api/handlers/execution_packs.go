@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -153,7 +154,9 @@ func (rs *ExecutionPacksResource) Rebuild(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if n == 0 {
-		render.ErrInvalidRequest(nil).Render(w, r) // nothing buildable (no spec/git source)
+		// The pack exists but has no spec and no git source — it was registered as
+		// a pre-built artifact, so there's nothing for the packbuilder to rebuild.
+		render.ErrInvalidRequest(fmt.Errorf("this pack was registered as a pre-built artifact (no spec or git source), so there is nothing to rebuild")).Render(w, r)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
