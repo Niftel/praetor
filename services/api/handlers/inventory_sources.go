@@ -94,7 +94,10 @@ func (rs *InventoriesResource) SyncInventorySource(w http.ResponseWriter, r *htt
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, invID, actAdmin) {
+	// Running a source sync is the AWX update_role action — no admin required.
+	// Inventory admins inherit update_role; defining/deleting sources still needs
+	// admin (handled on those endpoints).
+	if !rs.authorize(w, r, rbac.ContentTypeInventory, invID, actUpdate) {
 		return
 	}
 	sid, _ := strconv.ParseInt(chi.URLParam(r, "sourceId"), 10, 64)

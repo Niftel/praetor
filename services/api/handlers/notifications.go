@@ -59,7 +59,7 @@ func (h *ContentHandler) CreateNotificationTemplate(w http.ResponseWriter, r *ht
 	if body.NotificationType == "" {
 		body.NotificationType = "webhook"
 	}
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, body.OrganizationID, actAdmin) {
+	if !h.authorizeOrgRole(w, r, body.OrganizationID, rbac.RoleFieldNotificationAdmin) {
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *ContentHandler) DeleteNotificationTemplate(w http.ResponseWriter, r *ht
 		render.ErrInvalidRequest(fmt.Errorf("unknown notification template")).Render(w, r)
 		return
 	}
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
+	if !h.authorizeOrgRole(w, r, orgID, rbac.RoleFieldNotificationAdmin) {
 		return
 	}
 	if err := h.notifications.DeleteTemplate(r.Context(), id); err != nil {

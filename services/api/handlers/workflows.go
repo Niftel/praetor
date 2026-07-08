@@ -82,7 +82,7 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, body.OrganizationID, actAdmin) {
+	if !rs.authorizeOrgRole(w, r, body.OrganizationID, rbac.RoleFieldWorkflowAdmin) {
 		return
 	}
 	id, err := rs.store.Create(r.Context(), store.WorkflowSpec{
@@ -114,7 +114,7 @@ func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	if !rs.authorizeOrgRole(w, r, org, rbac.RoleFieldWorkflowAdmin) {
 		return
 	}
 	var body struct {
@@ -174,7 +174,7 @@ func (rs *WorkflowsResource) DeleteWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	if !rs.authorizeOrgRole(w, r, org, rbac.RoleFieldWorkflowAdmin) {
 		return
 	}
 	if err := rs.store.Delete(r.Context(), id); err != nil {
@@ -261,13 +261,16 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 
 func (rs *WorkflowsResource) setNodeApproval(w http.ResponseWriter, r *http.Request, status string) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	// Gate on the owning workflow's org.
+	// Gate on the owning workflow's org approval_role. Org admins inherit it;
+	// note a workflow_admin (manage) is deliberately NOT an approver unless also
+	// granted approval_role — approving a gate is a distinct authority from
+	// editing the workflow (matches AWX's manage-vs-approve separation).
 	org, err := rs.store.NodeApprovalOrg(r.Context(), id)
 	if err != nil {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actApprove) {
 		return
 	}
 	if err := rs.store.SetNodeApproval(r.Context(), id, status); err != nil {
