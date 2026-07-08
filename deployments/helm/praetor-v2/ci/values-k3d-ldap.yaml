@@ -1,0 +1,131 @@
+# LDAP overlay for the k3d smoke test — layer on top of values-k3d.yaml:
+#   helm install praetor deployments/helm/praetor-v2 \
+#     -f deployments/helm/praetor-v2/ci/values-k3d.yaml \
+#     -f deployments/helm/praetor-v2/ci/values-k3d-ldap.yaml -n praetor --create-namespace
+#
+# ldap.config is DERIVED from deployments/ldap/ldap-config.yaml with server.url
+# repointed at the in-cluster mock (ci/openldap.yaml). DEMO ONLY — insecure_skip_verify
+# and the plaintext ldap:// bind exist because the mock speaks no TLS.
+ldap:
+  enabled: true
+  config:
+    # Praetor LDAP Configuration — DEMO ONLY.
+    # AAP/AWX-style login-time group→role mapping (see pkg/auth/LDAP-REDESIGN.md).
+    # Connects to the mock OpenLDAP container in docker-compose. Do NOT copy this file
+    # to production as-is: bind_password comes from an env var (never commit a real
+    # one), and insecure_skip_verify must be false against a real ldaps:// directory.
+    
+    server:
+      url: "ldap://praetor-openldap:389"
+      bind_dn: "cn=admin,dc=praetor,dc=local"
+      # Never commit the bind password: read it from this env var (see the API service
+      # in docker-compose). The loader requires bind_password or bind_password_env.
+      bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
+      start_tls: false
+      # DEMO ONLY: the mock speaks plaintext ldap:// (no TLS). Against a real directory
+      # this MUST be false.
+      insecure_skip_verify: true
+      timeout: 30s
+    
+    users:
+      search_base: "ou=users,dc=praetor,dc=local"
+      search_filter: "(objectClass=inetOrgPerson)"
+      search_scope: "sub"
+      attributes:
+        username: "uid"
+        email: "mail"
+        first_name: "givenName"
+        last_name: "sn"
+    
+    # How a user's group membership is computed. The demo groups are groupOfNames with
+    # `member` DNs (no memberOf overlay), so member_dn is required here.
+    group_type:
+      type: member_dn
+      search_base: "ou=teams,dc=praetor,dc=local"
+      search_filter: "(objectClass=groupOfNames)"
+      member_attribute: "member"
+    
+    # Platform flags granted by group membership. The Praetor superuser is a local
+    # break-glass account (not in the directory); cn=admins here grants is_superuser to
+    # directory users such as `opark`.
+    user_flags_by_group:
+      is_superuser:
+        - "cn=admins,ou=teams,dc=praetor,dc=local"
+      is_system_auditor:
+        - "cn=compliance-team,ou=teams,dc=praetor,dc=local"
+    
+    # Organizations are operator-named here (created on first matching login) and bound
+    # to LDAP groups by role. remove_* revokes the role when a user leaves the group.
+    organization_map:
+      Engineering:
+        admins:
+          - "cn=platform-team,ou=teams,dc=praetor,dc=local"
+        users:
+          - "cn=platform-team,ou=teams,dc=praetor,dc=local"
+          - "cn=backend-team,ou=teams,dc=praetor,dc=local"
+          - "cn=frontend-team,ou=teams,dc=praetor,dc=local"
+        remove_admins: true
+        remove_users: true
+      Operations:
+        users:
+          - "cn=sre-team,ou=teams,dc=praetor,dc=local"
+          - "cn=network-team,ou=teams,dc=praetor,dc=local"
+          - "cn=admins,ou=teams,dc=praetor,dc=local"
+        remove_users: true
+      Security:
+        auditors:
+          - "cn=compliance-team,ou=teams,dc=praetor,dc=local"
+        users:
+          - "cn=security-team,ou=teams,dc=praetor,dc=local"
+        remove_auditors: true
+        remove_users: true
+      Data:
+        users:
+          - "cn=data-engineering-team,ou=teams,dc=praetor,dc=local"
+        remove_users: true
+      QualityAssurance:
+        users:
+          - "cn=qa-team,ou=teams,dc=praetor,dc=local"
+        remove_users: true
+    
+    # Teams are members-only; each resolves through its organization.
+    team_map:
+      platform-team:
+        organization: Engineering
+        users: ["cn=platform-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      backend-team:
+        organization: Engineering
+        users: ["cn=backend-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      frontend-team:
+        organization: Engineering
+        users: ["cn=frontend-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      sre-team:
+        organization: Operations
+        users: ["cn=sre-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      network-team:
+        organization: Operations
+        users: ["cn=network-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      security-team:
+        organization: Security
+        users: ["cn=security-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      compliance-team:
+        organization: Security
+        users: ["cn=compliance-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      data-engineering-team:
+        organization: Data
+        users: ["cn=data-engineering-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+      qa-team:
+        organization: QualityAssurance
+        users: ["cn=qa-team,ou=teams,dc=praetor,dc=local"]
+        remove: true
+secrets:
+  # Matches LDAP_ADMIN_PASSWORD in ci/openldap.yaml (mock bind account). Demo only.
+  ldapBindPassword: "admin"
