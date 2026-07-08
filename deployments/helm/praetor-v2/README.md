@@ -136,4 +136,42 @@ helm install praetor deployments/helm/praetor-v2 -f deployments/helm/praetor-v2/
 ```
 
 All nine service pods reach Ready; `ci/values-k3d.yaml` imports images bare
-(`registry: ""`) rather than pulling from a registry.
+(`registry: ""`) rather than pulling from a registry. Add a break-glass login
+with `--set bootstrapAdmin.enabled=true --set bootstrapAdmin.username=admin
+--set bootstrapAdmin.password=admin`.
+
+### Optional: LDAP (in-cluster mock)
+
+Exercise the AAP-style group→role mapping against a seeded OpenLDAP mock that
+runs *inside* the cluster (a stand-in for a real directory):
+
+```sh
+kubectl -n praetor create configmap openldap-seed \
+  --from-file=bootstrap.ldif=deployments/ldap/bootstrap.ldif
+kubectl apply -f deployments/helm/praetor-v2/ci/openldap.yaml
+
+helm upgrade praetor deployments/helm/praetor-v2 \
+  -f deployments/helm/praetor-v2/ci/values-k3d.yaml \
+  -f deployments/helm/praetor-v2/ci/values-k3d-ldap.yaml -n praetor
+```
+
+`values-k3d-ldap.yaml` points `ldap.config` at the in-cluster `praetor-openldap`
+Service. Log in as `opark`/`praetor123` (→ superuser via `cn=admins`) or
+`scho`/`praetor123` (→ system auditor via `cn=compliance-team`); orgs/teams are
+created from group membership on first login.
+
+### Optional: Gitea pack registry (external)
+
+The executor pulls Execution Packs anonymously from a Gitea generic registry
+(kept external by design). Point the chart at any reachable Gitea that has the
+packs published — e.g. a host-side Gitea reached from k3d via `host.k3d.internal`:
+
+```sh
+helm upgrade praetor deployments/helm/praetor-v2 \
+  -f deployments/helm/praetor-v2/ci/values-k3d.yaml \
+  --set gitea.internalUrl=http://host.k3d.internal:3002 --set gitea.owner=praetor -n praetor
+kubectl -n praetor rollout restart statefulset/praetor-executor   # pick up the ConfigMap change
+```
+
+The executor fetches `{gitea.internalUrl}/api/packages/{owner}/generic/execpack-<pack>/current/<pack>-linux-<arch>.tar.gz`
+with no token (only publishing needs one).
