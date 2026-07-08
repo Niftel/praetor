@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Credential, CredentialType } from '../types';
 import Card from '../components/ui/Card';
@@ -6,14 +7,15 @@ import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Key, Lock, Plus, Loader } from 'lucide-react';
+import { Key, Lock, Plus, Loader, ArrowLeft } from 'lucide-react';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
 const CredentialsPage = () => {
+  const { orgId: orgIdStr } = useParams();
+  const orgId = Number(orgIdStr);
+  const [orgName, setOrgName] = useState('');
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([]);
-  const [orgs, setOrgs] = useState<any[]>([]);
-  const [orgId, setOrgId] = useState<number | ''>('');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newCred, setNewCred] = useState<Partial<Credential>>({});
@@ -32,13 +34,10 @@ const CredentialsPage = () => {
           api.getCredentialTypes(),
           api.getOrganizations().catch(() => [])
         ]);
-        const creds = credsData || [];
         const types = typesData || [];
-        const orgList = unwrap(orgsData);
-        setCredentials(creds);
+        setCredentials(unwrap<Credential>(credsData).filter(c => (c as any).organization_id === orgId));
         setCredentialTypes(types);
-        setOrgs(orgList);
-        if (orgList.length > 0) setOrgId(orgList[0].id);
+        setOrgName(unwrap<{ id: number; name: string }>(orgsData).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
         if (types.length > 0) {
           setSelectedTypeId(types[0].id);
         }
@@ -49,13 +48,14 @@ const CredentialsPage = () => {
       }
     };
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
   const selectedType = credentialTypes.find(t => t.id === selectedTypeId);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCred.name || !selectedTypeId || orgId === '') return;
+    if (!newCred.name || !selectedTypeId) return;
 
     try {
       const credData = {
@@ -138,8 +138,13 @@ const CredentialsPage = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Credentials</h1>
+      <div className="flex justify-between items-end">
+        <div>
+          <Link to="/credentials" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
+            <ArrowLeft size={14} /> Organizations
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900 mt-1">{orgName} · Credentials</h1>
+        </div>
         <Button onClick={() => setIsModalOpen(true)} icon={<Plus size={16} />}>Add Credential</Button>
       </div>
 
@@ -171,16 +176,8 @@ const CredentialsPage = () => {
         )}
       </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="New Credential">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={`New Credential in ${orgName}`}>
         <form onSubmit={handleCreate} className="space-y-4">
-          <Select
-            label="Organization"
-            value={orgId}
-            onChange={e => setOrgId(Number(e.target.value))}
-          >
-            <option value="">Select organization…</option>
-            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </Select>
           <Input
             label="Name"
             type="text"

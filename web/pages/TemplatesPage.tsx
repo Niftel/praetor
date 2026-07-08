@@ -1,21 +1,24 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Template, Project, Inventory, Credential, PaginatedResponse, SurveyQuestion } from '../types';
 import Card from '../components/ui/Card';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
-import { Plus, Edit2, Play, Trash2, Loader } from 'lucide-react';
+import { Plus, Edit2, Play, Trash2, Loader, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
 const TemplatesPage = () => {
+  const { orgId: orgIdStr } = useParams();
+  const orgId = Number(orgIdStr);
+  const [orgName, setOrgName] = useState('');
   const [templates, setTemplates] = useState<Template[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [executionPacks, setExecutionPacks] = useState<any[]>([]);
-  const [orgs, setOrgs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
@@ -53,13 +56,14 @@ const TemplatesPage = () => {
           api.getExecutionPacks(),
           api.getOrganizations().catch(() => [])
         ]);
-        // Handle paginated responses
-        setTemplates(unwrap(templatesData));
-        setProjects(unwrap(projectsData));
-        setInventories(unwrap(inventoriesData));
-        setCredentials(credentialsData || []);
+        // Scope everything to the org from the route.
+        const byOrg = <T extends { organization_id?: number }>(arr: T[]) => arr.filter(x => x.organization_id === orgId);
+        setTemplates(byOrg(unwrap<Template>(templatesData)));
+        setProjects(byOrg(unwrap<Project>(projectsData)));
+        setInventories(byOrg(unwrap<Inventory>(inventoriesData)));
+        setCredentials(byOrg(unwrap<Credential>(credentialsData)));
         setExecutionPacks(packsData || []);
-        setOrgs(unwrap(orgsData));
+        setOrgName(unwrap<{ id: number; name: string }>(orgsData).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
       } catch (err) {
         console.error('Failed to load data', err);
       } finally {
@@ -67,11 +71,12 @@ const TemplatesPage = () => {
       }
     };
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
   const openCreateModal = () => {
     setEditingTemplate(null);
-    setFormData({});
+    setFormData({ organization_id: orgId }); // org fixed by the route
     setVarsText('');
     setSurvey([]);
     setFormMsg('');
@@ -204,8 +209,13 @@ const TemplatesPage = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Templates</h1>
+      <div className="flex justify-between items-end">
+        <div>
+          <Link to="/templates" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
+            <ArrowLeft size={14} /> Organizations
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900 mt-1">{orgName} · Templates</h1>
+        </div>
         <Button onClick={openCreateModal} icon={<Plus size={16} />}>
           Add Template
         </Button>
@@ -271,15 +281,6 @@ const TemplatesPage = () => {
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Select
-            label="Organization"
-            value={formData.organization_id || ''}
-            disabled={!!editingTemplate}
-            onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
-          >
-            <option value="">Select organization…</option>
-            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </Select>
           <Input
             label="Name"
             type="text"
