@@ -5,12 +5,30 @@ import (
 )
 
 // LDAPConfig is the root configuration structure for LDAP integration.
+//
+// The Organizations/Teams/Sync fields drive the legacy OU-discovery sync and are
+// being removed (see pkg/auth/LDAP-REDESIGN.md). The GroupType/UserFlags/
+// OrganizationMap/TeamMap fields drive the AAP/AWX login-time group→role model
+// that replaces it: LDAP groups are bound to Praetor roles, evaluated at login.
 type LDAPConfig struct {
 	Server        LDAPServerConfig `yaml:"server"`
 	Users         LDAPUserConfig   `yaml:"users"`
-	Organizations LDAPOrgConfig    `yaml:"organizations"`
-	Teams         LDAPTeamConfig   `yaml:"teams"`
-	Sync          LDAPSyncConfig   `yaml:"sync"`
+	Organizations LDAPOrgConfig    `yaml:"organizations"` // DEPRECATED (legacy sync)
+	Teams         LDAPTeamConfig   `yaml:"teams"`         // DEPRECATED (legacy sync)
+	Sync          LDAPSyncConfig   `yaml:"sync"`          // DEPRECATED (legacy sync)
+
+	// AAP/AWX login-time mapping.
+	GroupType       LDAPGroupTypeConfig         `yaml:"group_type"`
+	UserFlags       LDAPUserFlagsConfig         `yaml:"user_flags_by_group"`
+	OrganizationMap map[string]LDAPOrgMapEntry  `yaml:"organization_map"` // key = Praetor org NAME
+	TeamMap         map[string]LDAPTeamMapEntry `yaml:"team_map"`         // key = Praetor team NAME
+}
+
+// UsesLoginMapping reports whether any AAP-style mapping is configured, i.e. the
+// new model is in use for this config.
+func (c *LDAPConfig) UsesLoginMapping() bool {
+	return len(c.OrganizationMap) > 0 || len(c.TeamMap) > 0 ||
+		c.UserFlags.IsSuperuser.Configured() || c.UserFlags.IsSystemAuditor.Configured()
 }
 
 // LDAPServerConfig contains LDAP server connection settings.

@@ -100,6 +100,10 @@ type ContentHandler struct {
 	access        AccessStore
 	users         UserStore
 	notifications NotificationStore
+
+	// LDAPConfigPath, when set, enables LDAP login (AAP group→role mapping) in
+	// Login. Empty means local auth only. Set by the router from the API config.
+	LDAPConfigPath string
 }
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
