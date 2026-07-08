@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Button from '../components/ui/Button';
-import { Lock } from 'lucide-react';
+import { Input } from '../components/ui/Input';
 import { api, setAuthToken } from '../services/api';
 import { toast } from '../components/ui/toast';
 
@@ -41,32 +41,23 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
         <div className="p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <input
-                type="text"
-                required
-                className="w-full rounded-md border-gray-300 shadow-sm border p-2.5 focus:ring-brand-500 focus:border-brand-500 transition-colors"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-              />
-            </div>
+            <Input
+              label="Username"
+              type="text"
+              required
+              autoComplete="username"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+            />
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <div className="relative">
-                <input
-                  type="password"
-                  required
-                  className="w-full rounded-md border-gray-300 shadow-sm border p-2.5 pl-10 focus:ring-brand-500 focus:border-brand-500 transition-colors"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                />
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-4 w-4 text-gray-400" />
-                </div>
-              </div>
-            </div>
+            <Input
+              label="Password"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+            />
 
             <Button
               type="submit"
