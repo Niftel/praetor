@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -59,6 +60,60 @@ func TestDelegatedOrgAdminRoles(t *testing.T) {
 	rec = callJSON(t, h.CreateProject, http.MethodPost, projectBody(org, fmt.Sprintf("deleg-p2-%d", uniq)), invAdminUC, nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("inventory_admin create project: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+// TestOrgExecuteRunsJobTemplates proves migration 000048's hierarchy fix: a
+// holder of the org execute_role may execute (and read) any job template in the
+// org, without any per-template grant. The org execute_role was previously inert
+// because the trigger never made a JT's execute_role a child of it. Execute is
+// still not admin — an org-execute holder cannot manage the template.
+func TestOrgExecuteRunsJobTemplates(t *testing.T) {
+	db := rbacTestDB(t)
+	defer db.Close()
+	access := rbac.NewAccessChecker(db)
+	ctx := context.Background()
+
+	uniq := time.Now().UnixNano()
+	org := createOrg(t, db, fmt.Sprintf("rbac-orgexec-org-%d", uniq))
+	runner := createUser(t, db, fmt.Sprintf("rbac-orgexec-runner-%d", uniq)) // org execute_role
+	nobody := createUser(t, db, fmt.Sprintf("rbac-orgexec-nobody-%d", uniq))
+
+	// Insert a job template directly so the create_job_template_roles trigger
+	// fires (bypassing handler-level project validation, which is orthogonal here).
+	var ujtID int64
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO unified_job_templates (name) VALUES ($1) RETURNING id`,
+		fmt.Sprintf("ujt-%d", uniq)).Scan(&ujtID); err != nil {
+		t.Fatalf("insert unified_job_template: %v", err)
+	}
+	var jtID int64
+	if err := db.QueryRowContext(ctx,
+		`INSERT INTO job_templates (organization_id, name, playbook, unified_job_template_id)
+		 VALUES ($1, $2, 'site.yml', $3) RETURNING id`,
+		org, fmt.Sprintf("jt-%d", uniq), ujtID).Scan(&jtID); err != nil {
+		t.Fatalf("insert job_template: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM job_templates WHERE id = $1`, jtID)
+		_, _ = db.Exec(`DELETE FROM unified_job_templates WHERE id = $1`, ujtID)
+		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, org)
+		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, runner, nobody)
+	})
+
+	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldExecute, runner)
+
+	if ok, err := access.CanExecute(ctx, runner, rbac.ContentTypeJobTemplate, jtID); err != nil || !ok {
+		t.Fatalf("org-execute holder should execute org JT: ok=%v err=%v", ok, err)
+	}
+	if ok, err := access.CanRead(ctx, runner, rbac.ContentTypeJobTemplate, jtID); err != nil || !ok {
+		t.Fatalf("org-execute holder should read org JT: ok=%v err=%v", ok, err)
+	}
+	if ok, _ := access.CanAdmin(ctx, runner, rbac.ContentTypeJobTemplate, jtID); ok {
+		t.Fatalf("org-execute holder must NOT administer the JT")
+	}
+	if ok, _ := access.CanExecute(ctx, nobody, rbac.ContentTypeJobTemplate, jtID); ok {
+		t.Fatalf("unrelated user must not execute the JT")
 	}
 }
 
