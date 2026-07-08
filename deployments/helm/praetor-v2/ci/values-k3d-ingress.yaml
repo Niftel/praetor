@@ -1,0 +1,27 @@
+# Ingress + trusted-TLS overlay for the k3d demo — serve the stack on real URLs
+# (https://praetor.localhost) via k3s's built-in Traefik, with the machine's
+# mkcert cert so browsers show no warning. Layer on top of values-k3d.yaml:
+#
+#   helm upgrade praetor deployments/helm/praetor-v2 \
+#     -f deployments/helm/praetor-v2/ci/values-k3d.yaml \
+#     -f deployments/helm/praetor-v2/ci/values-k3d-ingress.yaml -n praetor
+#
+# PREREQUISITES (see README §"URLs via ingress + trusted TLS"):
+#  1. The cluster must map host 80/443 to the loadbalancer. Either create it with
+#       k3d cluster create praetor-test -p "80:80@loadbalancer" -p "443:443@loadbalancer"
+#     or add them to a live cluster:
+#       k3d cluster edit praetor-test --port-add "80:80@loadbalancer" --port-add "443:443@loadbalancer"
+#  2. Create the TLS secret from the mkcert cert (machine-specific — the private
+#     key is NOT committed):
+#       kubectl -n praetor create secret tls praetor-localhost-tls \
+#         --cert=deployments/traefik/certs/localhost.pem \
+#         --key=deployments/traefik/certs/localhost-key.pem
+#     Requires `mkcert -install` once so the local CA is trusted by the browser.
+ingress:
+  enabled: true
+  className: traefik                     # k3s ships Traefik as the default ingress
+  host: praetor.localhost                # UI (also serves /api via the ui proxy)
+  ingestionHost: ingest.praetor.localhost
+  tls:
+    enabled: true
+    secretName: praetor-localhost-tls    # mkcert cert loaded above; covers *.praetor.localhost
