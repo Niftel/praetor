@@ -88,8 +88,10 @@ hostRunner:
 
 ldap:
   enabled: false
-  # Rendered verbatim into /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml
-  # for the shape). Leave empty to disable LDAP auth/sync entirely.
+  # AAP-style login-time group→role mapping, rendered verbatim into
+  # /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml for a full
+  # example: server, users, group_type, user_flags_by_group, organization_map,
+  # team_map). Leave empty to disable LDAP entirely (local auth only).
   config: {}
 
 api:

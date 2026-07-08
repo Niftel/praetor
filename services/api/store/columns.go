@@ -17,8 +17,8 @@ const (
 	RoleCols           = `id, role_field, singleton_name, content_type, object_id, name, description, created_at, modified_at`
 	JobTemplateCols    = `id, organization_id, name, description, inventory_id, project_id, playbook, playbook_content, unified_job_template_id, credential_id, execution_pack_id, forks, job_type, verbosity, extra_vars, job_limit, ask_variables_on_launch, ask_limit_on_launch, survey_enabled, survey_spec, webhook_enabled, webhook_service, webhook_key, use_fact_cache, allow_simultaneous, created_at, modified_at`
 	ProjectCols        = `id, organization_id, name, description, scm_type, scm_url, scm_branch, created_at, modified_at`
-	OrganizationCols   = `id, name, description, ldap_dn, ldap_synced_at, created_at, modified_at`
-	TeamCols           = `id, organization_id, name, description, ldap_dn, ldap_synced_at, created_at, modified_at`
+	OrganizationCols   = `id, name, description, created_at, modified_at`
+	TeamCols           = `id, organization_id, name, description, created_at, modified_at`
 	ScheduleCols       = `id, name, description, unified_job_template_id, workflow_template_id, rrule, next_run, enabled, extra_vars, created_at, modified_at`
 )
 
