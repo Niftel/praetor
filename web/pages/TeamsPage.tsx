@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Team, User } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -7,6 +7,7 @@ import Modal from '../components/ui/Modal';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import { Users, Plus, Trash2, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 interface TeamWithMembers extends Team {
   members?: User[];
@@ -22,9 +23,9 @@ const TeamsPage = () => {
   const fetchTeams = async () => {
     try {
       setLoading(true);
-      api.getOrganizations().then(o => setOrgs(o?.items || o || [])).catch(() => setOrgs([]));
+      api.getOrganizations().then(o => setOrgs(unwrap(o))).catch(() => setOrgs([]));
       const teamsResponse = await api.getTeams();
-      const teamItems: Team[] = teamsResponse?.items || teamsResponse || [];
+      const teamItems: Team[] = unwrap(teamsResponse);
 
       const teamsWithMembers = await Promise.all(
         teamItems.map(async (team) => {
@@ -76,9 +77,7 @@ const TeamsPage = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader className="animate-spin text-brand-600" size={32} />
-      </div>
+      <PageSpinner />
     );
   }
 

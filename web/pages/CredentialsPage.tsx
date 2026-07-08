@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Credential, CredentialType } from '../types';
 import Card from '../components/ui/Card';
 import { Input, Textarea, Select } from '../components/ui/Input';
@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { Key, Lock, Plus, Loader } from 'lucide-react';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 const CredentialsPage = () => {
   const [credentials, setCredentials] = useState<Credential[]>([]);
@@ -33,7 +34,7 @@ const CredentialsPage = () => {
         ]);
         const creds = credsData || [];
         const types = typesData || [];
-        const orgList = orgsData?.items || orgsData || [];
+        const orgList = unwrap(orgsData);
         setCredentials(creds);
         setCredentialTypes(types);
         setOrgs(orgList);
@@ -131,9 +132,7 @@ const CredentialsPage = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader className="animate-spin text-brand-600" size={32} />
-      </div>
+      <PageSpinner />
     );
   }
 

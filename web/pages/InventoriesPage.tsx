@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Inventory, Host, Group } from '../types';
 import Card from '../components/ui/Card';
 import { Input, Textarea, Select } from '../components/ui/Input';
@@ -9,6 +9,7 @@ import ResourceAccess from '../components/ResourceAccess';
 import { splitConnection, mergeConnection, emptyConnection, HostConnection } from '../lib/hostConnection';
 import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock, Plug, Save, ChevronDown, ChevronRight } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 const InventoriesPage = () => {
   const [inventories, setInventories] = useState<Inventory[]>([]);
@@ -54,7 +55,7 @@ const InventoriesPage = () => {
     try {
       setLoading(true);
       const response = await api.getInventories();
-      const items = response?.items || response || [];
+      const items = unwrap(response);
       setInventories(items);
       if (items.length > 0 && !selectedInventoryId) {
         setSelectedInventoryId(items[0].id);
@@ -69,8 +70,8 @@ const InventoriesPage = () => {
 
   useEffect(() => {
     fetchInventories();
-    api.getCredentials().then(res => setCredentials(res?.items || res || [])).catch(() => { });
-    api.getOrganizations().then(o => { const l = o?.items || o || []; setOrgs(l); if (l.length) setNewInventoryOrg(l[0].id); }).catch(() => { });
+    api.getCredentials().then(res => setCredentials(unwrap(res))).catch(() => { });
+    api.getOrganizations().then(o => { const l = unwrap(o); setOrgs(l); if (l.length) setNewInventoryOrg(l[0].id); }).catch(() => { });
   }, []);
 
   // Load hosts and groups when selected inventory changes
@@ -300,9 +301,7 @@ const InventoriesPage = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader className="animate-spin text-brand-600" size={32} />
-      </div>
+      <PageSpinner />
     );
   }
 
