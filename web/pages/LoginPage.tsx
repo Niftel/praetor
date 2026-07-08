@@ -2,15 +2,15 @@ import React, { useState } from 'react';
 import Button from '../components/ui/Button';
 import { Lock } from 'lucide-react';
 import { api, setAuthToken } from '../services/api';
-import { toast, confirmDialog } from '../components/ui/toast';
+import { toast } from '../components/ui/toast';
 
 interface LoginPageProps {
   onLogin: () => void;
 }
 
 const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('password');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -68,16 +68,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center text-gray-600 cursor-pointer">
-                <input type="checkbox" className="rounded border-gray-300 text-brand-600 focus:ring-brand-500 mr-2" />
-                Remember me
-              </label>
-              <a href="#" className="font-medium text-brand-600 hover:text-brand-500">
-                Forgot password?
-              </a>
-            </div>
-
             <Button
               type="submit"
               className="w-full justify-center"
@@ -90,7 +80,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         </div>
 
         <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 text-center text-xs text-gray-400">
-          &copy; 2023 Praetor Automation. All rights reserved.
+          Praetor Automation Platform
         </div>
       </div>
     </div>

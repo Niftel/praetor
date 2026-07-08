@@ -4,6 +4,33 @@ export const getAuthToken = () => localStorage.getItem('praetor_token');
 export const setAuthToken = (token: string) => localStorage.setItem('praetor_token', token);
 export const removeAuthToken = () => localStorage.removeItem('praetor_token');
 
+export interface CurrentUser {
+    user_id: number;
+    username: string;
+    is_superuser: boolean;
+    is_system_auditor: boolean;
+}
+
+// Decode the logged-in user's identity from the JWT claims (no network call).
+// Returns null if there's no token or it can't be parsed.
+export const getCurrentUser = (): CurrentUser | null => {
+    const token = getAuthToken();
+    if (!token) return null;
+    try {
+        const payload = token.split('.')[1];
+        const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        const c = JSON.parse(json);
+        return {
+            user_id: c.user_id,
+            username: c.username,
+            is_superuser: !!c.is_superuser,
+            is_system_auditor: !!c.is_system_auditor,
+        };
+    } catch {
+        return null;
+    }
+};
+
 export const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
     const token = getAuthToken();
     const headers = new Headers(options.headers || {});

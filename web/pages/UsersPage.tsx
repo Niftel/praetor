@@ -79,6 +79,7 @@ const UsersPage = () => {
       </div>
 
       <Card>
+        <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -141,6 +142,7 @@ const UsersPage = () => {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Add User">
@@ -198,6 +200,7 @@ const UsersPage = () => {
                 <Shield size={14} className="inline mr-1" /> System Administrator — full access to everything.
               </div>
             )}
+            <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -223,6 +226,7 @@ const UsersPage = () => {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </Modal>
