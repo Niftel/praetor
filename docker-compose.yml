@@ -102,6 +102,12 @@ services:
       # are unset. Production MUST set real secrets (then this is irrelevant) and
       # should set PRAETOR_ALLOW_INSECURE_DEFAULTS=false so a missing secret fails hard.
       PRAETOR_ALLOW_INSECURE_DEFAULTS: "${PRAETOR_ALLOW_INSECURE_DEFAULTS:-true}"
+      # Break-glass LOCAL superuser (authenticates locally, never via LDAP). The demo
+      # directory has no admin user, so this is how you log in / bootstrap. Demo
+      # default admin/admin; override in .env for anything shared.
+      PRAETOR_BOOTSTRAP_ADMIN_USERNAME: "${PRAETOR_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+      PRAETOR_BOOTSTRAP_ADMIN_PASSWORD: "${PRAETOR_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+      PRAETOR_BOOTSTRAP_ADMIN_EMAIL: "${PRAETOR_BOOTSTRAP_ADMIN_EMAIL:-admin@praetor.local}"
     volumes:
       # One-time import of any existing keypair into the DB-managed automation
       # identity (read-only; generated fresh if absent).

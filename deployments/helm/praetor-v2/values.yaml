@@ -35,11 +35,24 @@ serviceAccount:
 # for throwaway installs where you don't provide secrets.
 allowInsecureDefaults: false
 
+# Break-glass LOCAL superuser, created by the migrator when enabled. It
+# authenticates locally (never via LDAP), so a misconfigured/unreachable directory
+# can't lock you out — and it provides a first superuser before any LDAP group
+# grants one. The password is re-applied on every upgrade (the chart is the source
+# of truth); a same-named LDAP user is never overwritten.
+bootstrapAdmin:
+  enabled: false
+  username: admin
+  email: ""
+  password: ""   # required when enabled (unless supplied via secrets.existingSecret
+                 # as PRAETOR_BOOTSTRAP_ADMIN_PASSWORD)
+
 secrets:
   # If set, all secret values below are ignored and this pre-existing Secret is
   # used instead (bring your own ExternalSecrets/sealed-secrets). It must contain:
   # DATABASE_URL, PRAETOR_SECRET_KEY, PRAETOR_SECRET_KEY_OLD, JWT_SECRET,
-  # PRAETOR_INTERNAL_TOKEN, PRAETOR_LDAP_BIND_PASSWORD.
+  # PRAETOR_INTERNAL_TOKEN, PRAETOR_LDAP_BIND_PASSWORD, and (if bootstrapAdmin is
+  # enabled) PRAETOR_BOOTSTRAP_ADMIN_PASSWORD.
   existingSecret: ""
   secretKey: ""            # exactly 32 bytes; required unless allowInsecureDefaults
   secretKeyOld: ""         # previous key during rotation
@@ -88,8 +101,10 @@ hostRunner:
 
 ldap:
   enabled: false
-  # Rendered verbatim into /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml
-  # for the shape). Leave empty to disable LDAP auth/sync entirely.
+  # AAP-style login-time group→role mapping, rendered verbatim into
+  # /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml for a full
+  # example: server, users, group_type, user_flags_by_group, organization_map,
+  # team_map). Leave empty to disable LDAP entirely (local auth only).
   config: {}
 
 api:

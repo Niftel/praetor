@@ -443,23 +443,9 @@ gidNumber: 1000
 homeDirectory: /home/mrossi
 userPassword: praetor123
 
-dn: uid=admin,ou=users,dc=praetor,dc=local
-objectClass: inetOrgPerson
-objectClass: posixAccount
-objectClass: shadowAccount
-uid: admin
-givenName: System
-sn: Administrator
-cn: System Administrator
-displayName: System Administrator
-mail: admin@praetor.local
-title: Systems Administrator
-departmentNumber: Operations
-manager: uid=opark,ou=users,dc=praetor,dc=local
-uidNumber: 1000
-gidNumber: 1000
-homeDirectory: /home/admin
-userPassword: admin
+# NOTE: there is deliberately NO uid=admin user in the directory. The Praetor
+# superuser is a local break-glass account (local password, ldap_dn NULL) that is
+# never LDAP-managed — so the directory must not carry a colliding admin user.
 
 # --- Security ----------------------------------------------------------------
 dn: uid=diana,ou=users,dc=praetor,dc=local
@@ -644,9 +630,8 @@ member: uid=mrossi,ou=users,dc=praetor,dc=local
 dn: cn=admins,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
 cn: admins
-description: Privileged systems administrators
+description: Privileged systems administrators (grants Praetor is_superuser)
 ou: Operations
-member: uid=admin,ou=users,dc=praetor,dc=local
 member: uid=opark,ou=users,dc=praetor,dc=local
 
 # --- Security teams ----------------------------------------------------------
