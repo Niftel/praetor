@@ -15,13 +15,15 @@ interface FieldWrapProps {
   error?: string;
   required?: boolean;
   id: string;
+  wrapperClassName?: string;
   children: (id: string) => React.ReactNode;
 }
 
 // Field renders a label bound (htmlFor/id) to the control it wraps, plus
-// optional hint/error text.
-const Field: React.FC<FieldWrapProps> = ({ label, hint, error, required, id, children }) => (
-  <div>
+// optional hint/error text. wrapperClassName lets callers place the field in a
+// flex/grid layout.
+const Field: React.FC<FieldWrapProps> = ({ label, hint, error, required, id, wrapperClassName, children }) => (
+  <div className={wrapperClassName}>
     {label && (
       <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
         {label}
@@ -38,13 +40,14 @@ type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   label?: string;
   hint?: string;
   error?: string;
+  wrapperClassName?: string;
 };
 
-export const Input: React.FC<InputProps> = ({ label, hint, error, className = '', id, ...rest }) => {
+export const Input: React.FC<InputProps> = ({ label, hint, error, className = '', id, wrapperClassName, ...rest }) => {
   const auto = useId();
   const fieldId = id ?? auto;
   return (
-    <Field label={label} hint={hint} error={error} required={rest.required} id={fieldId}>
+    <Field label={label} hint={hint} error={error} required={rest.required} id={fieldId} wrapperClassName={wrapperClassName}>
       {(fid) => (
         <input
           id={fid}
@@ -61,13 +64,14 @@ type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
   label?: string;
   hint?: string;
   error?: string;
+  wrapperClassName?: string;
 };
 
-export const Textarea: React.FC<TextareaProps> = ({ label, hint, error, className = '', id, ...rest }) => {
+export const Textarea: React.FC<TextareaProps> = ({ label, hint, error, className = '', id, wrapperClassName, ...rest }) => {
   const auto = useId();
   const fieldId = id ?? auto;
   return (
-    <Field label={label} hint={hint} error={error} required={rest.required} id={fieldId}>
+    <Field label={label} hint={hint} error={error} required={rest.required} id={fieldId} wrapperClassName={wrapperClassName}>
       {(fid) => (
         <textarea
           id={fid}
@@ -84,13 +88,14 @@ type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   label?: string;
   hint?: string;
   error?: string;
+  wrapperClassName?: string;
 };
 
-export const Select: React.FC<SelectProps> = ({ label, hint, error, className = '', id, children, ...rest }) => {
+export const Select: React.FC<SelectProps> = ({ label, hint, error, className = '', id, children, wrapperClassName, ...rest }) => {
   const auto = useId();
   const fieldId = id ?? auto;
   return (
-    <Field label={label} hint={hint} error={error} required={rest.required} id={fieldId}>
+    <Field label={label} hint={hint} error={error} required={rest.required} id={fieldId} wrapperClassName={wrapperClassName}>
       {(fid) => (
         <select
           id={fid}

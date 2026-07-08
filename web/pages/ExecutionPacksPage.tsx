@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import { Input, Textarea } from '../components/ui/Input';
 import { Package, Plus, Trash2, Loader, GitBranch, Copy, Pencil, RefreshCw } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 
@@ -164,24 +165,15 @@ const ExecutionPacksPage = () => {
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Execution Pack' : 'Register Execution Pack'}>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <p className="text-xs text-gray-500 mb-1">Must match the built artifact: <code>&lt;name&gt;-linux-&lt;arch&gt;.tar.gz</code>.</p>
-            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-sm" placeholder="docker-tools"
-              value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <input className="w-full border border-gray-300 rounded-md p-2" placeholder="ansible-core + community.docker + docker SDK"
-              value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Spec (YAML)</label>
-            <p className="text-xs text-gray-500 mb-1">Provide a spec and Praetor <b>builds the pack</b> for you (status → building → ready). Leave empty to register a pre-built artifact.</p>
-            <textarea rows={6} className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs"
-              placeholder={'name: docker-tools\nansible: ansible-core\ncollections:\n  - community.docker'}
-              value={form.spec} onChange={e => setForm({ ...form, spec: e.target.value })} />
-          </div>
+          <Input label="Name" className="font-mono text-sm" placeholder="docker-tools"
+            hint="Must match the built artifact: <name>-linux-<arch>.tar.gz"
+            value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+          <Input label="Description" placeholder="ansible-core + community.docker + docker SDK"
+            value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+          <Textarea label="Spec (YAML)" rows={6} className="font-mono text-xs"
+            hint="Provide a spec and Praetor builds the pack for you (status → building → ready). Leave empty to register a pre-built artifact."
+            placeholder={'name: docker-tools\nansible: ansible-core\ncollections:\n  - community.docker'}
+            value={form.spec} onChange={e => setForm({ ...form, spec: e.target.value })} />
 
           {/* Git-backed: pull the spec from a repo; a push webhook rebuilds it. */}
           <div className="border border-gray-200 rounded-md p-3 bg-gray-50 space-y-3">
@@ -190,14 +182,14 @@ const ExecutionPacksPage = () => {
             </div>
             <p className="text-xs text-gray-500 -mt-1">Point the pack at a repo + the path to its YAML. Praetor pulls the spec and builds; add the webhook below to your git host so a <b>push rebuilds the pack</b>. Leave blank to manage the spec inline above.</p>
             <div className="grid grid-cols-3 gap-2">
-              <input className="col-span-2 border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="https://gitea.local/me/packs.git"
+              <Input wrapperClassName="col-span-2" label="Repo URL" className="font-mono text-xs" placeholder="https://gitea.local/me/packs.git"
                 value={form.scm_url} onChange={e => setForm({ ...form, scm_url: e.target.value })} />
-              <input className="border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="main"
+              <Input label="Branch" className="font-mono text-xs" placeholder="main"
                 value={form.scm_branch} onChange={e => setForm({ ...form, scm_branch: e.target.value })} />
             </div>
-            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs" placeholder="path/in/repo/docker.yml"
+            <Input label="Spec path" className="font-mono text-xs" placeholder="path/in/repo/docker.yml"
               value={form.spec_path} onChange={e => setForm({ ...form, spec_path: e.target.value })} />
-            <input className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs"
+            <Input label="Webhook secret" className="font-mono text-xs"
               placeholder={editingId ? 'webhook secret (leave blank to keep current)' : 'webhook secret (token) for the push trigger'}
               value={form.webhook_key} onChange={e => setForm({ ...form, webhook_key: e.target.value })} />
           </div>

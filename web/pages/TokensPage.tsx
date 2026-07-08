@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import { Input } from '../components/ui/Input';
 import { KeyRound, Plus, Trash2, Copy, Check, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 
@@ -116,17 +117,11 @@ const TokensPage = () => {
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="New API Token">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input className="w-full border border-gray-300 rounded-md p-2" placeholder="ci-pipeline"
-              value={name} onChange={e => setName(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Expires (optional)</label>
-            <input type="date" className="w-full border border-gray-300 rounded-md p-2"
-              value={expires} onChange={e => setExpires(e.target.value)} />
-            <p className="text-xs text-gray-500 mt-1">Leave blank for a token that never expires.</p>
-          </div>
+          <Input label="Name" placeholder="ci-pipeline"
+            value={name} onChange={e => setName(e.target.value)} />
+          <Input label="Expires (optional)" type="date"
+            value={expires} onChange={e => setExpires(e.target.value)}
+            hint="Leave blank for a token that never expires." />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
             <Button onClick={create}>Create</Button>
