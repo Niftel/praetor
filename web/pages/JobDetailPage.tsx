@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Job } from '../types';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -67,7 +67,7 @@ const JobDetailPage = () => {
   const loadJob = useCallback(async () => {
     try {
       const list = await api.getJobs();
-      const jobs: Job[] = Array.isArray(list) ? list : (list?.items || []);
+      const jobs: Job[] = unwrap(list);
       const found = jobs.find(j => j.id === id);
       if (found) setJob(found);
     } catch { /* keep whatever we have */ }

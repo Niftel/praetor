@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Template, Project, Inventory, Credential, PaginatedResponse, SurveyQuestion } from '../types';
 import Card from '../components/ui/Card';
 import { Input, Textarea, Select } from '../components/ui/Input';
@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Plus, Edit2, Play, Trash2, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 const TemplatesPage = () => {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -53,12 +54,12 @@ const TemplatesPage = () => {
           api.getOrganizations().catch(() => [])
         ]);
         // Handle paginated responses
-        setTemplates(templatesData.items || templatesData || []);
-        setProjects(projectsData.items || projectsData || []);
-        setInventories(inventoriesData.items || inventoriesData || []);
+        setTemplates(unwrap(templatesData));
+        setProjects(unwrap(projectsData));
+        setInventories(unwrap(inventoriesData));
         setCredentials(credentialsData || []);
         setExecutionPacks(packsData || []);
-        setOrgs(orgsData?.items || orgsData || []);
+        setOrgs(unwrap(orgsData));
       } catch (err) {
         console.error('Failed to load data', err);
       } finally {
@@ -197,9 +198,7 @@ const TemplatesPage = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader className="animate-spin text-brand-600" size={32} />
-      </div>
+      <PageSpinner />
     );
   }
 

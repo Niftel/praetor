@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { User } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -9,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { roleLabel } from '../components/ResourceAccess';
 import { UserPlus, Shield, Trash2, Loader, KeyRound } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 const UsersPage = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -28,7 +29,7 @@ const UsersPage = () => {
     try {
       setLoading(true);
       const response = await api.getUsers();
-      const items = response?.items || response || [];
+      const items = unwrap(response);
       setUsers(items);
     } catch (err) {
       console.error('Failed to load users', err);
@@ -66,9 +67,7 @@ const UsersPage = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader className="animate-spin text-brand-600" size={32} />
-      </div>
+      <PageSpinner />
     );
   }
 

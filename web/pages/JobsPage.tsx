@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Job, Template } from '../types';
 import Card from '../components/ui/Card';
 import { Select } from '../components/ui/Input';
@@ -19,7 +19,7 @@ const JobsPage = () => {
     Promise.all([api.getJobs(), api.getTemplates()])
       .then(([jobsData, templatesData]) => {
         setJobs(jobsData || []);
-        setTemplates(templatesData.items || templatesData || []);
+        setTemplates(unwrap(templatesData));
       })
       .catch(err => console.error(err));
   };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Schedule, Template, Workflow, EventTrigger, WebhookTrigger } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -8,6 +8,7 @@ import Modal from '../components/ui/Modal';
 import { Input, Select } from '../components/ui/Input';
 import { Calendar, Plus, Power, Loader, Trash2, Zap, Webhook, Copy, Pencil } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 type TargetType = 'job' | 'workflow';
 
@@ -43,7 +44,7 @@ const SchedulesPage = () => {
         api.getWebhookTriggers().catch(() => []),
       ]);
       setSchedules(s || []);
-      setTemplates(t?.items || t || []);
+      setTemplates(unwrap(t));
       setWorkflows(wf || []);
       setEventTriggers(et || []);
       setWebhookTriggers(wh || []);
@@ -145,7 +146,7 @@ const SchedulesPage = () => {
     t.workflow_template_id ? `Workflow: ${workflowName(t.workflow_template_id)}` : `Template: ${templateNameByUjt(t.unified_job_template_id)}`;
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-brand-600" size={32} /></div>;
+    return <PageSpinner />;
   }
 
   return (
