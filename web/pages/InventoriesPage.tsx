@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Inventory, Host, Group } from '../types';
 import Card from '../components/ui/Card';
@@ -7,11 +8,14 @@ import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import ResourceAccess from '../components/ResourceAccess';
 import { splitConnection, mergeConnection, emptyConnection, HostConnection } from '../lib/hostConnection';
-import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock, Plug, Save, ChevronDown, ChevronRight } from 'lucide-react';
+import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock, Plug, Save, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
 const InventoriesPage = () => {
+  const { orgId: orgIdStr } = useParams();
+  const orgId = Number(orgIdStr);
+  const [orgName, setOrgName] = useState('');
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [selectedInventoryId, setSelectedInventoryId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'hosts' | 'groups' | 'sources' | 'access'>('hosts');
@@ -42,8 +46,6 @@ const InventoriesPage = () => {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [newInventoryName, setNewInventoryName] = useState('');
-  const [orgs, setOrgs] = useState<any[]>([]);
-  const [newInventoryOrg, setNewInventoryOrg] = useState<number | ''>('');
   const [newHostName, setNewHostName] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [importContent, setImportContent] = useState('');
@@ -55,7 +57,7 @@ const InventoriesPage = () => {
     try {
       setLoading(true);
       const response = await api.getInventories();
-      const items = unwrap(response);
+      const items = unwrap<Inventory>(response).filter(i => (i as any).organization_id === orgId);
       setInventories(items);
       if (items.length > 0 && !selectedInventoryId) {
         setSelectedInventoryId(items[0].id);
@@ -71,8 +73,11 @@ const InventoriesPage = () => {
   useEffect(() => {
     fetchInventories();
     api.getCredentials().then(res => setCredentials(unwrap(res))).catch(() => { });
-    api.getOrganizations().then(o => { const l = unwrap(o); setOrgs(l); if (l.length) setNewInventoryOrg(l[0].id); }).catch(() => { });
-  }, []);
+    api.getOrganizations().then(o => {
+      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
+    }).catch(() => setOrgName(`Org ${orgId}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
   // Load hosts and groups when selected inventory changes
   useEffect(() => {
@@ -170,11 +175,11 @@ const InventoriesPage = () => {
 
   // Create Inventory
   const handleCreateInventory = async () => {
-    if (!newInventoryName.trim() || newInventoryOrg === '') return;
+    if (!newInventoryName.trim()) return;
     try {
       await api.createInventory({
         name: newInventoryName,
-        organization_id: newInventoryOrg,
+        organization_id: orgId,
         kind: 'standard'
       });
       setNewInventoryName('');
@@ -311,8 +316,13 @@ const InventoriesPage = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Inventories</h1>
+      <div className="flex items-end justify-between">
+        <div>
+          <Link to="/inventories" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
+            <ArrowLeft size={14} /> Organizations
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900 mt-1">{orgName} · Inventories</h1>
+        </div>
         <Button icon={<Plus size={16} />} onClick={() => setShowInventoryModal(true)}>New Inventory</Button>
       </div>
 
@@ -587,16 +597,8 @@ const InventoriesPage = () => {
       </Modal>
 
       {/* New Inventory Modal */}
-      <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title="New Inventory">
+      <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title={`New Inventory in ${orgName}`}>
         <div className="space-y-4">
-          <Select
-            label="Organization"
-            value={newInventoryOrg}
-            onChange={(e) => setNewInventoryOrg(Number(e.target.value))}
-          >
-            <option value="">Select organization…</option>
-            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </Select>
           <Input
             label="Name"
             type="text"
