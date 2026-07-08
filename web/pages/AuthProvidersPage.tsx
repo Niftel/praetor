@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { RefreshCw, CheckCircle, XCircle, AlertCircle, Key, Users, Building, Github } from 'lucide-react';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 interface LdapConfig {
     configured: boolean;
@@ -89,9 +90,7 @@ const AuthProvidersPage: React.FC = () => {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
-                <RefreshCw className="animate-spin text-brand-500" size={32} />
-            </div>
+            <PageSpinner />
         );
     }
 
@@ -99,7 +98,7 @@ const AuthProvidersPage: React.FC = () => {
     const teamMap = ldapConfig?.team_map || {};
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
                     <Link to="/settings" className="text-sm text-gray-500 hover:text-brand-600">← Settings</Link>

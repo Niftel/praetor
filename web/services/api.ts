@@ -4,6 +4,15 @@ export const getAuthToken = () => localStorage.getItem('praetor_token');
 export const setAuthToken = (token: string) => localStorage.setItem('praetor_token', token);
 export const removeAuthToken = () => localStorage.removeItem('praetor_token');
 
+// unwrap normalizes a list endpoint's response to a plain array, whether the API
+// returns a bare array or a paginated { items: [...] } envelope. Replaces the
+// `res?.items || res || []` pattern that was duplicated across every list page.
+export function unwrap<T = any>(res: any): T[] {
+    if (Array.isArray(res)) return res as T[];
+    if (res && Array.isArray(res.items)) return res.items as T[];
+    return [];
+}
+
 export interface CurrentUser {
     user_id: number;
     username: string;

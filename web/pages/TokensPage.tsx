@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { KeyRound, Plus, Trash2, Copy, Check, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 interface Token {
   id: number;
@@ -53,7 +54,7 @@ const TokensPage = () => {
     if (newSecret) { navigator.clipboard?.writeText(newSecret); setCopied(true); setTimeout(() => setCopied(false), 1500); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-brand-600" size={32} /></div>;
+  if (loading) return <PageSpinner />;
 
   return (
     <div className="space-y-6">

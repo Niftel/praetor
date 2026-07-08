@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal';
 import { Input, Textarea } from '../components/ui/Input';
 import { Package, Plus, Trash2, Loader, GitBranch, Copy, Pencil, RefreshCw } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 interface Pack {
   id: number;
@@ -93,7 +94,7 @@ const ExecutionPacksPage = () => {
     load();
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-brand-600" size={32} /></div>;
+  if (loading) return <PageSpinner />;
 
   return (
     <div className="space-y-6">
