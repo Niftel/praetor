@@ -112,7 +112,7 @@ const JobsPage = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {job.started_at ? new Date(job.started_at).toLocaleString() : '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">admin</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">—</td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="inline-flex items-center justify-end gap-3">
                       {isActive(job.status) && (
