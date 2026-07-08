@@ -79,6 +79,23 @@ gidNumber: 1000
 homeDirectory: /home/ctran
 userPassword: praetor123
 
+# Onboarded engineer — member of Engineering via backend-team (non-admin).
+dn: uid=mwarburton,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: mwarburton
+givenName: Miles
+sn: Warburton
+cn: Miles Warburton
+displayName: Miles Warburton
+mail: miles.warburton@praetor.local
+title: Backend Engineer
+uidNumber: 2001
+gidNumber: 1000
+homeDirectory: /home/mwarburton
+userPassword: praetor123
+
 # --- Department heads (report to CTO) ----------------------------------------
 dn: uid=vengels,ou=users,dc=praetor,dc=local
 objectClass: inetOrgPerson
@@ -599,6 +616,7 @@ ou: Engineering
 member: uid=blee,ou=users,dc=praetor,dc=local
 member: uid=fmuller,ou=users,dc=praetor,dc=local
 member: uid=gkim,ou=users,dc=praetor,dc=local
+member: uid=mwarburton,ou=users,dc=praetor,dc=local
 
 dn: cn=frontend-team,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
