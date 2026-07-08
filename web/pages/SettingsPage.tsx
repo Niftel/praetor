@@ -14,7 +14,7 @@ interface SettingsCategory {
 // (jobs, system, notifications, …).
 const categories: SettingsCategory[] = [
     {
-        name: 'Authentication Providers',
+        name: 'Auth Settings',
         description: 'LDAP / SAML / GitHub / OAuth2 — how users sign in and how directory groups map to Praetor roles.',
         path: '/settings/auth-providers',
         icon: <Key size={22} />,
