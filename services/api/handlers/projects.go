@@ -69,8 +69,9 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Creating a project requires admin on its parent organization.
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+	// Creating a project requires the org's project_admin_role (org admins and
+	// superusers inherit it through the role hierarchy).
+	if !h.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldProjectAdmin) {
 		return
 	}
 
@@ -98,9 +99,9 @@ func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Triggering an SCM sync mutates the project; require admin on it.
-	// (update_role is the finer-grained AWX equivalent — a future refinement.)
-	if !h.authorize(w, r, rbac.ContentTypeProject, id, actAdmin) {
+	// Triggering an SCM sync is the AWX update_role action: it may run a project
+	// update without full admin. Project admins inherit update_role.
+	if !h.authorize(w, r, rbac.ContentTypeProject, id, actUpdate) {
 		return
 	}
 

@@ -23,6 +23,8 @@ const (
 	actAdmin
 	actUse
 	actExecute
+	actUpdate  // update_role: run an SCM update / inventory-source sync without admin
+	actApprove // approval_role: approve or deny workflow approval nodes
 )
 
 // Authorizer is the shared object-level authorization helper. It is embedded by
@@ -64,6 +66,10 @@ func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentTy
 		allowed, err = a.Access.CanUse(r.Context(), uc.UserID, contentType, objectID)
 	case actExecute:
 		allowed, err = a.Access.CanExecute(r.Context(), uc.UserID, contentType, objectID)
+	case actUpdate:
+		allowed, err = a.Access.HasObjectRole(r.Context(), uc.UserID, contentType, objectID, rbac.RoleFieldUpdate)
+	case actApprove:
+		allowed, err = a.Access.HasObjectRole(r.Context(), uc.UserID, contentType, objectID, rbac.RoleFieldApproval)
 	}
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -85,6 +91,25 @@ func requireSuperuser(w http.ResponseWriter, r *http.Request) bool {
 	}
 	render.ErrForbidden(nil).Render(w, r)
 	return false
+}
+
+// authorizeOrgRole gates an org-scoped action on a delegated organization role
+// (e.g. project_admin_role for creating a project). Org admins, system admins,
+// and superusers pass automatically through the role hierarchy, so this is
+// strictly wider than the plain org-admin check it replaces on create paths.
+// It writes the response and returns false when the request must stop.
+func (a *Authorizer) authorizeOrgRole(w http.ResponseWriter, r *http.Request, orgID int64, roleField rbac.RoleField) bool {
+	uc := currentUser(r)
+	allowed, err := a.Access.HasObjectRole(r.Context(), uc.UserID, rbac.ContentTypeOrganization, orgID, roleField)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return false
+	}
+	if !allowed {
+		render.ErrForbidden(nil).Render(w, r)
+		return false
+	}
+	return true
 }
 
 // readableIDs returns the object IDs of contentType the current user may read.

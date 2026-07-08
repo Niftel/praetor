@@ -123,8 +123,9 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Creating a credential requires admin on its parent organization.
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+	// Creating a credential requires the org's credential_admin_role (org admins
+	// and superusers inherit it through the role hierarchy).
+	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldCredentialAdmin) {
 		return
 	}
 
