@@ -1,18 +1,18 @@
 # Praetor LDAP Configuration — DEMO ONLY.
+# AAP/AWX-style login-time group→role mapping (see pkg/auth/LDAP-REDESIGN.md).
 # Connects to the mock OpenLDAP container in docker-compose. Do NOT copy this file
-# to production as-is: the bind password is sourced from an env var (never commit a
-# real one here), and insecure_skip_verify must be false against a real directory.
+# to production as-is: bind_password comes from an env var (never commit a real
+# one), and insecure_skip_verify must be false against a real ldaps:// directory.
 
 server:
   url: "ldap://ldap:389"
   bind_dn: "cn=admin,dc=praetor,dc=local"
   # Never commit the bind password: read it from this env var (see the API service
-  # in docker-compose). The loader (pkg/auth/config.go) requires one of
-  # bind_password / bind_password_env.
+  # in docker-compose). The loader requires bind_password or bind_password_env.
   bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
   start_tls: false
-  # DEMO ONLY: the mock speaks plaintext ldap:// (no TLS), so there is nothing to
-  # verify here. Against a real ldaps:// directory this MUST be false.
+  # DEMO ONLY: the mock speaks plaintext ldap:// (no TLS). Against a real directory
+  # this MUST be false.
   insecure_skip_verify: true
   timeout: 30s
 
@@ -26,31 +26,92 @@ users:
     first_name: "givenName"
     last_name: "sn"
 
-organizations:
-  enabled: true
-  search_base: "ou=organizations,dc=praetor,dc=local"
-  search_filter: "(objectClass=organizationalUnit)"
-  search_scope: "one"
-  attributes:
-    name: "ou"
-    description: "description"
-  member_attribute: "member"
-
-teams:
-  enabled: true
+# How a user's group membership is computed. The demo groups are groupOfNames with
+# `member` DNs (no memberOf overlay), so member_dn is required here.
+group_type:
+  type: member_dn
   search_base: "ou=teams,dc=praetor,dc=local"
   search_filter: "(objectClass=groupOfNames)"
-  search_scope: "sub"
-  attributes:
-    name: "cn"
-    description: "description"
   member_attribute: "member"
-  organization_attribute: "ou"
 
-sync:
-  interval: "1h"
-  create_users: true
-  create_orgs: true
-  create_teams: true
-  remove_stale: false
-  dry_run: false
+# Platform flags granted by group membership. The Praetor superuser is a local
+# break-glass account (not in the directory); cn=admins here grants is_superuser to
+# directory users such as `opark`.
+user_flags_by_group:
+  is_superuser:
+    - "cn=admins,ou=teams,dc=praetor,dc=local"
+  is_system_auditor:
+    - "cn=compliance-team,ou=teams,dc=praetor,dc=local"
+
+# Organizations are operator-named here (created on first matching login) and bound
+# to LDAP groups by role. remove_* revokes the role when a user leaves the group.
+organization_map:
+  Engineering:
+    admins:
+      - "cn=platform-team,ou=teams,dc=praetor,dc=local"
+    users:
+      - "cn=platform-team,ou=teams,dc=praetor,dc=local"
+      - "cn=backend-team,ou=teams,dc=praetor,dc=local"
+      - "cn=frontend-team,ou=teams,dc=praetor,dc=local"
+    remove_admins: true
+    remove_users: true
+  Operations:
+    users:
+      - "cn=sre-team,ou=teams,dc=praetor,dc=local"
+      - "cn=network-team,ou=teams,dc=praetor,dc=local"
+      - "cn=admins,ou=teams,dc=praetor,dc=local"
+    remove_users: true
+  Security:
+    auditors:
+      - "cn=compliance-team,ou=teams,dc=praetor,dc=local"
+    users:
+      - "cn=security-team,ou=teams,dc=praetor,dc=local"
+    remove_auditors: true
+    remove_users: true
+  Data:
+    users:
+      - "cn=data-engineering-team,ou=teams,dc=praetor,dc=local"
+    remove_users: true
+  QualityAssurance:
+    users:
+      - "cn=qa-team,ou=teams,dc=praetor,dc=local"
+    remove_users: true
+
+# Teams are members-only; each resolves through its organization.
+team_map:
+  platform-team:
+    organization: Engineering
+    users: ["cn=platform-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  backend-team:
+    organization: Engineering
+    users: ["cn=backend-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  frontend-team:
+    organization: Engineering
+    users: ["cn=frontend-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  sre-team:
+    organization: Operations
+    users: ["cn=sre-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  network-team:
+    organization: Operations
+    users: ["cn=network-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  security-team:
+    organization: Security
+    users: ["cn=security-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  compliance-team:
+    organization: Security
+    users: ["cn=compliance-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  data-engineering-team:
+    organization: Data
+    users: ["cn=data-engineering-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  qa-team:
+    organization: QualityAssurance
+    users: ["cn=qa-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
