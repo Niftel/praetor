@@ -17,7 +17,7 @@ import (
 // WorkflowStore is the workflows-domain data access the handler depends on.
 type WorkflowStore interface {
 	OrgOf(ctx context.Context, id int64) (int64, bool)
-	ListByOrgs(ctx context.Context, orgIDs []int64) ([]store.WorkflowSummary, error)
+	ListByIDs(ctx context.Context, ids []int64) ([]store.WorkflowSummary, error)
 	Create(ctx context.Context, spec store.WorkflowSpec) (int64, error)
 	Update(ctx context.Context, id int64, spec store.WorkflowSpec) error
 	TemplateNodes(ctx context.Context, templateID int64) ([]store.WorkflowNode, error)
@@ -27,11 +27,11 @@ type WorkflowStore interface {
 	AllowSimultaneous(ctx context.Context, id int64) bool
 	ActiveRunCount(ctx context.Context, id int64) (int, error)
 	LaunchSnapshot(ctx context.Context, templateID int64) (int64, error)
-	ListJobsByOrgs(ctx context.Context, orgIDs []int64) ([]store.WorkflowRun, error)
+	ListJobsByTemplates(ctx context.Context, templateIDs []int64) ([]store.WorkflowRun, error)
 	JobMeta(ctx context.Context, id int64) (store.WorkflowJobMeta, error)
 	JobNodes(ctx context.Context, jobID int64) ([]store.WorkflowJobNode, error)
 	JobEdges(ctx context.Context, jobID int64) ([]store.WorkflowEdge, error)
-	NodeApprovalOrg(ctx context.Context, nodeID int64) (int64, error)
+	NodeApprovalTemplate(ctx context.Context, nodeID int64) (int64, error)
 	SetNodeApproval(ctx context.Context, nodeID int64, status string) error
 }
 
@@ -51,14 +51,14 @@ type workflowEdge = store.WorkflowEdge
 
 // ListWorkflows GET /api/v1/workflow-templates
 func (rs *WorkflowsResource) ListWorkflows(w http.ResponseWriter, r *http.Request) {
-	// Honor the object-role model: a user only sees workflows in organizations
-	// they can read. Superusers/auditors get everything via readableIDs.
-	orgIDs, err := rs.readableIDs(r, rbac.ContentTypeOrganization)
+	// Object-role model: a user sees only the workflows they can read.
+	// Superusers/auditors get everything via readableIDs.
+	ids, err := rs.readableIDs(r, rbac.ContentTypeWorkflowTemplate)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	rows, err := rs.store.ListByOrgs(r.Context(), orgIDs)
+	rows, err := rs.store.ListByIDs(r.Context(), ids)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -99,6 +99,9 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
+	// Creator becomes admin of the new workflow (AWX creator-admin), matching
+	// job templates — so a non-superuser can manage what they create.
+	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeWorkflowTemplate, id, currentUser(r))
 	render.Created(w, r, map[string]interface{}{"id": id})
 }
 
@@ -109,12 +112,11 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 // editing when the workflow has no active run.
 func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	org, ok := rs.store.OrgOf(r.Context(), id)
-	if !ok {
+	if _, ok := rs.store.OrgOf(r.Context(), id); !ok {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorizeOrgRole(w, r, org, rbac.RoleFieldWorkflowAdmin) {
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actAdmin) {
 		return
 	}
 	var body struct {
@@ -153,7 +155,7 @@ func (rs *WorkflowsResource) GetWorkflow(w http.ResponseWriter, r *http.Request)
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actRead) {
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actRead) {
 		return
 	}
 	nodes, _ := rs.store.TemplateNodes(r.Context(), id)
@@ -169,12 +171,11 @@ func (rs *WorkflowsResource) GetWorkflow(w http.ResponseWriter, r *http.Request)
 // DeleteWorkflow DELETE /api/v1/workflow-templates/{id}
 func (rs *WorkflowsResource) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	org, ok := rs.store.OrgOf(r.Context(), id)
-	if !ok {
+	if _, ok := rs.store.OrgOf(r.Context(), id); !ok {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorizeOrgRole(w, r, org, rbac.RoleFieldWorkflowAdmin) {
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actAdmin) {
 		return
 	}
 	if err := rs.store.Delete(r.Context(), id); err != nil {
@@ -188,14 +189,14 @@ func (rs *WorkflowsResource) DeleteWorkflow(w http.ResponseWriter, r *http.Reque
 // a workflow_jobs run that the scheduler's workflow runner then walks.
 func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	org, ok := rs.store.OrgOf(r.Context(), id)
-	if !ok {
+	if _, ok := rs.store.OrgOf(r.Context(), id); !ok {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	// Launching a workflow is an execute action: the org execute_role (which org
-	// admins inherit) may run any executable in the org, workflows included.
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actExecute) {
+	// Launching a workflow is an execute action on the workflow. The org
+	// execute_role is a parent of each workflow's execute_role (migration 000049),
+	// so org-execute holders may run any workflow in the org.
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actExecute) {
 		return
 	}
 
@@ -218,12 +219,12 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 
 // ListWorkflowJobs GET /api/v1/workflow-jobs — recent runs the user can see.
 func (rs *WorkflowsResource) ListWorkflowJobs(w http.ResponseWriter, r *http.Request) {
-	orgIDs, err := rs.readableIDs(r, rbac.ContentTypeOrganization)
+	ids, err := rs.readableIDs(r, rbac.ContentTypeWorkflowTemplate)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	rows, err := rs.store.ListJobsByOrgs(r.Context(), orgIDs)
+	rows, err := rs.store.ListJobsByTemplates(r.Context(), ids)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -241,7 +242,7 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, meta.Org, actRead) {
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, meta.TemplateID, actRead) {
 		return
 	}
 	// run_id is the node's latest execution run, so the UI can show the engine
@@ -263,16 +264,17 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 
 func (rs *WorkflowsResource) setNodeApproval(w http.ResponseWriter, r *http.Request, status string) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	// Gate on the owning workflow's org approval_role. Org admins inherit it;
-	// note a workflow_admin (manage) is deliberately NOT an approver unless also
-	// granted approval_role — approving a gate is a distinct authority from
-	// editing the workflow (matches AWX's manage-vs-approve separation).
-	org, err := rs.store.NodeApprovalOrg(r.Context(), id)
+	// Gate on the workflow's own approval_role (parented to the org approval_role,
+	// so org approvers still pass). A workflow_admin (manage) is deliberately NOT
+	// an approver unless also granted approval_role — approving a gate is a
+	// distinct authority from editing the workflow (AWX manage-vs-approve), and is
+	// now delegable per-workflow.
+	tplID, err := rs.store.NodeApprovalTemplate(r.Context(), id)
 	if err != nil {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actApprove) {
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, tplID, actApprove) {
 		return
 	}
 	if err := rs.store.SetNodeApproval(r.Context(), id, status); err != nil {
