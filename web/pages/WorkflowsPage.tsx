@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { Workflow, WorkflowNode, WorkflowEdge, WorkflowNodeType, WorkflowEdgeType, WorkflowRunSummary } from '../types';
 import Card from '../components/ui/Card';
+import { Input, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
@@ -272,17 +273,11 @@ const WorkflowsPage = () => {
       <Modal isOpen={builderOpen} onClose={() => setBuilderOpen(false)} title={editingId ? 'Edit Workflow' : 'New Workflow'} size="full">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <input value={name} onChange={e => setName(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder="nightly-deploy" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Organization</label>
-              <select value={orgId} onChange={e => setOrgId(Number(e.target.value))} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
-                <option value="">Select…</option>
-                {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-              </select>
-            </div>
+            <Input label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="nightly-deploy" />
+            <Select label="Organization" value={orgId} onChange={e => setOrgId(Number(e.target.value))}>
+              <option value="">Select…</option>
+              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </Select>
           </div>
 
           <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -298,18 +293,12 @@ const WorkflowsPage = () => {
             </label>
             {whEnabled && (
               <div className="grid grid-cols-2 gap-3 mt-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Provider</label>
-                  <select value={whService} onChange={e => setWhService(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1 text-sm">
-                    <option value="generic">Generic (token)</option>
-                    <option value="github">GitHub (HMAC)</option>
-                    <option value="gitlab">GitLab (token)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Secret key</label>
-                  <input value={whKey} onChange={e => setWhKey(e.target.value)} placeholder={editingId ? 'leave blank to keep current' : 'shared secret'} className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" />
-                </div>
+                <Select label="Provider" value={whService} onChange={e => setWhService(e.target.value)}>
+                  <option value="generic">Generic (token)</option>
+                  <option value="github">GitHub (HMAC)</option>
+                  <option value="gitlab">GitLab (token)</option>
+                </Select>
+                <Input label="Secret key" className="font-mono" value={whKey} onChange={e => setWhKey(e.target.value)} placeholder={editingId ? 'leave blank to keep current' : 'shared secret'} />
                 <p className="col-span-2 text-[11px] text-gray-500">
                   After saving, POST to <span className="font-mono">/api/v1/webhooks/workflow-templates/&lt;id&gt;/{whService}</span> with this secret to launch a run.
                 </p>
