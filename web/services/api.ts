@@ -245,12 +245,9 @@ export const api = {
     createRoleBinding: (data: any) => fetchWithAuth('/role_bindings', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     deleteRoleBinding: (id: number) => fetchWithAuth(`/role_bindings/${id}`, { method: 'DELETE' }),
 
-    // LDAP Configuration
+    // LDAP Configuration (read-only; group→role mapping is applied at login)
     getLdapConfig: () => fetchWithAuth('/ldap/config').then(r => r.json()),
     testLdapConnection: () => fetchWithAuth('/ldap/test-connection', { method: 'POST' }).then(r => r.json()),
-    triggerLdapSync: () => fetchWithAuth('/ldap/sync', { method: 'POST' }).then(r => r.json()),
-    getLdapSyncStatus: () => fetchWithAuth('/ldap/sync/status').then(r => r.json()),
-    getLdapSyncDetails: (id: number) => fetchWithAuth(`/ldap/sync/${id}`).then(r => r.json()),
 };
 
 
