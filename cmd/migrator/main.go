@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/db"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -57,6 +58,7 @@ func main() {
 			recordApplied(database, name)
 		}
 		seedCredentialTypes(database)
+		seedBootstrapAdmin(database)
 		log.Println("Migration complete (baselined).")
 		return
 	}
@@ -79,6 +81,52 @@ func main() {
 
 	// Seed Credential Types (idempotent).
 	seedCredentialTypes(database)
+
+	// Optionally ensure a break-glass local superuser (opt-in via env).
+	seedBootstrapAdmin(database)
+}
+
+// seedBootstrapAdmin ensures a break-glass LOCAL superuser exists when
+// PRAETOR_BOOTSTRAP_ADMIN_USERNAME + _PASSWORD are set. This account authenticates
+// locally (never via LDAP), so a misconfigured or unreachable directory can't lock
+// everyone out. Idempotent, and it never clobbers an LDAP-managed row: the upsert
+// only touches a row whose ldap_dn IS NULL.
+func seedBootstrapAdmin(database *sqlx.DB) {
+	username := os.Getenv("PRAETOR_BOOTSTRAP_ADMIN_USERNAME")
+	password := os.Getenv("PRAETOR_BOOTSTRAP_ADMIN_PASSWORD")
+	if username == "" || password == "" {
+		return // opt-in only
+	}
+	email := os.Getenv("PRAETOR_BOOTSTRAP_ADMIN_EMAIL")
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Bootstrap admin: hashing password failed: %v", err)
+		return
+	}
+
+	// Create the local superuser, or reset it to the configured password on
+	// re-run — but ONLY when it's a local account (ldap_dn IS NULL). A same-named
+	// LDAP user is left untouched (the ON CONFLICT WHERE guard skips it).
+	res, err := database.Exec(`
+		INSERT INTO users (username, password_hash, email, is_superuser, is_active)
+		VALUES ($1, $2, NULLIF($3, ''), true, true)
+		ON CONFLICT (username) DO UPDATE
+			SET password_hash = EXCLUDED.password_hash,
+			    is_superuser = true,
+			    is_active = true,
+			    modified_at = NOW()
+			WHERE users.ldap_dn IS NULL`,
+		username, string(hash), email)
+	if err != nil {
+		log.Printf("Bootstrap admin %q: %v", username, err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		log.Printf("Bootstrap admin %q: a same-named LDAP user exists; left untouched", username)
+		return
+	}
+	log.Printf("Bootstrap local superuser ensured: %s", username)
 }
 
 // loadApplied returns the set of migration versions already recorded.
