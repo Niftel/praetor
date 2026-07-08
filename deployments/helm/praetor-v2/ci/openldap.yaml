@@ -1,0 +1,71 @@
+# In-cluster OpenLDAP mock for the k3d smoke test — a stand-in for a real
+# directory so the AAP-style group→role mapping can be exercised end to end.
+# DEMO ONLY: plaintext ldap://, fixed passwords. Never model production on this;
+# point ldap.config at your own LDAP/AD instead.
+#
+# The directory is seeded from the canonical LDIF. Create the seed ConfigMap
+# BEFORE applying this manifest:
+#
+#   kubectl -n praetor create configmap openldap-seed \
+#     --from-file=bootstrap.ldif=deployments/ldap/bootstrap.ldif
+#
+# Then: kubectl apply -f deployments/helm/praetor-v2/ci/openldap.yaml
+#
+# Seed via LDAP_SEED_INTERNAL_LDIF_PATH only (mounted at /tmp/ldif). Do NOT also
+# mount the LDIF at the container's custom-bootstrap path, or slapd applies it
+# twice and dies with LDAP err 68 (already exists).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praetor-openldap
+  namespace: praetor
+  labels:
+    app: praetor-openldap
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: praetor-openldap
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: praetor-openldap
+    spec:
+      containers:
+        - name: openldap
+          image: osixia/openldap:1.5.0
+          env:
+            - { name: LDAP_ORGANISATION, value: "Praetor Demo" }
+            - { name: LDAP_DOMAIN, value: "praetor.local" }
+            - { name: LDAP_BASE_DN, value: "dc=praetor,dc=local" }
+            - { name: LDAP_ADMIN_PASSWORD, value: "admin" }        # == secrets.ldapBindPassword
+            - { name: LDAP_CONFIG_PASSWORD, value: "config" }
+            - { name: LDAP_READONLY_USER, value: "true" }
+            - { name: LDAP_READONLY_USER_USERNAME, value: "readonly" }
+            - { name: LDAP_READONLY_USER_PASSWORD, value: "readonly" }
+            - { name: LDAP_SEED_INTERNAL_LDIF_PATH, value: "/tmp/ldif" }
+          ports:
+            - { containerPort: 389, name: ldap }
+          volumeMounts:
+            - name: seed
+              mountPath: /tmp/ldif
+              readOnly: true
+      volumes:
+        - name: seed
+          configMap:
+            name: openldap-seed
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praetor-openldap
+  namespace: praetor
+spec:
+  selector:
+    app: praetor-openldap
+  ports:
+    - name: ldap
+      port: 389
+      targetPort: 389
