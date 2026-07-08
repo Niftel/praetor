@@ -47,7 +47,7 @@ func (s *UserStore) Get(ctx context.Context, id int64) (models.User, error) {
 func (s *UserStore) ByUsernameWithHash(ctx context.Context, username string) (models.User, error) {
 	var user models.User
 	err := s.db.GetContext(ctx, &user,
-		`SELECT id, username, password_hash, first_name, last_name, email, is_superuser, is_system_auditor, is_active FROM users WHERE username = $1`,
+		`SELECT id, username, password_hash, first_name, last_name, email, is_superuser, is_system_auditor, is_active, ldap_dn FROM users WHERE username = $1`,
 		username)
 	return user, wrap("UserStore.ByUsernameWithHash", err)
 }

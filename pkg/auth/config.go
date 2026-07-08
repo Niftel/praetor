@@ -113,6 +113,26 @@ func (c *LDAPConfig) applyDefaults() {
 	if c.Sync.Interval == 0 {
 		c.Sync.Interval = time.Hour
 	}
+
+	// Group-type (AAP login-mapping) defaults, applied only when a type is set.
+	if c.GroupType.Type != "" {
+		if c.GroupType.SearchFilter == "" {
+			c.GroupType.SearchFilter = "(objectClass=groupOfNames)"
+		}
+		if c.GroupType.MemberAttribute == "" {
+			if c.GroupType.Type == GroupTypePosix {
+				c.GroupType.MemberAttribute = "memberUid"
+			} else {
+				c.GroupType.MemberAttribute = "member"
+			}
+		}
+		if c.GroupType.MemberOfAttribute == "" {
+			c.GroupType.MemberOfAttribute = "memberOf"
+		}
+		if c.GroupType.MaxDepth == 0 {
+			c.GroupType.MaxDepth = 5
+		}
+	}
 }
 
 // Validate checks the configuration for required fields and valid values.
@@ -160,6 +180,26 @@ func (c *LDAPConfig) Validate() error {
 		}
 		if err := validateSearchScope(c.Teams.SearchScope); err != nil {
 			errs = append(errs, fmt.Sprintf("teams.search_scope: %v", err))
+		}
+	}
+
+	// AAP login-mapping validation (only when the new model is configured).
+	if c.UsesLoginMapping() {
+		switch c.GroupType.Type {
+		case GroupTypeMemberDN, GroupTypeMemberOf, GroupTypePosix, GroupTypeNested:
+			// ok
+		case "":
+			errs = append(errs, "group_type.type is required when organization_map/team_map/user_flags_by_group are set")
+		default:
+			errs = append(errs, fmt.Sprintf("group_type.type %q must be one of: member_dn, member_of, posix, nested", c.GroupType.Type))
+		}
+		if c.GroupType.Type != "" && c.GroupType.Type != GroupTypeMemberOf && c.GroupType.SearchBase == "" {
+			errs = append(errs, fmt.Sprintf("group_type.search_base is required for group_type %q", c.GroupType.Type))
+		}
+		for name, entry := range c.TeamMap {
+			if entry.Organization == "" {
+				errs = append(errs, fmt.Sprintf("team_map[%q].organization is required", name))
+			}
 		}
 	}
 

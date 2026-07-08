@@ -52,6 +52,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 
 	// Handlers
 	content := handlers.NewContentHandler(db)
+	content.LDAPConfigPath = cfg.LDAPConfigPath // enables LDAP login when set
 
 	// Auth Routes (Public). Login is rate-limited per IP to blunt password
 	// brute-forcing (20 attempts/minute).
