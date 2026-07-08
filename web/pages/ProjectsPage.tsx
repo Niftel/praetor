@@ -101,6 +101,7 @@ const ProjectsPage = () => {
       </Card>
 
       <Card>
+        <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -134,6 +135,7 @@ const ProjectsPage = () => {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
     </div>
   );

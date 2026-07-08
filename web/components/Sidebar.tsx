@@ -21,6 +21,8 @@ import {
 
 interface SidebarProps {
   onLogout?: () => void;
+  isOpen?: boolean;      // mobile drawer open state (ignored at lg+)
+  onNavigate?: () => void; // called on nav click so the mobile drawer can close
 }
 
 interface NavItem {
@@ -34,7 +36,7 @@ interface NavSection {
   items: NavItem[];
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = ({ onLogout, isOpen = false, onNavigate }) => {
   const navSections: NavSection[] = [
     {
       items: [
@@ -72,7 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
   ];
 
   return (
-    <div className="h-screen w-64 bg-slate-900 text-white flex flex-col fixed left-0 top-0 overflow-y-auto z-20 shadow-xl">
+    <div className={`h-screen w-64 bg-slate-900 text-white flex flex-col fixed left-0 top-0 overflow-y-auto z-30 shadow-xl transform transition-transform duration-200 lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       <div className="p-6 border-b border-slate-800">
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
           <div className="w-8 h-8 bg-brand-500 rounded-md flex items-center justify-center text-white shadow-lg shadow-brand-500/20">
@@ -95,6 +97,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
                 <NavLink
                   key={item.name}
                   to={item.path}
+                  onClick={onNavigate}
                   className={({ isActive }) =>
                     `flex items-center px-4 py-2.5 text-sm font-medium rounded-md transition-all duration-200 ${isActive
                       ? 'bg-brand-600 text-white shadow-md shadow-brand-900/20'

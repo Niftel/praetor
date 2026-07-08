@@ -109,6 +109,7 @@ const ExecutionPacksPage = () => {
       </Card>
 
       <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -158,6 +159,7 @@ const ExecutionPacksPage = () => {
             {packs.length === 0 && <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-500">No packs registered.</td></tr>}
           </tbody>
         </table>
+        </div>
       </Card>
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Execution Pack' : 'Register Execution Pack'}>

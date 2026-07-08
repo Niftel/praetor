@@ -384,6 +384,7 @@ const InventoriesPage = () => {
 
               {/* Hosts */}
               {activeTab === 'hosts' && (
+                <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-100">
                   <tbody className="divide-y divide-gray-50">
                     {hosts.map(host => (
@@ -421,10 +422,12 @@ const InventoriesPage = () => {
                     {hosts.length === 0 && <tr><td className="px-4 py-8 text-center text-sm text-gray-400">No hosts. Add one, import, or sync a source.</td></tr>}
                   </tbody>
                 </table>
+                </div>
               )}
 
               {/* Groups */}
               {activeTab === 'groups' && (
+                <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-100">
                   <tbody className="divide-y divide-gray-50">
                     {groups.map(group => (
@@ -440,10 +443,12 @@ const InventoriesPage = () => {
                     {groups.length === 0 && <tr><td className="px-4 py-8 text-center text-sm text-gray-400">No groups yet.</td></tr>}
                   </tbody>
                 </table>
+                </div>
               )}
 
               {/* Sources */}
               {activeTab === 'sources' && (
+                <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-100">
                   <thead className="bg-gray-50"><tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
@@ -468,6 +473,7 @@ const InventoriesPage = () => {
                     {sources.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-400">No sources. Add one to populate this inventory dynamically (e.g. AWS).</td></tr>}
                   </tbody>
                 </table>
+                </div>
               )}
             </Card>
           </div>
