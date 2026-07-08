@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Workflow, WorkflowNode, WorkflowEdge, WorkflowNodeType, WorkflowEdgeType, WorkflowRunSummary } from '../types';
 import Card from '../components/ui/Card';
 import { Input, Select } from '../components/ui/Input';
@@ -76,8 +76,8 @@ const WorkflowsPage = () => {
     ]).then(([wf, rs, tpls, o]) => {
       setWorkflows(wf || []);
       setRuns(rs || []);
-      setTemplates(tpls?.items || tpls || []);
-      setOrgs(o?.items || o || []);
+      setTemplates(unwrap(tpls));
+      setOrgs(unwrap(o));
     }).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);

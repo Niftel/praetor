@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Project } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { RefreshCw, Plus, Trash2, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 const ProjectsPage = () => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -17,7 +18,7 @@ const ProjectsPage = () => {
   const fetchProjects = async () => {
     try {
       const data = await api.getProjects();
-      setProjects(data?.items || data || []);
+      setProjects(unwrap(data));
     } catch (err) {
       console.error('Failed to load projects', err);
     } finally {
@@ -62,9 +63,7 @@ const ProjectsPage = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader className="animate-spin text-brand-600" size={32} />
-      </div>
+      <PageSpinner />
     );
   }
 

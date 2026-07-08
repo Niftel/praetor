@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import { Organization, User, Team, Role } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -9,6 +9,7 @@ import { Input, Textarea, Select } from '../components/ui/Input';
 import ResourceAccess from '../components/ResourceAccess';
 import { Building2, Users, ShieldCheck, UserPlus, Trash2, Loader, Eye, Key, Package, Plus } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
 
 const OrganizationsPage = () => {
     const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -36,7 +37,7 @@ const OrganizationsPage = () => {
         try {
             setLoading(true);
             const response = await api.getOrganizations();
-            const items = response?.items || response || [];
+            const items = unwrap(response);
             setOrganizations(items);
         } catch (err) {
             console.error('Failed to load organizations', err);
@@ -47,8 +48,8 @@ const OrganizationsPage = () => {
 
     useEffect(() => {
         fetchOrganizations();
-        api.getUsers().then(res => setAllUsers(res?.items || res || [])).catch(() => { });
-        api.getCredentials().then(res => setAllCredentials(res?.items || res || [])).catch(() => { });
+        api.getUsers().then(res => setAllUsers(unwrap(res))).catch(() => { });
+        api.getCredentials().then(res => setAllCredentials(unwrap(res))).catch(() => { });
         api.getCredentialTypes().then((types: any[]) => {
             const galaxy = (types || []).find(t => /galaxy/i.test(t.name));
             if (galaxy) setGalaxyTypeId(galaxy.id);
@@ -164,9 +165,7 @@ const OrganizationsPage = () => {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
-                <Loader className="animate-spin text-brand-600" size={32} />
-            </div>
+            <PageSpinner />
         );
     }
 
