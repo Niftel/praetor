@@ -106,19 +106,19 @@ func (s *WorkflowStore) OrgOf(ctx context.Context, id int64) (int64, bool) {
 	return org, err == nil
 }
 
-// ListByOrgs returns workflow templates in the given orgs.
-func (s *WorkflowStore) ListByOrgs(ctx context.Context, orgIDs []int64) ([]WorkflowSummary, error) {
+// ListByIDs returns the given workflow templates (RBAC-scoped by the caller).
+func (s *WorkflowStore) ListByIDs(ctx context.Context, ids []int64) ([]WorkflowSummary, error) {
 	rows := []WorkflowSummary{}
-	if len(orgIDs) == 0 {
+	if len(ids) == 0 {
 		return rows, nil
 	}
-	q, args, err := sqlx.In(`SELECT id, organization_id, name FROM workflow_templates WHERE organization_id IN (?) ORDER BY name`, orgIDs)
+	q, args, err := sqlx.In(`SELECT id, organization_id, name FROM workflow_templates WHERE id IN (?) ORDER BY name`, ids)
 	if err != nil {
-		return nil, wrap("WorkflowStore.ListByOrgs", err)
+		return nil, wrap("WorkflowStore.ListByIDs", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &rows, q, args...)
-	return rows, wrap("WorkflowStore.ListByOrgs", err)
+	return rows, wrap("WorkflowStore.ListByIDs", err)
 }
 
 // insertGraph inserts a spec's nodes and edges for a template id (applying the
@@ -271,10 +271,11 @@ func (s *WorkflowStore) LaunchSnapshot(ctx context.Context, templateID int64) (i
 	return wjID, tx.Commit()
 }
 
-// ListJobsByOrgs returns recent workflow runs in the given orgs.
-func (s *WorkflowStore) ListJobsByOrgs(ctx context.Context, orgIDs []int64) ([]WorkflowRun, error) {
+// ListJobsByTemplates returns recent workflow runs for the given templates
+// (RBAC-scoped by the caller to the workflows they can read).
+func (s *WorkflowStore) ListJobsByTemplates(ctx context.Context, templateIDs []int64) ([]WorkflowRun, error) {
 	rows := []WorkflowRun{}
-	if len(orgIDs) == 0 {
+	if len(templateIDs) == 0 {
 		return rows, nil
 	}
 	q, args, err := sqlx.In(`
@@ -282,14 +283,14 @@ func (s *WorkflowStore) ListJobsByOrgs(ctx context.Context, orgIDs []int64) ([]W
 		       wt.organization_id, wj.status, wj.created_at, wj.finished_at
 		FROM workflow_jobs wj
 		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
-		WHERE wt.organization_id IN (?)
-		ORDER BY wj.id DESC LIMIT 100`, orgIDs)
+		WHERE wj.workflow_template_id IN (?)
+		ORDER BY wj.id DESC LIMIT 100`, templateIDs)
 	if err != nil {
-		return nil, wrap("WorkflowStore.ListJobsByOrgs", err)
+		return nil, wrap("WorkflowStore.ListJobsByTemplates", err)
 	}
 	q = s.db.Rebind(q)
 	err = s.db.SelectContext(ctx, &rows, q, args...)
-	return rows, wrap("WorkflowStore.ListJobsByOrgs", err)
+	return rows, wrap("WorkflowStore.ListJobsByTemplates", err)
 }
 
 // JobMeta returns a run's header (with owning org) by id.
@@ -330,16 +331,17 @@ func (s *WorkflowStore) JobEdges(ctx context.Context, jobID int64) ([]WorkflowEd
 	return edges, wrap("WorkflowStore.JobEdges", err)
 }
 
-// NodeApprovalOrg returns the org owning the workflow a job node belongs to.
-func (s *WorkflowStore) NodeApprovalOrg(ctx context.Context, nodeID int64) (int64, error) {
-	var org int64
-	err := s.db.GetContext(ctx, &org, `
-		SELECT wt.organization_id
+// NodeApprovalTemplate returns the workflow template a job node belongs to, so
+// approval can be gated on that workflow's approval_role.
+func (s *WorkflowStore) NodeApprovalTemplate(ctx context.Context, nodeID int64) (int64, error) {
+	var tplID int64
+	err := s.db.GetContext(ctx, &tplID, `
+		SELECT wt.id
 		FROM workflow_job_nodes wjn
 		JOIN workflow_jobs wj ON wj.id = wjn.workflow_job_id
 		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
 		WHERE wjn.id=$1`, nodeID)
-	return org, wrap("WorkflowStore.NodeApprovalOrg", err)
+	return tplID, wrap("WorkflowStore.NodeApprovalTemplate", err)
 }
 
 // SetNodeApproval transitions an awaiting_approval node to approved/rejected.
