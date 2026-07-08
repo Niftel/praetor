@@ -7,6 +7,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { roleLabel } from '../components/ResourceAccess';
 import { UserPlus, Shield, Trash2, Loader, KeyRound } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 const UsersPage = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -48,12 +49,12 @@ const UsersPage = () => {
       fetchUsers();
     } catch (err) {
       console.error('Failed to create user', err);
-      alert('Failed to create user');
+      toast.error('Failed to create user');
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this user?')) return;
+    if (!(await confirmDialog('Delete this user?'))) return;
     try {
       await api.deleteUser(id);
       fetchUsers();

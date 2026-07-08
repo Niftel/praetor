@@ -4,6 +4,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { KeyRound, Plus, Trash2, Copy, Check, Loader } from 'lucide-react';
+import { toast, confirmDialog } from '../components/ui/toast';
 
 interface Token {
   id: number;
@@ -37,12 +38,12 @@ const TokensPage = () => {
       setName(''); setExpires(''); setShowModal(false);
       load();
     } catch {
-      alert('Failed to create token');
+      toast.error('Failed to create token');
     }
   };
 
   const revoke = async (t: Token) => {
-    if (!confirm(`Revoke token "${t.name}"? Any client using it will stop working.`)) return;
+    if (!(await confirmDialog(`Revoke token "${t.name}"? Any client using it will stop working.`))) return;
     await api.revokeToken(t.id).catch(() => {});
     load();
   };
