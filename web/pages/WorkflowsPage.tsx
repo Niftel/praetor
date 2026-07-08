@@ -196,6 +196,7 @@ const WorkflowsPage = () => {
 
       {/* Templates */}
       <Card title="Templates" className="overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -222,6 +223,7 @@ const WorkflowsPage = () => {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
 
       {/* Recent runs — grouped by workflow */}
@@ -245,6 +247,7 @@ const WorkflowsPage = () => {
                     <span className="text-xs text-gray-400 whitespace-nowrap">latest {new Date(g.runs[0].created_at).toLocaleString()}</span>
                   </button>
                   {open && (
+                    <div className="overflow-x-auto">
                     <table className="min-w-full">
                       <tbody className="divide-y divide-gray-50">
                         {g.runs.map(r => (
@@ -256,6 +259,7 @@ const WorkflowsPage = () => {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </div>
               );
