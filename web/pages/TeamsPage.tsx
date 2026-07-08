@@ -4,6 +4,7 @@ import { Team, User } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
+import { Input, Textarea, Select } from '../components/ui/Input';
 import { Users, Plus, Trash2, Loader } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 
@@ -136,37 +137,28 @@ const TeamsPage = () => {
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Create Team">
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Organization</label>
-            <select
-              className="w-full border border-gray-300 rounded-md p-2"
-              value={formData.organization_id}
-              onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
-            >
-              <option value="">Select organization…</option>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md p-2"
-              value={formData.name}
-              onChange={e => setFormData({ ...formData, name: e.target.value })}
-              placeholder="DevOps Team"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea
-              className="w-full border border-gray-300 rounded-md p-2"
-              value={formData.description}
-              onChange={e => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Optional description"
-              rows={3}
-            />
-          </div>
+          <Select
+            label="Organization"
+            value={formData.organization_id}
+            onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
+          >
+            <option value="">Select organization…</option>
+            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </Select>
+          <Input
+            label="Name"
+            type="text"
+            value={formData.name}
+            onChange={e => setFormData({ ...formData, name: e.target.value })}
+            placeholder="DevOps Team"
+          />
+          <Textarea
+            label="Description"
+            value={formData.description}
+            onChange={e => setFormData({ ...formData, description: e.target.value })}
+            placeholder="Optional description"
+            rows={3}
+          />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
             <Button onClick={handleCreate}>Create</Button>
