@@ -15,7 +15,8 @@ import {
   LogOut,
   Building2,
   UserCog,
-  History
+  History,
+  Settings as SettingsIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -60,8 +61,12 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout }) => {
         { name: 'Organizations', path: '/organizations', icon: <Building2 size={20} /> },
         { name: 'Users', path: '/users', icon: <Users size={20} /> },
         { name: 'Teams', path: '/teams', icon: <UserCog size={20} /> },
-        { name: 'Auth Providers', path: '/auth-providers', icon: <Key size={20} /> },
         { name: 'Activity', path: '/activity', icon: <History size={20} /> },
+      ]
+    },
+    {
+      items: [
+        { name: 'Settings', path: '/settings', icon: <SettingsIcon size={20} /> },
       ]
     }
   ];
