@@ -175,3 +175,33 @@ kubectl -n praetor rollout restart statefulset/praetor-executor   # pick up the 
 
 The executor fetches `{gitea.internalUrl}/api/packages/{owner}/generic/execpack-<pack>/current/<pack>-linux-<arch>.tar.gz`
 with no token (only publishing needs one).
+
+### Optional: URLs via ingress + trusted TLS
+
+By default the k3d values disable ingress (reach the UI with a port-forward).
+To serve the stack on real URLs (`https://praetor.localhost`) through k3s's
+built-in Traefik — with a browser-trusted cert, exactly like the compose env:
+
+```sh
+# 1. Map host 80/443 into the cluster (at create time, or edit a live cluster):
+k3d cluster edit praetor-test \
+  --port-add "80:80@loadbalancer" --port-add "443:443@loadbalancer"
+
+# 2. Load the machine's mkcert cert as a TLS secret (private key is NOT in git).
+#    Run `mkcert -install` once so the local CA is trusted by your browser.
+kubectl -n praetor create secret tls praetor-localhost-tls \
+  --cert=deployments/traefik/certs/localhost.pem \
+  --key=deployments/traefik/certs/localhost-key.pem
+
+# 3. Enable ingress with the mkcert cert:
+helm upgrade praetor deployments/helm/praetor-v2 \
+  -f deployments/helm/praetor-v2/ci/values-k3d.yaml \
+  -f deployments/helm/praetor-v2/ci/values-k3d-ingress.yaml -n praetor
+```
+
+Then open `https://praetor.localhost/login` — no cert warning, because the cert
+is signed by the mkcert CA already in your trust store. The cert is
+machine-specific; regenerate it (covering `praetor.localhost` and
+`*.praetor.localhost`) with the `mkcert` command in
+`deployments/traefik/dynamic/`. Without a `secretName`, Traefik falls back to
+its self-signed default cert (works, but the browser warns).
