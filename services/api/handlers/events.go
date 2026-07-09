@@ -17,6 +17,7 @@ import (
 	"github.com/hyperjumptech/grule-rule-engine/engine"
 	"github.com/hyperjumptech/grule-rule-engine/pkg"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/services/api/render"
 	"github.com/praetordev/praetor/services/api/store"
 )
@@ -28,7 +29,7 @@ type EventStore interface {
 	InsertReceipt(ctx context.Context, sourceID int64, payload []byte, matched int, launched []byte) error
 	JobTemplateAllowSimultaneous(ctx context.Context, unifiedTemplateID int64) bool
 	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) int
-	InsertEventJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte) (int64, error)
+	InsertEventJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error)
 	LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error)
 	ListSources(ctx context.Context) ([]store.EventSource, error)
 	CreateSource(ctx context.Context, in store.EventSource) (store.EventSource, error)
@@ -250,12 +251,11 @@ func (rs *EventsResource) launch(ctx context.Context, ruleName string, ujt, wf s
 				return 0, nil // a heal is already in flight; skip this event
 			}
 		}
-		args := map[string]interface{}{"extra_vars": map[string]interface{}{"eda_event": payload}}
+		opts := launch.Options{ExtraVars: map[string]interface{}{"eda_event": payload}}
 		if limit != "" {
-			args["limit"] = limit
+			opts.Limit = &limit
 		}
-		jobArgs, _ := json.Marshal(args)
-		id, err := rs.store.InsertEventJob(ctx, ruleName+" (event)", ujt.Int64, jobArgs)
+		id, err := rs.store.InsertEventJob(ctx, ruleName+" (event)", ujt.Int64, opts)
 		if isActiveRunConflict(err) {
 			return 0, nil // a heal is already in flight; skip this event
 		}

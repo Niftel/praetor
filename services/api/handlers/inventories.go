@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
@@ -29,7 +30,7 @@ type InventoryStore interface {
 	CreateSource(ctx context.Context, inventoryID int64, name, kind, source string, credentialID *int64, updateOnLaunch bool) (int64, error)
 	DeleteSource(ctx context.Context, sourceID, inventoryID int64) error
 	SourceName(ctx context.Context, sourceID, inventoryID int64) (string, error)
-	EnqueueSourceSync(ctx context.Context, jobName string, jobArgs []byte) (int64, error)
+	EnqueueSourceSync(ctx context.Context, jobName string, opts launch.Options) (int64, error)
 	// inventory import
 	HostByName(ctx context.Context, inventoryID int64, name string) (models.Host, error)
 	CreateImportHost(ctx context.Context, inventoryID int64, name string) (models.Host, error)

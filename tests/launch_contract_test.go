@@ -10,107 +10,124 @@ import (
 	"testing"
 )
 
-// TestLaunchSurfaceContract freezes the column set each launch surface writes to
-// unified_jobs. Today, starting a job is reimplemented at six independent
-// INSERT sites across two services (coupling hotspot H1); this test documents
-// and pins that divergence so the pkg/launch extraction (B2) shows up as a
-// deliberate, reviewable change to this contract rather than a silent drift.
+// TestLaunchIsSingleSited enforces the core invariant established by B2: a job or
+// workflow run is created in exactly one place. Before pkg/launch, "start a job"
+// was reimplemented at six independent INSERT INTO unified_jobs sites (and four
+// workflow_jobs snapshots) across the api and scheduler, each hand-marshalling a
+// different subset of job_args — which is how scheduled runs and workflow nodes
+// silently dropped their overrides (bug #79).
 //
-// It reads the source directly (rather than exercising a DB) because the point
-// is to freeze *what each site writes* — including the two surfaces that omit
-// job_args, which is exactly why scheduled runs and workflow nodes can't carry
-// overrides today (bug #79 and the workflow-node gap). When B2 routes all six
-// through launch.Job/launch.Workflow, update the expectations below to the
-// unified column set.
+// If this test fails because a new hand-rolled INSERT appeared, don't update the
+// test — route the new launch surface through pkg/launch instead. The whole
+// point is that there is one door.
 //
 // See docs/coupling-decomposition-plan.md (B1, B2).
-func TestLaunchSurfaceContract(t *testing.T) {
+func TestLaunchIsSingleSited(t *testing.T) {
 	root := repoRoot(t)
 
-	type surface struct {
-		file    string   // path relative to repo root
-		desc    string   // what launches through here
-		columns []string // exact unified_jobs columns this site INSERTs
-		jobArgs bool     // whether it carries per-launch overrides (job_args)
-	}
-
-	// The frozen contract. Two surfaces deliberately omit job_args — that is the
-	// override-dropping divergence B2 fixes, captured here so the fix is visible.
-	surfaces := []surface{
+	for _, tc := range []struct {
+		table       string
+		wantFile    string
+		wantColumns []string // the frozen column set of the single insert
+	}{
 		{
-			file:    "services/api/store/job_store.go",
-			desc:    "manual launch (POST /job-templates/{id}/launch)",
-			columns: []string{"name", "unified_job_template_id", "status", "created_at", "job_args"},
-			jobArgs: true,
+			table:       "unified_jobs",
+			wantFile:    "pkg/launch/launch.go",
+			wantColumns: []string{"name", "unified_job_template_id", "status", "created_at", "job_args"},
 		},
 		{
-			file:    "services/api/store/webhook_store.go",
-			desc:    "inbound webhook launch",
-			columns: []string{"name", "unified_job_template_id", "status", "created_at", "job_args"},
-			jobArgs: true,
+			table:    "workflow_jobs",
+			wantFile: "pkg/launch/launch.go",
+			// The workflow-run row; nodes/edges are snapshotted in the same function.
+			wantColumns: []string{"workflow_template_id", "status"},
 		},
-		{
-			file:    "services/api/store/event_store.go",
-			desc:    "EDA event-rule launch",
-			columns: []string{"name", "unified_job_template_id", "status", "created_at", "job_args"},
-			jobArgs: true,
-		},
-		{
-			file:    "services/api/store/inventory_store.go",
-			desc:    "inventory-source sync (no template)",
-			columns: []string{"name", "status", "created_at", "job_args"},
-			jobArgs: true,
-		},
-		{
-			file:    "services/scheduler/core/triggers.go",
-			desc:    "schedule / event-trigger launch — DROPS job_args (bug #79)",
-			columns: []string{"name", "unified_job_template_id", "status", "created_at"},
-			jobArgs: false,
-		},
-		{
-			file:    "services/scheduler/core/workflow.go",
-			desc:    "workflow node launch — DROPS job_args (and created_at)",
-			columns: []string{"name", "unified_job_template_id", "status"},
-			jobArgs: false,
-		},
-	}
-
-	for _, s := range surfaces {
-		t.Run(s.file, func(t *testing.T) {
-			cols := unifiedJobsInsertColumns(t, filepath.Join(root, s.file))
-			if !equalStringSets(cols, s.columns) {
-				t.Errorf("%s\n  %s\n  columns changed:\n    got:  %v\n    want: %v\n"+
-					"If this is the pkg/launch extraction (B2), update the frozen contract in this test.",
-					s.file, s.desc, cols, s.columns)
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			sites := insertSites(t, root, tc.table)
+			if len(sites) != 1 {
+				t.Fatalf("expected exactly one `INSERT INTO %s` site in non-test code, found %d:\n  %s\n"+
+					"Every launch must go through pkg/launch — route the new surface there instead of adding an INSERT.",
+					tc.table, len(sites), strings.Join(siteFiles(sites), "\n  "))
 			}
-			if hasJobArgs := contains(cols, "job_args"); hasJobArgs != s.jobArgs {
-				t.Errorf("%s: job_args presence changed: got %v want %v (%s)", s.file, hasJobArgs, s.jobArgs, s.desc)
+			if got := rel(root, sites[0].file); got != tc.wantFile {
+				t.Errorf("the single `INSERT INTO %s` moved to %s (want %s)", tc.table, got, tc.wantFile)
+			}
+			if !equalStringSets(sites[0].columns, tc.wantColumns) {
+				t.Errorf("`INSERT INTO %s` columns changed:\n  got:  %v\n  want: %v", tc.table, sites[0].columns, tc.wantColumns)
 			}
 		})
 	}
 }
 
-var unifiedJobsInsertRe = regexp.MustCompile(`INSERT INTO unified_jobs\s*\(([^)]*)\)`)
+type insertSite struct {
+	file    string
+	columns []string
+}
 
-// unifiedJobsInsertColumns extracts the column list of the single
-// `INSERT INTO unified_jobs (...)` statement in a source file.
-func unifiedJobsInsertColumns(t *testing.T, path string) []string {
+func siteFiles(s []insertSite) []string {
+	var out []string
+	for _, x := range s {
+		out = append(out, x.file)
+	}
+	return out
+}
+
+// insertSites scans every non-test .go file under root for
+// `INSERT INTO <table> (...)` statements and returns each match's column list.
+// Matches inside line comments are ignored so doc comments don't count as sites.
+func insertSites(t *testing.T, root, table string) []insertSite {
 	t.Helper()
-	src, err := os.ReadFile(path)
+	re := regexp.MustCompile(`INSERT INTO ` + regexp.QuoteMeta(table) + `\s*\(([^)]*)\)`)
+	var sites []insertSite
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		for _, line := range strings.Split(string(src), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue // skip doc-comment mentions
+			}
+			for _, m := range re.FindAllStringSubmatch(line, -1) {
+				sites = append(sites, insertSite{file: path, columns: splitColumns(m[1])})
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+		t.Fatalf("scan for INSERT INTO %s: %v", table, err)
 	}
-	m := unifiedJobsInsertRe.FindAllStringSubmatch(string(src), -1)
-	if len(m) != 1 {
-		t.Fatalf("%s: expected exactly one `INSERT INTO unified_jobs`, found %d", path, len(m))
-	}
+	return sites
+}
+
+func splitColumns(s string) []string {
 	var cols []string
-	for _, c := range strings.Split(m[0][1], ",") {
+	for _, c := range strings.Split(s, ",") {
 		if c = strings.TrimSpace(c); c != "" {
 			cols = append(cols, c)
 		}
 	}
 	return cols
+}
+
+func rel(root, path string) string {
+	r, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return r
 }
 
 func equalStringSets(a, b []string) bool {
@@ -126,15 +143,6 @@ func equalStringSets(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-func contains(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // repoRoot returns the repository root by walking up from this test file until a

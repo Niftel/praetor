@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 )
 
 // EventIntakeSource is the minimal source row the public intake path verifies against.
@@ -101,12 +102,8 @@ func (s *EventStore) ActiveJobCount(ctx context.Context, unifiedTemplateID int64
 
 // InsertEventJob creates a pending unified_job from an event rule; the raw error
 // is returned so the caller can detect an active-run conflict.
-func (s *EventStore) InsertEventJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte) (int64, error) {
-	var id int64
-	err := s.db.QueryRowxContext(ctx,
-		`INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
-		 VALUES ($1,$2,'pending',now(),$3) RETURNING id`,
-		name, unifiedTemplateID, jobArgs).Scan(&id)
+func (s *EventStore) InsertEventJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error) {
+	id, err := launch.Job(ctx, s.db, name, &unifiedTemplateID, opts)
 	return id, wrap("EventStore.InsertEventJob", err)
 }
 
@@ -117,24 +114,11 @@ func (s *EventStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTemplat
 		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}
 	defer tx.Rollback()
-	var wjID int64
-	if err := tx.QueryRowxContext(ctx,
-		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1,'running') RETURNING id`, workflowTemplateID).Scan(&wjID); err != nil {
+	wjID, err := launch.Workflow(ctx, tx, workflowTemplateID)
+	if err != nil {
 		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
-		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
-		wjID, workflowTemplateID); err != nil {
-		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
-		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
-		wjID, workflowTemplateID); err != nil {
-		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
-	}
-	return wjID, tx.Commit()
+	return wjID, wrap("EventStore.LaunchWorkflowSnapshot", tx.Commit())
 }
 
 // ListSources returns all event sources (token masked).

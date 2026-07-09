@@ -10,10 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/models"
 )
 
@@ -140,14 +140,10 @@ func (s *JobStore) ActiveJobCount(ctx context.Context, unifiedTemplateID int64) 
 }
 
 // InsertPendingJob creates a unified_job in 'pending' state (no current_run_id);
-// the scheduler picks it up. Returns the new job id.
-func (s *JobStore) InsertPendingJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte, createdAt time.Time) (int64, error) {
-	var id int64
-	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
-		VALUES ($1, $2, 'pending', $3, $4)
-		RETURNING id`,
-		name, unifiedTemplateID, createdAt, jobArgs).Scan(&id)
+// the scheduler picks it up. Returns the new job id. Delegates to pkg/launch,
+// the single job-creation site.
+func (s *JobStore) InsertPendingJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error) {
+	id, err := launch.Job(ctx, s.db, name, &unifiedTemplateID, opts)
 	if err != nil {
 		return 0, fmt.Errorf("insert pending job: %w", err)
 	}

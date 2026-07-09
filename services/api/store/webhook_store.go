@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 )
 
 // JobTemplateWebhook is what an inbound job-template webhook needs to verify and
@@ -63,13 +64,9 @@ func (s *WebhookStore) ActiveJobCount(ctx context.Context, unifiedTemplateID int
 
 // InsertWebhookJob creates a pending unified_job from a webhook and returns its
 // id. The raw error is returned so the caller can detect an active-run conflict.
-func (s *WebhookStore) InsertWebhookJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte) (int64, error) {
-	var jobID int64
-	err := s.db.QueryRowxContext(ctx, `
-		INSERT INTO unified_jobs (name, unified_job_template_id, status, created_at, job_args)
-		VALUES ($1, $2, 'pending', now(), $3) RETURNING id`,
-		name, unifiedTemplateID, jobArgs).Scan(&jobID)
-	return jobID, wrap("WebhookStore.InsertWebhookJob", err)
+func (s *WebhookStore) InsertWebhookJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error) {
+	id, err := launch.Job(ctx, s.db, name, &unifiedTemplateID, opts)
+	return id, wrap("WebhookStore.InsertWebhookJob", err)
 }
 
 // WorkflowTemplateWebhook loads a workflow template's webhook config by id.
@@ -88,27 +85,11 @@ func (s *WebhookStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTempl
 		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
 	defer tx.Rollback()
-	var wjID int64
-	if err := tx.QueryRowxContext(ctx,
-		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`, workflowTemplateID).Scan(&wjID); err != nil {
+	wjID, err := launch.Workflow(ctx, tx, workflowTemplateID)
+	if err != nil {
 		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
-		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
-		wjID, workflowTemplateID); err != nil {
-		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
-		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
-		wjID, workflowTemplateID); err != nil {
-		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
-	}
-	return wjID, nil
+	return wjID, wrap("WebhookStore.LaunchWorkflowSnapshot", tx.Commit())
 }
 
 // PackWebhook loads an execution pack's webhook config by id.

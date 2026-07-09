@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 )
 
 // WorkflowNode is a node in a workflow template graph (also the create/update input).
@@ -251,24 +252,11 @@ func (s *WorkflowStore) LaunchSnapshot(ctx context.Context, templateID int64) (i
 		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
 	defer tx.Rollback()
-	var wjID int64
-	if err := tx.QueryRowxContext(ctx,
-		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`, templateID).Scan(&wjID); err != nil {
+	wjID, err := launch.Workflow(ctx, tx, templateID)
+	if err != nil {
 		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_job_nodes (workflow_job_id, node_key, node_type, job_template_id, name, webhook_url, webhook_body, status)
-		 SELECT $1, node_key, node_type, job_template_id, name, webhook_url, webhook_body, 'pending' FROM workflow_nodes WHERE workflow_template_id=$2`,
-		wjID, templateID); err != nil {
-		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_job_edges (workflow_job_id, parent_key, child_key, edge_type)
-		 SELECT $1, parent_key, child_key, edge_type FROM workflow_node_edges WHERE workflow_template_id=$2`,
-		wjID, templateID); err != nil {
-		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
-	}
-	return wjID, tx.Commit()
+	return wjID, wrap("WorkflowStore.LaunchSnapshot", tx.Commit())
 }
 
 // ListJobsByTemplates returns recent workflow runs for the given templates

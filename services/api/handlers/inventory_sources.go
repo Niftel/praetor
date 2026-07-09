@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 )
@@ -108,8 +109,8 @@ func (rs *InventoriesResource) SyncInventorySource(w http.ResponseWriter, r *htt
 		return
 	}
 
-	jobArgs, _ := json.Marshal(map[string]interface{}{"inventory_source_id": sid})
-	jobID, err := rs.store.EnqueueSourceSync(r.Context(), "Inventory sync: "+name, jobArgs)
+	opts := launch.Options{InventorySourceID: sid}
+	jobID, err := rs.store.EnqueueSourceSync(r.Context(), "Inventory sync: "+name, opts)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/models"
 )
 
@@ -143,12 +144,11 @@ func (s *InventoryStore) SourceName(ctx context.Context, sourceID, inventoryID i
 
 // EnqueueSourceSync creates a pending unified_job for an inventory-source sync
 // and returns its id.
-func (s *InventoryStore) EnqueueSourceSync(ctx context.Context, jobName string, jobArgs []byte) (int64, error) {
-	var jobID int64
-	err := s.db.QueryRowxContext(ctx,
-		`INSERT INTO unified_jobs (name, status, created_at, job_args)
-		 VALUES ($1, 'pending', now(), $2) RETURNING id`, jobName, jobArgs).Scan(&jobID)
-	return jobID, wrap("InventoryStore.EnqueueSourceSync", err)
+func (s *InventoryStore) EnqueueSourceSync(ctx context.Context, jobName string, opts launch.Options) (int64, error) {
+	// Sync jobs have no job template (nil ujtID); the source is carried in
+	// opts.InventorySourceID and read back by the scheduler.
+	id, err := launch.Job(ctx, s.db, jobName, nil, opts)
+	return id, wrap("InventoryStore.EnqueueSourceSync", err)
 }
 
 // --- inventory import (upsert host/group by name within an inventory) ---
