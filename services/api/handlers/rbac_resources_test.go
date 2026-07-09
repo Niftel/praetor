@@ -128,9 +128,19 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 	operatorUC := middleware.UserContext{UserID: operator}
 	nobodyUC := middleware.UserContext{UserID: nobody}
 
-	// Admin creates a template (inline playbook, no attachments).
+	// Inline playbooks are deprecated — a template must source its playbook from an
+	// SCM project. Create one in orgA (the AFTER INSERT trigger grants its roles, so
+	// the org admin inherits project use through the hierarchy).
+	var projID int64
+	if err := db.QueryRow(
+		`INSERT INTO projects (organization_id, name, scm_type, scm_url) VALUES ($1,$2,'git','https://example.invalid/r.git') RETURNING id`,
+		orgA, fmt.Sprintf("rbac-tmpl-proj-%d", uniq)).Scan(&projID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	// Admin creates a template sourcing its playbook from the project.
 	rec := callJSON(t, tmplRes.CreateTemplate, http.MethodPost,
-		fmt.Sprintf(`{"name":"tmpl-%d","organization_id":%d,"playbook":"site.yml"}`, uniq, orgA), adminUC, nil)
+		fmt.Sprintf(`{"name":"tmpl-%d","organization_id":%d,"project_id":%d,"playbook":"site.yml"}`, uniq, orgA, projID), adminUC, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("admin create template: want 201, got %d (%s)", rec.Code, rec.Body)
 	}
@@ -143,8 +153,9 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM unified_jobs WHERE unified_job_template_id = $1`, *created.UnifiedJobTemplateID)
-		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, orgA)
 		_, _ = db.Exec(`DELETE FROM unified_job_templates WHERE id = $1`, *created.UnifiedJobTemplateID)
+		_, _ = db.Exec(`DELETE FROM projects WHERE id = $1`, projID)
+		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, orgA)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`, admin, operator, nobody)
 	})
 
@@ -161,7 +172,7 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 
 	// operator (execute, not admin) cannot edit the template.
 	rec = callJSON(t, tmplRes.UpdateTemplate, http.MethodPut,
-		fmt.Sprintf(`{"name":"tmpl-edited-%d","organization_id":%d,"playbook":"site.yml"}`, uniq, orgA),
+		fmt.Sprintf(`{"name":"tmpl-edited-%d","organization_id":%d,"project_id":%d,"playbook":"site.yml"}`, uniq, orgA, projID),
 		operatorUC, map[string]string{"id": fmt.Sprint(created.ID)})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("operator edit template: want 403, got %d", rec.Code)
