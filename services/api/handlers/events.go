@@ -30,7 +30,7 @@ type EventStore interface {
 	JobTemplateAllowSimultaneous(ctx context.Context, unifiedTemplateID int64) bool
 	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) int
 	InsertEventJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error)
-	LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error)
+	LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64, opts launch.Options) (int64, error)
 	ListSources(ctx context.Context) ([]store.EventSource, error)
 	CreateSource(ctx context.Context, in store.EventSource) (store.EventSource, error)
 	DeleteSource(ctx context.Context, id int64) error
@@ -244,6 +244,14 @@ func (rs *EventsResource) Intake(w http.ResponseWriter, r *http.Request) {
 // --limit so remediation targets only the affected host. Honors the target
 // template's allow_simultaneous concurrency guard (skip overlapping heals).
 func (rs *EventsResource) launch(ctx context.Context, ruleName string, ujt, wf sql.NullInt64, payload map[string]interface{}, limit string) (int64, error) {
+	// The event is context for whatever we launch: the full event under
+	// extra_vars.eda_event, and (when the rule extracts one) the affected host as
+	// --limit so remediation targets only it. Both the job and workflow targets
+	// carry these; for a workflow they overlay every node job.
+	opts := launch.Options{ExtraVars: map[string]interface{}{"eda_event": payload}}
+	if limit != "" {
+		opts.Limit = &limit
+	}
 	switch {
 	case ujt.Valid:
 		if !rs.store.JobTemplateAllowSimultaneous(ctx, ujt.Int64) {
@@ -251,18 +259,15 @@ func (rs *EventsResource) launch(ctx context.Context, ruleName string, ujt, wf s
 				return 0, nil // a heal is already in flight; skip this event
 			}
 		}
-		opts := launch.Options{ExtraVars: map[string]interface{}{"eda_event": payload}}
-		if limit != "" {
-			opts.Limit = &limit
-		}
 		id, err := rs.store.InsertEventJob(ctx, ruleName+" (event)", ujt.Int64, opts)
 		if isActiveRunConflict(err) {
 			return 0, nil // a heal is already in flight; skip this event
 		}
 		return id, err
 	case wf.Valid:
-		// Snapshot the workflow into a run (same as an inbound workflow webhook).
-		return rs.store.LaunchWorkflowSnapshot(ctx, wf.Int64)
+		// Snapshot the workflow into a run (same as an inbound workflow webhook),
+		// carrying the event context + limit into the run's node jobs.
+		return rs.store.LaunchWorkflowSnapshot(ctx, wf.Int64, opts)
 	default:
 		return 0, fmt.Errorf("rule %q has no target", ruleName)
 	}

@@ -28,12 +28,13 @@ func logExec(ctx context.Context, ex sqlExec, query string, args ...interface{})
 
 // launchTarget starts a trigger's target: a workflow run (snapshotting its
 // graph) or an ordinary job from a unified job template, carrying opts (e.g. a
-// schedule's extra_vars) into the job. Exactly one of wfID / ujtID must be set.
-// Both paths route through pkg/launch, the single job/workflow creation site.
+// schedule's extra_vars) into whichever it launches. Exactly one of wfID / ujtID
+// must be set. Both paths route through pkg/launch, the single job/workflow
+// creation site.
 func launchTarget(ctx context.Context, ex sqlExec, name string, wfID, ujtID *int64, opts launch.Options) error {
 	switch {
 	case wfID != nil:
-		_, err := launch.Workflow(ctx, ex, *wfID)
+		_, err := launch.Workflow(ctx, ex, *wfID, opts)
 		return err
 	case ujtID != nil:
 		_, err := launch.Job(ctx, ex, name, ujtID, opts)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 	"github.com/praetordev/praetor/services/api/store"
@@ -26,7 +27,7 @@ type WorkflowStore interface {
 	Delete(ctx context.Context, id int64) error
 	AllowSimultaneous(ctx context.Context, id int64) bool
 	ActiveRunCount(ctx context.Context, id int64) (int, error)
-	LaunchSnapshot(ctx context.Context, templateID int64) (int64, error)
+	LaunchSnapshot(ctx context.Context, templateID int64, opts launch.Options) (int64, error)
 	ListJobsByTemplates(ctx context.Context, templateIDs []int64) ([]store.WorkflowRun, error)
 	JobMeta(ctx context.Context, id int64) (store.WorkflowJobMeta, error)
 	JobNodes(ctx context.Context, jobID int64) ([]store.WorkflowJobNode, error)
@@ -209,7 +210,11 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	wjID, err := rs.store.LaunchSnapshot(r.Context(), id)
+	// Manual launches carry no overrides today: workflow-level prompt-on-launch
+	// (extra_vars/survey/limit questions) is a separate feature. The typed Options
+	// path exists so machine-originated launches (schedules, webhooks, EDA) can
+	// carry context; wiring a manual prompt UI is now a one-place change (#90).
+	wjID, err := rs.store.LaunchSnapshot(r.Context(), id, launch.Options{})
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

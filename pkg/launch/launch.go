@@ -117,11 +117,17 @@ func Job(ctx context.Context, ex Execer, name string, ujtID *int64, opts Options
 // workflow-launch site: manual launch, schedules, event triggers, inbound
 // webhooks and EDA rules all call it. Callers that need the three inserts to be
 // atomic pass a transaction as ex.
-func Workflow(ctx context.Context, ex Execer, wfID int64) (int64, error) {
+//
+// opts are workflow-level launch overrides (a schedule's extra_vars, a webhook
+// payload, an EDA event + --limit). They are stored on workflow_jobs.launch_args
+// and, when the scheduler runs each node's job template, overlaid on that job's
+// template defaults (launch wins) — matching AWX workflow extra_vars semantics.
+// Empty Options store "{}", i.e. no overrides, which is the historical behavior.
+func Workflow(ctx context.Context, ex Execer, wfID int64, opts Options) (int64, error) {
 	var wjID int64
 	if err := ex.QueryRowContext(ctx,
-		`INSERT INTO workflow_jobs (workflow_template_id, status) VALUES ($1, 'running') RETURNING id`,
-		wfID).Scan(&wjID); err != nil {
+		`INSERT INTO workflow_jobs (workflow_template_id, status, launch_args) VALUES ($1, 'running', $2) RETURNING id`,
+		wfID, []byte(opts.JobArgs())).Scan(&wjID); err != nil {
 		return 0, err
 	}
 	if _, err := ex.ExecContext(ctx,

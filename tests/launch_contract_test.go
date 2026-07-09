@@ -39,7 +39,9 @@ func TestLaunchIsSingleSited(t *testing.T) {
 			table:    "workflow_jobs",
 			wantFile: "pkg/launch/launch.go",
 			// The workflow-run row; nodes/edges are snapshotted in the same function.
-			wantColumns: []string{"workflow_template_id", "status"},
+			// launch_args carries workflow-level overrides (schedule extra_vars,
+			// webhook payload, EDA event+limit) overlaid on each node job (#90).
+			wantColumns: []string{"workflow_template_id", "status", "launch_args"},
 		},
 	} {
 		t.Run(tc.table, func(t *testing.T) {
