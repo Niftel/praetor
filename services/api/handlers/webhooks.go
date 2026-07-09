@@ -24,7 +24,7 @@ type WebhookStore interface {
 	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) (int, error)
 	InsertWebhookJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error)
 	WorkflowTemplateWebhook(ctx context.Context, id int64) (store.WorkflowTemplateWebhook, error)
-	LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error)
+	LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64, opts launch.Options) (int64, error)
 	PackWebhook(ctx context.Context, id int64) (store.PackWebhook, error)
 	QueuePackRebuild(ctx context.Context, id int64) error
 	NodeCallbackInfo(ctx context.Context, id int64) (store.NodeCallbackInfo, error)
@@ -67,21 +67,7 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Inject the payload (and convenience ref/commit vars) as extra_vars.
-	vars := map[string]interface{}{}
-	var payload map[string]interface{}
-	if json.Unmarshal(body, &payload) == nil {
-		vars["webhook_payload"] = payload
-		if ref, ok := payload["ref"].(string); ok {
-			vars["webhook_ref"] = ref
-		}
-		for _, k := range []string{"after", "checkout_sha"} {
-			if c, ok := payload[k].(string); ok {
-				vars["webhook_commit"] = c
-				break
-			}
-		}
-	}
-	opts := launch.Options{ExtraVars: vars}
+	opts := launch.Options{ExtraVars: webhookExtraVars(body)}
 
 	// Concurrency guard: unless the template allows simultaneous runs, skip this
 	// webhook trigger while a prior run is still active (webhooks can fire in
@@ -131,8 +117,11 @@ func (rs *WebhooksResource) HandleWorkflow(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Snapshot the template's nodes into a running workflow_jobs run, exactly as
-	// LaunchWorkflow does; the scheduler's workflow runner then walks it.
-	wjID, err := rs.store.LaunchWorkflowSnapshot(r.Context(), id)
+	// LaunchWorkflow does; the scheduler's workflow runner then walks it. The same
+	// payload/ref/commit vars a job-template webhook injects are carried as
+	// workflow-level extra_vars, overlaid on every node job.
+	opts := launch.Options{ExtraVars: webhookExtraVars(body)}
+	wjID, err := rs.store.LaunchWorkflowSnapshot(r.Context(), id, opts)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -215,6 +204,28 @@ func (rs *WebhooksResource) HandleNodeCallback(w http.ResponseWriter, r *http.Re
 	}
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"node_id": id, "status": result})
+}
+
+// webhookExtraVars turns an inbound webhook body into the launch extra_vars both
+// job-template and workflow-template webhooks inject: the whole payload under
+// webhook_payload, plus convenience webhook_ref / webhook_commit pulled from the
+// common git-provider fields. A non-JSON body yields an empty map (no vars).
+func webhookExtraVars(body []byte) map[string]interface{} {
+	vars := map[string]interface{}{}
+	var payload map[string]interface{}
+	if json.Unmarshal(body, &payload) == nil {
+		vars["webhook_payload"] = payload
+		if ref, ok := payload["ref"].(string); ok {
+			vars["webhook_ref"] = ref
+		}
+		for _, k := range []string{"after", "checkout_sha"} {
+			if c, ok := payload[k].(string); ok {
+				vars["webhook_commit"] = c
+				break
+			}
+		}
+	}
+	return vars
 }
 
 // verifyWebhook checks the request against the template's shared secret using

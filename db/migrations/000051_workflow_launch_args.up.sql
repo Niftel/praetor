@@ -1,0 +1,11 @@
+-- Workflow runs can now carry launch-time overrides, exactly like ordinary jobs
+-- carry unified_jobs.job_args. Before this, launch.Workflow took no Options, so a
+-- schedule's extra_vars, an inbound webhook's payload, and an EDA rule's event
+-- context + --limit were all silently dropped when the target was a workflow.
+--
+-- The column mirrors the unified_jobs.job_args shape (pkg/launch.Options.JobArgs);
+-- the scheduler's workflow runner reads it back with launch.ParseArgs and overlays
+-- it on every node job's template defaults (launch wins), matching AWX workflow
+-- extra_vars semantics. DEFAULT '{}' reproduces the pre-migration behavior for any
+-- in-flight run. See #90 / docs/coupling-decomposition-plan.md (B2, workflow leg).
+ALTER TABLE workflow_jobs ADD COLUMN IF NOT EXISTS launch_args JSONB NOT NULL DEFAULT '{}';

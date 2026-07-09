@@ -108,13 +108,13 @@ func (s *EventStore) InsertEventJob(ctx context.Context, name string, unifiedTem
 }
 
 // LaunchWorkflowSnapshot snapshots a workflow template into a running run.
-func (s *EventStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error) {
+func (s *EventStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64, opts launch.Options) (int64, error) {
 	tx, err := s.db.Beginx()
 	if err != nil {
 		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}
 	defer tx.Rollback()
-	wjID, err := launch.Workflow(ctx, tx, workflowTemplateID)
+	wjID, err := launch.Workflow(ctx, tx, workflowTemplateID, opts)
 	if err != nil {
 		return 0, wrap("EventStore.LaunchWorkflowSnapshot", err)
 	}

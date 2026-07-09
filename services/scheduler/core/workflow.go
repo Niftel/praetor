@@ -151,15 +151,21 @@ func (s *Scheduler) startWebhookOutNode(ctx context.Context, wfName string, wjID
 
 func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 	var wf struct {
-		TemplateID int64  `db:"workflow_template_id"`
-		Name       string `db:"name"`
+		TemplateID int64           `db:"workflow_template_id"`
+		Name       string          `db:"name"`
+		LaunchArgs json.RawMessage `db:"launch_args"`
 	}
 	if err := s.DB.GetContext(ctx, &wf,
-		`SELECT wj.workflow_template_id, wt.name
+		`SELECT wj.workflow_template_id, wt.name, wj.launch_args
 		 FROM workflow_jobs wj JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
 		 WHERE wj.id=$1`, wjID); err != nil {
 		return err
 	}
+	// Workflow-level launch overrides (a schedule's extra_vars, a webhook payload,
+	// an EDA event + --limit) captured at snapshot time. They are overlaid on each
+	// node job's template defaults below (launch wins), matching AWX workflow
+	// extra_vars semantics.
+	wfOpts := launch.ParseArgs(wf.LaunchArgs)
 	// Read the run's snapshotted graph — not the template — so editing the template
 	// never changes a run in flight.
 	var nodes []wfNode
@@ -263,10 +269,12 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			nodeLabel = n.NodeKey
 		}
 		jobName := fmt.Sprintf("%s #%d / %s", wf.Name, wjID, nodeLabel)
-		// Workflow nodes launch through the single job-creation site. They carry
-		// no per-node overrides today (empty Options); wiring node-level extra_vars
-		// is a future change that now has one place to land.
-		jobID, err := launch.Job(ctx, s.DB, jobName, &ujtID, launch.Options{})
+		// Workflow nodes launch through the single job-creation site, carrying the
+		// workflow-level launch Options (schedule/webhook/EDA context) which the
+		// scheduler's manifest build overlays on the node template's defaults
+		// (launch wins). Per-node overrides are a future change that now has one
+		// place to land.
+		jobID, err := launch.Job(ctx, s.DB, jobName, &ujtID, wfOpts)
 		if err != nil {
 			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='failed' WHERE id=$1`, n.ID)
 			n.Status = "failed"

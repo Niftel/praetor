@@ -79,13 +79,13 @@ func (s *WebhookStore) WorkflowTemplateWebhook(ctx context.Context, id int64) (W
 
 // LaunchWorkflowSnapshot snapshots a workflow template's nodes+edges into a new
 // running workflow_jobs run and returns its id (one transaction).
-func (s *WebhookStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error) {
+func (s *WebhookStore) LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64, opts launch.Options) (int64, error) {
 	tx, err := s.db.Beginx()
 	if err != nil {
 		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}
 	defer tx.Rollback()
-	wjID, err := launch.Workflow(ctx, tx, workflowTemplateID)
+	wjID, err := launch.Workflow(ctx, tx, workflowTemplateID, opts)
 	if err != nil {
 		return 0, wrap("WebhookStore.LaunchWorkflowSnapshot", err)
 	}

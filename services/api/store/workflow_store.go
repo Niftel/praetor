@@ -246,13 +246,13 @@ func (s *WorkflowStore) ActiveRunCount(ctx context.Context, id int64) (int, erro
 
 // LaunchSnapshot snapshots a template's nodes+edges into a running workflow_jobs
 // run and returns its id (one transaction).
-func (s *WorkflowStore) LaunchSnapshot(ctx context.Context, templateID int64) (int64, error) {
+func (s *WorkflowStore) LaunchSnapshot(ctx context.Context, templateID int64, opts launch.Options) (int64, error) {
 	tx, err := s.db.Beginx()
 	if err != nil {
 		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
 	defer tx.Rollback()
-	wjID, err := launch.Workflow(ctx, tx, templateID)
+	wjID, err := launch.Workflow(ctx, tx, templateID, opts)
 	if err != nil {
 		return 0, wrap("WorkflowStore.LaunchSnapshot", err)
 	}
