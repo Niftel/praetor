@@ -304,9 +304,11 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Fetch due schedules with SKIP LOCKED
+	// 1. Fetch due schedules with SKIP LOCKED. Explicit column list (never SELECT *):
+	// this is the dispatch path, so a new schedules column with a SELECT * would fail
+	// the scan ("missing destination name X") and stop every scheduled launch (#91).
 	query := `
-		SELECT *
+		SELECT ` + models.ScheduleCols + `
 		FROM schedules
 		WHERE enabled = true AND next_run <= NOW()
 		FOR UPDATE SKIP LOCKED

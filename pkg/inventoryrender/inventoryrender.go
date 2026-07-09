@@ -19,14 +19,18 @@ import (
 // An inventory with no hosts renders to the empty string (the executor treats
 // that as localhost). Group memberships are fetched in a single batched query.
 func Render(ctx context.Context, db *sqlx.DB, inventoryID int64) (string, error) {
+	// Explicit column lists (never SELECT *): this runs on the dispatch path — the
+	// executor fetches the rendered inventory by reference at every job dispatch —
+	// so a `SELECT *` here turns any new hosts/groups column into a runtime scan
+	// failure ("missing destination name X") that stops jobs from launching (#91).
 	var hosts []models.Host
 	if err := db.SelectContext(ctx, &hosts,
-		`SELECT * FROM hosts WHERE inventory_id = $1 AND enabled = true`, inventoryID); err != nil {
+		`SELECT `+models.HostCols+` FROM hosts WHERE inventory_id = $1 AND enabled = true`, inventoryID); err != nil {
 		return "", fmt.Errorf("fetch hosts: %w", err)
 	}
 	var groups []models.Group
 	if err := db.SelectContext(ctx, &groups,
-		`SELECT * FROM groups WHERE inventory_id = $1`, inventoryID); err != nil {
+		`SELECT `+models.GroupCols+` FROM groups WHERE inventory_id = $1`, inventoryID); err != nil {
 		return "", fmt.Errorf("fetch groups: %w", err)
 	}
 
