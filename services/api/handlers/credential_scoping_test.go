@@ -78,7 +78,7 @@ func TestUpdateTemplateRechecksUse(t *testing.T) {
 func TestCredentialGrantOrgFence(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	h := handlers.NewContentHandler(db)
+	h := handlers.NewRolesResource(db)
 	access := rbac.NewAccessChecker(db)
 	ctx := context.Background()
 

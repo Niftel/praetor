@@ -1,20 +1,45 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
+
+// RoleStore is the roles-domain read access (role mutations go through the rbac
+// Access service).
+type RoleStore interface {
+	ListAll(ctx context.Context) ([]rbac.Role, error)
+	ListSingletons(ctx context.Context) ([]rbac.Role, error)
+	GetByID(ctx context.Context, id int64) (rbac.Role, error)
+	UsersForRole(ctx context.Context, roleID int64) ([]models.User, error)
+	TeamsForRole(ctx context.Context, roleID int64) ([]models.Team, error)
+}
+
+// RolesResource is the self-contained roles domain (extracted from ContentHandler — B6/#85).
+type RolesResource struct {
+	DB *sqlx.DB
+	*Authorizer
+	store RoleStore
+}
+
+func NewRolesResource(db *sqlx.DB) *RolesResource {
+	return &RolesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewRoleStore(db)}
+}
 
 // ListRoles GET /api/v1/roles
 // Lists all roles user can see (system roles + roles on accessible objects)
-func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) ListRoles(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 
 	var roles []rbac.Role
@@ -22,7 +47,7 @@ func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 
 	if userCtx.IsSuperuser {
 		// Superusers see all roles
-		roles, err = h.roles.ListAll(r.Context())
+		roles, err = h.store.ListAll(r.Context())
 	} else {
 		// Regular users see system roles + roles on objects they can access
 		roles, err = h.Access.GetUserRoles(r.Context(), userCtx.UserID)
@@ -34,7 +59,7 @@ func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Also include system singleton roles
-	singletons, _ := h.roles.ListSingletons(r.Context())
+	singletons, _ := h.store.ListSingletons(r.Context())
 
 	// Merge (avoiding duplicates)
 	roleSet := make(map[int64]rbac.Role)
@@ -54,7 +79,7 @@ func (h *ContentHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetRole GET /api/v1/roles/{id}
-func (h *ContentHandler) GetRole(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) GetRole(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	roleIDStr := chi.URLParam(r, "id")
 	roleID, err := strconv.ParseInt(roleIDStr, 10, 64)
@@ -63,7 +88,7 @@ func (h *ContentHandler) GetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role, err := h.roles.GetByID(r.Context(), roleID)
+	role, err := h.store.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -86,7 +111,7 @@ func (h *ContentHandler) GetRole(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListRoleUsers GET /api/v1/roles/{id}/users
-func (h *ContentHandler) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	roleIDStr := chi.URLParam(r, "id")
 	roleID, err := strconv.ParseInt(roleIDStr, 10, 64)
@@ -96,7 +121,7 @@ func (h *ContentHandler) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get role to check permissions
-	role, err := h.roles.GetByID(r.Context(), roleID)
+	role, err := h.store.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -111,7 +136,7 @@ func (h *ContentHandler) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	users, err := h.roles.UsersForRole(r.Context(), roleID)
+	users, err := h.store.UsersForRole(r.Context(), roleID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -120,7 +145,7 @@ func (h *ContentHandler) ListRoleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // AddRoleUser POST /api/v1/roles/{id}/users
-func (h *ContentHandler) AddRoleUser(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) AddRoleUser(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	roleIDStr := chi.URLParam(r, "id")
 	roleID, err := strconv.ParseInt(roleIDStr, 10, 64)
@@ -129,7 +154,7 @@ func (h *ContentHandler) AddRoleUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role, err := h.roles.GetByID(r.Context(), roleID)
+	role, err := h.store.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -186,7 +211,7 @@ func (h *ContentHandler) AddRoleUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveRoleUser DELETE /api/v1/roles/{id}/users/{userId}
-func (h *ContentHandler) RemoveRoleUser(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) RemoveRoleUser(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	roleIDStr := chi.URLParam(r, "id")
 	roleID, err := strconv.ParseInt(roleIDStr, 10, 64)
@@ -202,7 +227,7 @@ func (h *ContentHandler) RemoveRoleUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	role, err := h.roles.GetByID(r.Context(), roleID)
+	role, err := h.store.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -232,7 +257,7 @@ func (h *ContentHandler) RemoveRoleUser(w http.ResponseWriter, r *http.Request) 
 }
 
 // ListRoleTeams GET /api/v1/roles/{id}/teams
-func (h *ContentHandler) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	roleIDStr := chi.URLParam(r, "id")
 	roleID, err := strconv.ParseInt(roleIDStr, 10, 64)
@@ -241,7 +266,7 @@ func (h *ContentHandler) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role, err := h.roles.GetByID(r.Context(), roleID)
+	role, err := h.store.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -255,7 +280,7 @@ func (h *ContentHandler) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	teams, err := h.roles.TeamsForRole(r.Context(), roleID)
+	teams, err := h.store.TeamsForRole(r.Context(), roleID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -264,7 +289,7 @@ func (h *ContentHandler) ListRoleTeams(w http.ResponseWriter, r *http.Request) {
 }
 
 // AddRoleTeam POST /api/v1/roles/{id}/teams
-func (h *ContentHandler) AddRoleTeam(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) AddRoleTeam(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	roleIDStr := chi.URLParam(r, "id")
 	roleID, err := strconv.ParseInt(roleIDStr, 10, 64)
@@ -273,7 +298,7 @@ func (h *ContentHandler) AddRoleTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role, err := h.roles.GetByID(r.Context(), roleID)
+	role, err := h.store.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -323,7 +348,7 @@ func (h *ContentHandler) AddRoleTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveRoleTeam DELETE /api/v1/roles/{id}/teams/{teamId}
-func (h *ContentHandler) RemoveRoleTeam(w http.ResponseWriter, r *http.Request) {
+func (h *RolesResource) RemoveRoleTeam(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	roleIDStr := chi.URLParam(r, "id")
 	roleID, err := strconv.ParseInt(roleIDStr, 10, 64)
@@ -339,7 +364,7 @@ func (h *ContentHandler) RemoveRoleTeam(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	role, err := h.roles.GetByID(r.Context(), roleID)
+	role, err := h.store.GetByID(r.Context(), roleID)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return

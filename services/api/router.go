@@ -50,14 +50,19 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		MaxAge:           300,
 	}))
 
-	// Handlers
-	content := handlers.NewContentHandler(db)
-	content.LDAPConfigPath = cfg.LDAPConfigPath // enables LDAP login when set
+	// Identity / access domains (formerly the ContentHandler god-object — B6/#85).
+	auth := handlers.NewAuthResource(db)
+	auth.LDAPConfigPath = cfg.LDAPConfigPath // enables LDAP login when set
+	orgs := handlers.NewOrgsResource(db)
+	users := handlers.NewUsersResource(db)
+	teams := handlers.NewTeamsResource(db)
+	roles := handlers.NewRolesResource(db)
+	access := handlers.NewAccessResource(db)
 
 	// Auth Routes (Public). Login is rate-limited per IP to blunt password
 	// brute-forcing (20 attempts/minute).
 	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.With(modelAuth.RateLimit(20, time.Minute)).Post("/login", content.Login)
+		r.With(modelAuth.RateLimit(20, time.Minute)).Post("/login", auth.Login)
 	})
 
 	r.Get("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -102,37 +107,37 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Mount("/tokens", handlers.NewTokensResource(db).Routes())
 
 		// Activity stream (audit log) — superuser/auditor only
-		r.Get("/activity-stream", content.ListActivityStream)
+		r.Get("/activity-stream", access.ListActivityStream)
 
 		// =======================================================================
 		// Organizations (AWX-style with RBAC)
 		// =======================================================================
 		r.Route("/organizations", func(r chi.Router) {
-			r.Get("/", content.ListOrganizations)
-			r.Post("/", content.CreateOrganization)
+			r.Get("/", orgs.ListOrganizations)
+			r.Post("/", orgs.CreateOrganization)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", content.GetOrganization)
-				r.Put("/", content.UpdateOrganization)
-				r.Delete("/", content.DeleteOrganization)
+				r.Get("/", orgs.GetOrganization)
+				r.Put("/", orgs.UpdateOrganization)
+				r.Delete("/", orgs.DeleteOrganization)
 
 				// Organization membership
-				r.Get("/users", content.ListOrganizationUsers)
-				r.Post("/users", content.AddOrganizationUser)
-				r.Delete("/users/{userId}", content.RemoveOrganizationUser)
+				r.Get("/users", orgs.ListOrganizationUsers)
+				r.Post("/users", orgs.AddOrganizationUser)
+				r.Delete("/users/{userId}", orgs.RemoveOrganizationUser)
 
-				r.Get("/admins", content.ListOrganizationAdmins)
-				r.Post("/admins", content.AddOrganizationAdmin)
+				r.Get("/admins", orgs.ListOrganizationAdmins)
+				r.Post("/admins", orgs.AddOrganizationAdmin)
 
 				// Organization subresources
-				r.Get("/teams", content.ListOrganizationTeams)
-				r.Get("/projects", content.ListOrganizationProjects)
-				r.Get("/inventories", content.ListOrganizationInventories)
-				r.Get("/object_roles", content.ListOrganizationRoles)
+				r.Get("/teams", orgs.ListOrganizationTeams)
+				r.Get("/projects", orgs.ListOrganizationProjects)
+				r.Get("/inventories", orgs.ListOrganizationInventories)
+				r.Get("/object_roles", orgs.ListOrganizationRoles)
 
 				// Galaxy / Automation Hub credentials for the org
-				r.Get("/galaxy-credentials", content.ListOrgGalaxyCredentials)
-				r.Post("/galaxy-credentials", content.AddOrgGalaxyCredential)
-				r.Delete("/galaxy-credentials/{credId}", content.RemoveOrgGalaxyCredential)
+				r.Get("/galaxy-credentials", orgs.ListOrgGalaxyCredentials)
+				r.Post("/galaxy-credentials", orgs.AddOrgGalaxyCredential)
+				r.Delete("/galaxy-credentials/{credId}", orgs.RemoveOrgGalaxyCredential)
 			})
 		})
 
@@ -140,36 +145,36 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// Users
 		// =======================================================================
 		r.Route("/users", func(r chi.Router) {
-			r.Get("/", content.ListUsers)
-			r.Post("/", content.CreateUser)
+			r.Get("/", users.ListUsers)
+			r.Post("/", users.CreateUser)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", content.GetUser)
-				r.Put("/", content.UpdateUser)
-				r.Delete("/", content.DeleteUser)
-				r.Get("/organizations", content.ListUserOrganizations)
-				r.Get("/teams", content.ListUserTeams)
-				r.Get("/roles", content.ListUserRoles)
-				r.Get("/access", content.UserAccess) // roles a user holds, with resource names
+				r.Get("/", users.GetUser)
+				r.Put("/", users.UpdateUser)
+				r.Delete("/", users.DeleteUser)
+				r.Get("/organizations", users.ListUserOrganizations)
+				r.Get("/teams", users.ListUserTeams)
+				r.Get("/roles", users.ListUserRoles)
+				r.Get("/access", access.UserAccess) // roles a user holds, with resource names
 			})
 		})
 
 		// Per-resource access (who holds which role on an object): AWX-style.
-		r.Get("/access", content.ResourceAccess)
+		r.Get("/access", access.ResourceAccess)
 
 		// =======================================================================
 		// Teams
 		// =======================================================================
 		r.Route("/teams", func(r chi.Router) {
-			r.Get("/", content.ListTeams)
-			r.Post("/", content.CreateTeam)
+			r.Get("/", teams.ListTeams)
+			r.Post("/", teams.CreateTeam)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", content.GetTeam)
-				r.Put("/", content.UpdateTeam)
-				r.Delete("/", content.DeleteTeam)
+				r.Get("/", teams.GetTeam)
+				r.Put("/", teams.UpdateTeam)
+				r.Delete("/", teams.DeleteTeam)
 
-				r.Get("/members", content.ListTeamMembers)
-				r.Post("/members", content.AddTeamMember)
-				r.Delete("/members/{userID}", content.RemoveTeamMember)
+				r.Get("/members", teams.ListTeamMembers)
+				r.Post("/members", teams.AddTeamMember)
+				r.Delete("/members/{userID}", teams.RemoveTeamMember)
 			})
 		})
 
@@ -177,15 +182,15 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// Roles (AWX-style)
 		// =======================================================================
 		r.Route("/roles", func(r chi.Router) {
-			r.Get("/", content.ListRoles)
+			r.Get("/", roles.ListRoles)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", content.GetRole)
-				r.Get("/users", content.ListRoleUsers)
-				r.Post("/users", content.AddRoleUser)
-				r.Delete("/users/{userId}", content.RemoveRoleUser)
-				r.Get("/teams", content.ListRoleTeams)
-				r.Post("/teams", content.AddRoleTeam)
-				r.Delete("/teams/{teamId}", content.RemoveRoleTeam)
+				r.Get("/", roles.GetRole)
+				r.Get("/users", roles.ListRoleUsers)
+				r.Post("/users", roles.AddRoleUser)
+				r.Delete("/users/{userId}", roles.RemoveRoleUser)
+				r.Get("/teams", roles.ListRoleTeams)
+				r.Post("/teams", roles.AddRoleTeam)
+				r.Delete("/teams/{teamId}", roles.RemoveRoleTeam)
 			})
 		})
 

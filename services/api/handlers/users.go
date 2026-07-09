@@ -1,14 +1,41 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// UserStore is the users-domain data access.
+type UserStore interface {
+	List(ctx context.Context, limit, offset int) ([]models.User, error)
+	Count(ctx context.Context) (int64, error)
+	Get(ctx context.Context, id int64) (models.User, error)
+	Create(ctx context.Context, u models.User) (models.User, error)
+	Update(ctx context.Context, u models.User, setPassword bool) (models.User, error)
+	Delete(ctx context.Context, id int64) (int64, error)
+	Organizations(ctx context.Context, userID int64) ([]models.Organization, error)
+	Teams(ctx context.Context, userID int64) ([]models.Team, error)
+	ByUsernameWithHash(ctx context.Context, username string) (models.User, error)
+}
+
+// UsersResource is the self-contained users domain (extracted from ContentHandler — B6/#85).
+type UsersResource struct {
+	DB *sqlx.DB
+	*Authorizer
+	store UserStore
+}
+
+func NewUsersResource(db *sqlx.DB) *UsersResource {
+	return &UsersResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewUserStore(db)}
+}
 
 // userInput is the create/update payload: the user fields plus a write-only
 // password (the User model itself never (de)serializes a password).
@@ -18,16 +45,16 @@ type userInput struct {
 }
 
 // ListUsers GET /api/v1/users
-func (h *ContentHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) ListUsers(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
 
-	users, err := h.users.List(r.Context(), pg.Limit, pg.Offset)
+	users, err := h.store.List(r.Context(), pg.Limit, pg.Offset)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	total, _ := h.users.Count(r.Context())
+	total, _ := h.store.Count(r.Context())
 
 	render.JSON(w, r, &render.PaginatedResponse{
 		Items:  users,
@@ -38,7 +65,7 @@ func (h *ContentHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateUser POST /api/v1/users
-func (h *ContentHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if uc := currentUser(r); !uc.IsSuperuser {
 		render.ErrForbidden(nil).Render(w, r)
 		return
@@ -61,7 +88,7 @@ func (h *ContentHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	input.PasswordHash = string(hash)
 
-	created, err := h.users.Create(r.Context(), input.User)
+	created, err := h.store.Create(r.Context(), input.User)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -70,9 +97,9 @@ func (h *ContentHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetUser GET /api/v1/users/{id}
-func (h *ContentHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) GetUser(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
-	user, err := h.users.Get(r.Context(), id)
+	user, err := h.store.Get(r.Context(), id)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -81,7 +108,7 @@ func (h *ContentHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateUser PUT /api/v1/users/{id}
-func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// This endpoint can set is_superuser/is_active, so it is superuser-only.
 	// Self-service profile editing belongs in a separate, field-restricted route.
 	if uc := currentUser(r); !uc.IsSuperuser {
@@ -108,7 +135,7 @@ func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		input.PasswordHash = string(hash)
 	}
 
-	updated, err := h.users.Update(r.Context(), input.User, setPassword)
+	updated, err := h.store.Update(r.Context(), input.User, setPassword)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -121,14 +148,14 @@ func (h *ContentHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteUser DELETE /api/v1/users/{id}
-func (h *ContentHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	if uc := currentUser(r); !uc.IsSuperuser {
 		render.ErrForbidden(nil).Render(w, r)
 		return
 	}
 
 	id := render.GetIDParam(r)
-	count, err := h.users.Delete(r.Context(), id)
+	count, err := h.store.Delete(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -142,10 +169,10 @@ func (h *ContentHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 // ListUserOrganizations GET /api/v1/users/{id}/organizations
 // Returns organizations the user is a member of
-func (h *ContentHandler) ListUserOrganizations(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) ListUserOrganizations(w http.ResponseWriter, r *http.Request) {
 	userID := render.GetIDParam(r)
 
-	orgs, err := h.users.Organizations(r.Context(), userID)
+	orgs, err := h.store.Organizations(r.Context(), userID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -155,10 +182,10 @@ func (h *ContentHandler) ListUserOrganizations(w http.ResponseWriter, r *http.Re
 
 // ListUserTeams GET /api/v1/users/{id}/teams
 // Returns teams the user is a member of
-func (h *ContentHandler) ListUserTeams(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) ListUserTeams(w http.ResponseWriter, r *http.Request) {
 	userID := render.GetIDParam(r)
 
-	teams, err := h.users.Teams(r.Context(), userID)
+	teams, err := h.store.Teams(r.Context(), userID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -168,7 +195,7 @@ func (h *ContentHandler) ListUserTeams(w http.ResponseWriter, r *http.Request) {
 
 // ListUserRoles GET /api/v1/users/{id}/roles
 // Returns all roles the user has (directly or through teams)
-func (h *ContentHandler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
+func (h *UsersResource) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 	userID := render.GetIDParam(r)
 
 	roles, err := h.Access.GetUserRoles(r.Context(), userID)
