@@ -29,9 +29,12 @@ executor:
     ssh:   { size: 64Mi }
   shmSize: 256Mi
 
-# A placeholder callback URL so NOTES doesn't warn; not exercised in the smoke test.
+# Host-runner callback URL. For in-cluster targets (e.g. the SSH sandbox in the
+# praetor namespace) this must be the in-cluster ingestion service so pushed
+# host-runners can report events/logs/heartbeat back. For real external targets,
+# set this to an externally-routable ingestion address instead.
 hostRunner:
-  callbackUrl: "http://ingest.praetor.local"
+  callbackUrl: "http://praetor-ingestion:8081"
 
 ingress:
   enabled: false

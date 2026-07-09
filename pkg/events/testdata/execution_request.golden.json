@@ -13,6 +13,8 @@
       "retries": 3
     },
     "limit": "web",
+    "verbosity": 3,
+    "forks": 5,
     "use_fact_cache": true,
     "cached_facts": {
       "host-1": {

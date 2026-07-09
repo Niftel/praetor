@@ -318,6 +318,8 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			PlaybookContent: "", // inline playbooks disabled — SCM projects only
 			ExtraVars:       extraVars,
 			Limit:           limit,
+			Verbosity:       template.Verbosity, // #78: carry -v level through to the host-runner
+			Forks:           template.Forks,     // #78: carry --forks through to the host-runner
 			UseFactCache:    template.UseFactCache,
 			RunnerHost:      runnerHostName,
 			RunnerHostID:    runnerHostID,

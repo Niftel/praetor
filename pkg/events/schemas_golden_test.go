@@ -42,6 +42,8 @@ func fullyPopulatedRequest() ExecutionRequest {
 			PlaybookContent:     "- hosts: all\n  tasks: []\n",
 			ExtraVars:           map[string]interface{}{"env": "prod", "retries": float64(3)},
 			Limit:               "web",
+			Verbosity:           3,
+			Forks:               5,
 			UseFactCache:        true,
 			CachedFacts:         map[string]json.RawMessage{"host-1": json.RawMessage(`{"ansible_os_family":"Debian"}`)},
 			InventorySync:       true,
