@@ -158,217 +158,60 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 			return err // Rollback
 		}
 
-		// Inventory-sync jobs carry no template; they reference an
-		// inventory_source and are dispatched to the executor to run
-		// `ansible-inventory` and upsert the result into the inventory.
+		// Resolve the claimed job into an execution manifest. Inventory-sync jobs
+		// (no template) and ordinary template jobs each have their own read-only
+		// builder in manifest.go; both return the ids we snapshot on the run below.
+		var manifest events.JobManifest
+		var runnerHostID, credID int64
 		if srcID := launch.ParseArgs(job.JobArgs).InventorySourceID; srcID > 0 {
-			var src struct {
-				InventoryID  int64  `db:"inventory_id"`
-				Source       string `db:"source"`
-				Kind         string `db:"source_kind"`
-				CredentialID *int64 `db:"credential_id"`
-			}
-			if err := tx.GetContext(ctx, &src,
-				`SELECT inventory_id, source, source_kind, credential_id FROM inventory_sources WHERE id = $1`, srcID); err != nil {
-				logger.Error("inventory sync source not found", "job_id", job.ID, "source_id", srcID, "err", err)
+			m, cred, berr := s.buildSyncManifest(ctx, tx, srcID)
+			if berr != nil {
+				logger.Error("build inventory-sync manifest failed", "job_id", job.ID, "source_id", srcID, "err", berr)
 				logExec(ctx, tx, "UPDATE unified_jobs SET status='failed' WHERE id=$1", job.ID)
 				continue
 			}
-			syncManifest := events.JobManifest{
-				InventorySync:       true,
-				InventorySource:     src.Source,
-				InventorySourceKind: src.Kind,
-				SyncInventoryID:     src.InventoryID,
-				APIURL:              s.APIURL,
-			}
-			// Reference only: the executor resolves the source's cloud credential at
-			// dispatch from ingestion (no plaintext at rest). Snapshot the id on the
-			// run so resolution is run-scoped.
-			if src.CredentialID != nil {
-				syncManifest.CredentialID = *src.CredentialID
-				if _, uerr := tx.ExecContext(ctx,
-					`UPDATE execution_runs SET credential_id = $1 WHERE id = $2`, *src.CredentialID, runID); uerr != nil {
-					logger.Error("snapshot credential id on run failed", "job_id", job.ID, "run_id", runID, "err", uerr)
-				}
-			}
-			req := &events.ExecutionRequest{ExecutionRunID: runID, UnifiedJobID: job.ID, JobManifest: syncManifest, CreatedAt: time.Now()}
-			payload, perr := json.Marshal(req)
-			if perr != nil {
-				return perr
-			}
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO execution_outbox (execution_run_id, payload) VALUES ($1, $2)`, runID, payload); err != nil {
-				return err
-			}
-			logger.Info("enqueued inventory sync", "job_id", job.ID, "run_id", runID, "source_id", srcID)
-			continue
-		}
-
-		// 5. Resolve Project from Template - REQUIRES a template with a project
-		if job.UnifiedJobTemplateID == nil {
-			logger.Warn("job has no template - skipping (template required)", "job_id", job.ID)
-			logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
-			continue
-		}
-
-		// Look up Template
-		var template models.JobTemplate
-		err = tx.GetContext(ctx, &template, "SELECT * FROM job_templates WHERE id = $1", *job.UnifiedJobTemplateID)
-		if err != nil {
-			logger.Error("find template for job failed", "template_id", *job.UnifiedJobTemplateID, "job_id", job.ID, "err", err)
-			logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
-			continue
-		}
-
-		// Sync from Git project (if provided)
-		var projectURL string
-		if template.ProjectID != nil {
-			var project models.Project
-			err = tx.GetContext(ctx, &project, "SELECT * FROM projects WHERE id = $1", *template.ProjectID)
-			if err != nil {
-				logger.Error("find project for template failed", "project_id", *template.ProjectID, "template", template.Name, "err", err)
+			manifest, credID = m, cred
+		} else {
+			if job.UnifiedJobTemplateID == nil {
+				logger.Warn("job has no template - skipping (template required)", "job_id", job.ID)
 				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
-			projectURL = project.SCMURL
-			logger.Info("using project for job", "project", project.Name, "scm_url", project.SCMURL, "job_id", job.ID)
-		} else {
-			logger.Info("template has no project - using default/inline logic", "template", template.Name, "job_id", job.ID)
-		}
-
-		// 6. Inventory by reference: ship only the id. The executor fetches the
-		// rendered INI from ingestion at dispatch and fills manifest.Inventory
-		// before pushing to the host-runner, so a large inventory never bloats the
-		// outbox row / NATS message or runs an O(n) INI build inside this claim
-		// transaction (#13). INI generation now lives in ingestion (pkg/inventoryrender).
-		var inventoryID int64
-		if template.InventoryID != nil {
-			var inventory models.Inventory
-			err = tx.GetContext(ctx, &inventory, "SELECT * FROM inventories WHERE id = $1", *template.InventoryID)
-			if err != nil {
-				logger.Error("find inventory for template failed", "inventory_id", *template.InventoryID, "template", template.Name, "err", err)
+			m, rh, cred, berr := s.buildJobManifest(ctx, tx, job)
+			if berr != nil {
+				logger.Error("build job manifest failed", "job_id", job.ID, "err", berr)
 				logExec(ctx, tx, "UPDATE unified_jobs SET status = 'failed' WHERE id = $1", job.ID)
 				continue
 			}
-			inventoryID = *template.InventoryID
-		} else {
-			logger.Info("template has no inventory - using default localhost", "template", template.Name, "job_id", job.ID)
-			// inventoryContent remains empty, Executor will default to localhost
+			manifest, runnerHostID, credID = m, rh, cred
 		}
 
-		// Inline playbooks are disabled: playbooks come only from a source-control
-		// project (never dispatch template.PlaybookContent, even if a legacy row
-		// still has it). The API rejects inline content on create/update.
-
-		// 7. Find the designated runner host for this inventory
-		var runnerHostName string
-		var runnerHostID int64
-		if template.InventoryID != nil {
-			var runnerHost models.Host
-			err = tx.GetContext(ctx, &runnerHost, `
-				SELECT * FROM hosts 
-				WHERE inventory_id = $1 AND is_runner_host = true AND enabled = true
-				LIMIT 1`, *template.InventoryID)
-			if err == nil {
-				runnerHostName = runnerHost.Name
-				runnerHostID = runnerHost.ID
-				logger.Info("using runner host", "host", runnerHostName, "host_id", runnerHostID, "job_id", job.ID)
-			} else {
-				// Fallback to first enabled host if no explicit runner host is set
-				var firstHost models.Host
-				err = tx.GetContext(ctx, &firstHost, `
-					SELECT * FROM hosts 
-					WHERE inventory_id = $1 AND enabled = true
-					ORDER BY id LIMIT 1`, *template.InventoryID)
-				if err == nil {
-					runnerHostName = firstHost.Name
-					runnerHostID = firstHost.ID
-					logger.Info("no runner host set - using first host", "host", runnerHostName, "host_id", runnerHostID, "job_id", job.ID)
-				}
-			}
-		}
-
-		// Snapshot the runner host onto the run so the reconciler can SSH back to
-		// the SAME host to harvest its WAL after an outage, even if the inventory
-		// or runner-host designation changes later. A 0 id means localhost (nothing
-		// to snapshot — those runs aren't reconcilable over SSH).
+		// Snapshot the resolved runner host + credential onto the run: the
+		// reconciler can then SSH back to the SAME host after an outage, and
+		// credential resolution stays run-scoped, even if the template/inventory
+		// changes later. A 0 runner-host id means localhost (nothing to snapshot).
 		if runnerHostID != 0 {
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE execution_runs SET runner_host_id = $1 WHERE id = $2`, runnerHostID, runID); err != nil {
 				logger.Error("snapshot runner_host_id failed", "job_id", job.ID, "err", err)
 			}
 		}
-
-		// Effective variables and limit: the template's defaults, overlaid by any
-		// prompt-on-launch overrides the launcher supplied. The launch handler has
-		// already gated those overrides by the template's ask_* flags, so anything
-		// present in job_args is allowed.
-		jobOpts := launch.ParseArgs(job.JobArgs)
-		extraVars := jobOpts.MergeExtraVars(template.ExtraVars)
-		limit := jobOpts.EffectiveLimit(template.JobLimit)
-
-		// Fact cache travels by reference too: ship only the UseFactCache flag, and
-		// the executor fetches the inventory's stored facts from ingestion at
-		// dispatch (#48) — so they don't bloat the outbox/NATS message.
-
-		manifest := events.JobManifest{
-			InventoryID:     inventoryID, // executor fetches + fills Inventory + CachedFacts at dispatch (#13/#48)
-			ProjectURL:      projectURL,
-			Playbook:        template.Playbook,
-			PlaybookContent: "", // inline playbooks disabled — SCM projects only
-			ExtraVars:       extraVars,
-			Limit:           limit,
-			Verbosity:       template.Verbosity, // #78: carry -v level through to the host-runner
-			Forks:           template.Forks,     // #78: carry --forks through to the host-runner
-			UseFactCache:    template.UseFactCache,
-			RunnerHost:      runnerHostName,
-			RunnerHostID:    runnerHostID,
-			APIURL:          s.APIURL,
-			GalaxyServers:   s.resolveGalaxyServers(ctx, template.OrganizationID),
-		}
-
-		// Machine credential: resolve the template's SSH credential into the
-		// injector env/files the executor and host-runner apply. The Machine
-		// credential type's injectors render ANSIBLE_REMOTE_USER / ANSIBLE_PASSWORD
-		// and the become settings (ANSIBLE_BECOME_METHOD / ANSIBLE_BECOME_USER) as
-		// env, and ANSIBLE_PRIVATE_KEY_FILE / ANSIBLE_BECOME_PASSWORD_FILE as files.
-		// This credential is how Praetor authenticates to managed hosts — there is
-		// no shared platform key. A remote job with no Machine credential (and no
-		// per-host ansible_user/key) fails at bootstrap with a clear error.
-		if template.CredentialID != nil {
-			// Reference only: the manifest carries the credential id and we snapshot
-			// it on the run; the executor resolves the injectors at dispatch from
-			// ingestion, so no plaintext key is persisted in the outbox or NATS (#11).
-			// Snapshotting on the run keeps resolution strictly run-scoped (000045).
-			manifest.CredentialID = *template.CredentialID
-			if _, uerr := tx.ExecContext(ctx,
-				`UPDATE execution_runs SET credential_id = $1 WHERE id = $2`, *template.CredentialID, runID); uerr != nil {
-				logger.Error("snapshot credential id on run failed", "job_id", job.ID, "run_id", runID, "err", uerr)
+		if credID != 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE execution_runs SET credential_id = $1 WHERE id = $2`, credID, runID); err != nil {
+				logger.Error("snapshot credential id on run failed", "job_id", job.ID, "run_id", runID, "err", err)
 			}
 		}
 
-		// Execution Pack: which self-contained Python+Ansible runtime the executor
-		// pushes and the host-runner runs in. Empty leaves the default.
-		if template.ExecutionPackID != nil {
-			var packName string
-			if err := tx.GetContext(ctx, &packName, `SELECT name FROM execution_packs WHERE id = $1`, *template.ExecutionPackID); err == nil {
-				manifest.ExecutionPack = packName
-			}
-		}
-
+		// Enqueue the launch in the transactional outbox rather than publishing
+		// inline. The outbox row commits atomically with the run; the relay
+		// delivers it — no dual-write hazard (orphaned run / stranded job).
 		req := &events.ExecutionRequest{
 			ExecutionRunID: runID,
 			UnifiedJobID:   job.ID,
 			JobManifest:    manifest,
 			CreatedAt:      time.Now(),
 		}
-
-		// Enqueue the launch in the transactional outbox rather than publishing
-		// inline. Publishing inside the tx was a dual-write: a publish that
-		// succeeded before a failed commit would orphan a run, and a publish
-		// that failed after a successful commit would strand the job in
-		// 'queued' forever. The outbox row commits atomically with the run; the
-		// relay delivers it.
 		payload, err := json.Marshal(req)
 		if err != nil {
 			logger.Error("marshal execution request failed", "run_id", runID, "err", err)
