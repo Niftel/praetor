@@ -4,6 +4,21 @@
 
 ---
 
+## Status as of `4b7f2b5` (2026-07) — this plan is COMPLETE
+
+> **Read this before re-planning anything below.** The register, decomposition, and backlog in the rest of this document describe the state of `main` *when it was written*. That state no longer exists — every backlog item shipped. Sections 0–3 are preserved as the original analysis (and as the rationale for why the code looks the way it does), but their present-tense claims ("six insert sites", "verbosity/forks silently dropped", "`ContentHandler` god-object") are **historical**. Do not treat them as current bugs.
+>
+> **Done & merged:**
+> - **B1–B9** (the entire backlog, §3): guard tests; `pkg/launch` as the single job/workflow creation site with typed `Options`; `pkg/registry` + `pkg/notify`; `services/scheduler/core/manifest.go` with explicit column lists (verbosity/forks now reach ansible); `JobManifest` `ManifestVersion` + additive-only rule; `ContentHandler` dissolved into 8 per-domain Resources; credential-types `managed` flag + management API; `pkg/rbac` `contentTables` map + `TEMPLATE_rbac_resource.sql`; workflow node dispatch table.
+> - **#90** — the workflow leg of `pkg/launch`: `launch.Workflow` takes typed `Options`, persisted on `workflow_jobs.launch_args` (migration `000051`) and overlaid on every node job. Closed the three remaining silent-drop bugs (schedule `extra_vars` / inbound-webhook payload / EDA event+`--limit` to workflow targets).
+> - **#91** — the last two dispatch-critical `SELECT *`s (`scheduler.processSchedules`, `pkg/inventoryrender`) replaced with explicit column lists; canonical `Host`/`Group`/`Schedule` column consts relocated to shared `pkg/models`; the `#39` no-wildcard gate generalized to a repo-wide gate (`tests/wildcard_select_test.go`).
+>
+> **Hotspots H1–H6 are addressed; H7 (notifications) has its registry.** No new INSERT smear, god-object, or multi-file ritual exists as of this stamp (verified by a full `switch`/insert sweep across all four services).
+>
+> **What's left is gated on demand — nothing has triggered.** See the tripwire table in the seams doc (`docs/modularity-plugin-architecture.md`, "Status" section). The correct next move is **product features**, not more refactor; the roadmap's next feature (workflow/approval notifications) is *feature* work that rides the finished notify registry, not a modularity change.
+
+---
+
 ## 0. The headline finding
 
 The worst coupling in Praetor is **not** the switch statements the previous doc catalogued. It is the **launch/dispatch pipeline**: the path from "someone wants a job to run" to "ansible-playbook argv on a target host" is smeared across **6 hand-rolled `INSERT INTO unified_jobs` sites in 2 services, a JSON side-channel (`job_args`) with no shared type, a 25-field manifest struct 3 parties read/write, and a separately-versioned host-runner binary**. This is the pipeline every flagship AAP feature flows through (launch prompts, surveys, tags, verbosity, timeouts, instance selection, provisioning callbacks…), so its tax is paid on almost every release.
