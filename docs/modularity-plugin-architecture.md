@@ -4,6 +4,27 @@
 
 ---
 
+## Status as of `4b7f2b5` (2026-07) — the actionable debt is CLEARED; remaining seams are demand-gated
+
+> **Read this before acting on the seam assessment below.** Sections A–D describe `main` *as it was when written*. The four items this doc named as actionable — the notifications switch (§A.2/§C), the `ContentHandler` god-object (§A.3), the missing credential-types management API (§A.1), and the auth interface (§A.5) — the first three are **done**; the fourth is deliberately deferred (see the table). Present-tense claims like "`switch r.Type` in `notifier.go:91`" are **historical**. The registry primitive (§B), `pkg/notify` with `webhook`/`slack`/`pagerduty`, and the `/notification-types` discovery endpoint all shipped; `pkg/notify/pagerduty.go` exists as exactly the one-file addition §C promised.
+>
+> Phases 1–3 of the migration plan (§D) are complete. Phase 4 (auth) and Phase 5 (on-demand seams) are unchanged in intent and remain gated on the triggers below.
+>
+> ### Per-gate trigger table (verified against `main` @ `4b7f2b5`)
+>
+> | Deferred seam | Doc ref | Current state (file:line) | Trigger that fires it | Pre-planned response |
+> |---|---|---|---|---|
+> | **3rd EDA rule action** | §A.4, §B(2b) | `services/api/handlers/events.go` `launch()` — exactly 2 cases (job / workflow) | A third action (notify / webhook-out / set-fact) is requested | `eda.Action{Type;Validate;Execute}` registry + `(action_type, action_config JSONB)` migration replacing the nullable-FK pair. Rebuild: api. |
+> | **Auth provider / OIDC** | §A.5, §D-P4 | `pkg/auth/mapper.go:44` takes `*LDAPConfig`; `:88` `upsertLDAPUser`; `ldap_dn` column. `auth.go` is now a standalone `AuthResource` (B6 left it OIDC-ready). | OIDC (or any 2nd provider) is actually scheduled | Rename `upsertLDAPUser`→`upsertExternalUser`; split `MappingConfig` out of `LDAPConfig`; add `auth.Provider{Name;LoginRoutes;Resolve}` registry with per-provider routes. **Do NOT pre-build** — the neutral external-ID shape (OIDC wants `(issuer, sub)`, not `ldap_dn`) is unknowable until the real 2nd provider. Rebuild: api. |
+> | **2nd SCM type** | §A.6 | `services/api/handlers/projects.go` forces `scm_type='git'`; hardcoded `git clone` | A user asks for SVN/hg/archive | 20-line `scm.Cloner` `map[string]func` in the sync path. Rebuild: api (+ host-runner if it clones). |
+> | **Vendor-signed event sources** | §A.4 | Partially satisfied elsewhere: inbound-**webhook** verification already switches github-HMAC / gitlab-token / generic (`webhooks.go` `verifyWebhook`, a 3-case switch — the size this doc blesses as a plain switch). EDA `events.go` intake is still bare-token. | A 4th webhook vendor, OR an EDA source needs vendor signatures | Extract `verifyWebhook`'s cases into a shared `PayloadVerifier` map used by both the webhook and EDA-intake surfaces. Rebuild: api. |
+> | **Credential lookup (Vault/CyberARK)** | §B(1) | No vault/cyberark anywhere in repo | External secret-store lookup is requested | A *second*, registry-backed concept ("credential lookup plugin") — NOT a rework of the data-driven credential *types*. Rebuild: api + executor. |
+> | **Inventory-source catalog** | §B(5b) | Engine done (`ansible-inventory` + injected creds); no UX catalog table | The UI wants a source-kind picker | UX-metadata-only catalog table (name/description/example plugin YAML/suggested credential type); zero engine change. Rebuild: api + migrator. |
+>
+> **Bottom line:** the plumbing is finished. Every seam has either its registry/data-driven mechanism *or* a named, checked trigger above. Spend effort on product features — they will reveal which gate fires first — not on manufacturing a refactor. **Non-goal reaffirmed:** do not speculatively "complete" `launch.Options` with unrequested fields (tags/verbosity-at-launch) — the whole point is that the next launch feature is a one-package change *when asked*; pre-adding fields just widens the frozen `job_args` wire for nothing.
+
+---
+
 ## 0. Framing: what "plugin" should mean for Praetor
 
 Praetor is a small-team, single-module Go product with six microservices sharing one Postgres schema and a NATS JetStream backbone. Go gives you three realistic extensibility patterns, in ascending order of cost:
