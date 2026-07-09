@@ -1,0 +1,50 @@
+{
+  "execution_run_id": "11111111-2222-3333-4444-555555555555",
+  "unified_job_id": 4242,
+  "job_manifest": {
+    "inventory_id": 7,
+    "inventory": "[web]\nhost-1 ansible_host=10.0.0.1\n",
+    "project_url": "https://gitea.local/acme/playbooks.git",
+    "project_ref": "main",
+    "playbook": "site.yml",
+    "playbook_content": "- hosts: all\n  tasks: []\n",
+    "extra_vars": {
+      "env": "prod",
+      "retries": 3
+    },
+    "limit": "web",
+    "use_fact_cache": true,
+    "cached_facts": {
+      "host-1": {
+        "ansible_os_family": "Debian"
+      }
+    },
+    "inventory_sync": true,
+    "inventory_source": "plugin: amazon.aws.aws_ec2\n",
+    "inventory_source_kind": "inventory",
+    "sync_inventory_id": 9,
+    "runner_host": "bastion.acme.internal",
+    "runner_host_id": 11,
+    "api_url": "https://praetor.local/api/v1",
+    "execution_pack": "docker-tools",
+    "ssh_user": "deploy",
+    "ssh_private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\nREDACTED\n-----END OPENSSH PRIVATE KEY-----\n",
+    "credential_id": 13,
+    "credential_env": {
+      "AWS_ACCESS_KEY_ID": "AKIAEXAMPLE"
+    },
+    "credential_files": {
+      "ANSIBLE_PRIVATE_KEY_FILE": "keydata"
+    },
+    "galaxy_servers": [
+      {
+        "name": "automation_hub",
+        "url": "https://hub.local/api/galaxy/",
+        "token": "galaxy-token",
+        "auth_url": "https://hub.local/sso/token"
+      }
+    ],
+    "ingest_token": "run-scoped-bearer-token"
+  },
+  "created_at": "2025-01-02T03:04:05Z"
+}
