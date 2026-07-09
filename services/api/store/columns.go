@@ -10,7 +10,7 @@ package store
 // the test will fail loudly if they diverge.
 const (
 	CredentialCols     = `id, organization_id, credential_type_id, name, description, inputs, created_at, modified_at`
-	CredentialTypeCols = `id, name, description, inputs, injectors, created_at, modified_at`
+	CredentialTypeCols = `id, name, description, inputs, injectors, managed, created_at, modified_at`
 	HostCols           = `id, inventory_id, name, description, variables, enabled, is_control_node, is_runner_host, runner_last_seen, runner_healthy, created_at, modified_at`
 	InventoryCols      = `id, organization_id, name, description, kind, content, created_at, modified_at`
 	GroupCols          = `id, inventory_id, name, description, variables, created_at, modified_at`

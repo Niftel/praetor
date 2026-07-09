@@ -59,8 +59,11 @@ type CredentialType struct {
 	Description *string         `json:"description,omitempty" db:"description"`
 	Inputs      json.RawMessage `json:"inputs" db:"inputs"`
 	Injectors   json.RawMessage `json:"injectors" db:"injectors"`
-	CreatedAt   time.Time       `json:"created_at" db:"created_at"`
-	ModifiedAt  time.Time       `json:"modified_at" db:"modified_at"`
+	// Managed marks a system built-in (seeded by the migrator). Managed types are
+	// read-only via the API; user-created types are editable/deletable.
+	Managed    bool      `json:"managed" db:"managed"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	ModifiedAt time.Time `json:"modified_at" db:"modified_at"`
 }
 
 type Credential struct {
@@ -75,33 +78,33 @@ type Credential struct {
 }
 
 type JobTemplate struct {
-	ID                     int64           `json:"id" db:"id"`
-	OrganizationID         int64           `json:"organization_id" db:"organization_id"`
-	Name                   string          `json:"name" db:"name"`
-	Description            *string         `json:"description,omitempty" db:"description"`
-	InventoryID            *int64          `json:"inventory_id,omitempty" db:"inventory_id"`
-	ProjectID              *int64          `json:"project_id,omitempty" db:"project_id"`
-	Playbook               string          `json:"playbook" db:"playbook"`
-	PlaybookContent        *string         `json:"playbook_content,omitempty" db:"playbook_content"`
-	UnifiedJobTemplateID   *int64          `json:"unified_job_template_id,omitempty" db:"unified_job_template_id"`
-	CredentialID           *int64          `json:"credential_id,omitempty" db:"credential_id"`
-	ExecutionPackID        *int64          `json:"execution_pack_id,omitempty" db:"execution_pack_id"`
-	Forks                  int             `json:"forks" db:"forks"`
-	JobType                string          `json:"job_type" db:"job_type"`
-	Verbosity              int             `json:"verbosity" db:"verbosity"`
-	ExtraVars              json.RawMessage `json:"extra_vars,omitempty" db:"extra_vars"`
-	JobLimit               string          `json:"limit" db:"job_limit"`
-	AskVariablesOnLaunch   bool            `json:"ask_variables_on_launch" db:"ask_variables_on_launch"`
-	AskLimitOnLaunch       bool            `json:"ask_limit_on_launch" db:"ask_limit_on_launch"`
-	SurveyEnabled          bool            `json:"survey_enabled" db:"survey_enabled"`
-	SurveySpec             json.RawMessage `json:"survey_spec,omitempty" db:"survey_spec"`
-	WebhookEnabled         bool            `json:"webhook_enabled" db:"webhook_enabled"`
-	WebhookService         string          `json:"webhook_service" db:"webhook_service"`
-	WebhookKey             string          `json:"webhook_key" db:"webhook_key"`
-	UseFactCache           bool            `json:"use_fact_cache" db:"use_fact_cache"`
-	AllowSimultaneous      bool            `json:"allow_simultaneous" db:"allow_simultaneous"`
-	CreatedAt              time.Time       `json:"created_at" db:"created_at"`
-	ModifiedAt             time.Time       `json:"modified_at" db:"modified_at"`
+	ID                   int64           `json:"id" db:"id"`
+	OrganizationID       int64           `json:"organization_id" db:"organization_id"`
+	Name                 string          `json:"name" db:"name"`
+	Description          *string         `json:"description,omitempty" db:"description"`
+	InventoryID          *int64          `json:"inventory_id,omitempty" db:"inventory_id"`
+	ProjectID            *int64          `json:"project_id,omitempty" db:"project_id"`
+	Playbook             string          `json:"playbook" db:"playbook"`
+	PlaybookContent      *string         `json:"playbook_content,omitempty" db:"playbook_content"`
+	UnifiedJobTemplateID *int64          `json:"unified_job_template_id,omitempty" db:"unified_job_template_id"`
+	CredentialID         *int64          `json:"credential_id,omitempty" db:"credential_id"`
+	ExecutionPackID      *int64          `json:"execution_pack_id,omitempty" db:"execution_pack_id"`
+	Forks                int             `json:"forks" db:"forks"`
+	JobType              string          `json:"job_type" db:"job_type"`
+	Verbosity            int             `json:"verbosity" db:"verbosity"`
+	ExtraVars            json.RawMessage `json:"extra_vars,omitempty" db:"extra_vars"`
+	JobLimit             string          `json:"limit" db:"job_limit"`
+	AskVariablesOnLaunch bool            `json:"ask_variables_on_launch" db:"ask_variables_on_launch"`
+	AskLimitOnLaunch     bool            `json:"ask_limit_on_launch" db:"ask_limit_on_launch"`
+	SurveyEnabled        bool            `json:"survey_enabled" db:"survey_enabled"`
+	SurveySpec           json.RawMessage `json:"survey_spec,omitempty" db:"survey_spec"`
+	WebhookEnabled       bool            `json:"webhook_enabled" db:"webhook_enabled"`
+	WebhookService       string          `json:"webhook_service" db:"webhook_service"`
+	WebhookKey           string          `json:"webhook_key" db:"webhook_key"`
+	UseFactCache         bool            `json:"use_fact_cache" db:"use_fact_cache"`
+	AllowSimultaneous    bool            `json:"allow_simultaneous" db:"allow_simultaneous"`
+	CreatedAt            time.Time       `json:"created_at" db:"created_at"`
+	ModifiedAt           time.Time       `json:"modified_at" db:"modified_at"`
 }
 
 type Schedule struct {
