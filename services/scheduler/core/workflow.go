@@ -105,6 +105,50 @@ func wfEdgeFires(edgeType, parentState string) bool {
 	return false
 }
 
+// nodeStarter starts an eligible workflow node of a specific node_type — updating
+// its status and performing any side effect (pause, remote POST, ...). Registered
+// in nodeStarters keyed by node_type; a node with no registered starter falls
+// through to the default job-launch path in advanceWorkflow. Table-ifying the old
+// if/else ladder (B9/#88) makes adding a node type a single map entry.
+type nodeStarter func(s *Scheduler, ctx context.Context, wfName string, wjID int64, n *wfNode)
+
+var nodeStarters = map[string]nodeStarter{
+	"approval":    (*Scheduler).startApprovalNode,
+	"webhook_in":  (*Scheduler).startWebhookInNode,
+	"webhook_out": (*Scheduler).startWebhookOutNode,
+}
+
+// startApprovalNode pauses the node until a user approves/denies it.
+func (s *Scheduler) startApprovalNode(ctx context.Context, _ string, _ int64, n *wfNode) {
+	logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='awaiting_approval' WHERE id=$1`, n.ID)
+	n.Status = "awaiting_approval"
+}
+
+// startWebhookInNode pauses until an external caller hits the node's callback with
+// its per-run event_token. The token is minted now so the run detail can surface
+// the callback URL for whoever needs to release it.
+func (s *Scheduler) startWebhookInNode(ctx context.Context, _ string, wjID int64, n *wfNode) {
+	token := newEventToken()
+	logExec(ctx, s.DB,
+		`UPDATE workflow_job_nodes SET status='awaiting_event', event_token=$1 WHERE id=$2`, token, n.ID)
+	n.Status = "awaiting_event"
+	n.EventToken = token
+	logger.Info("workflow node awaiting remote event", "workflow_id", wjID, "node", n.NodeKey)
+}
+
+// startWebhookOutNode POSTs to the configured URL and continues immediately. A 2xx
+// (or 3xx) is success; anything else — or a missing/failed request — fails the node
+// so its failure edges fire.
+func (s *Scheduler) startWebhookOutNode(ctx context.Context, wfName string, wjID int64, n *wfNode) {
+	newSt := "successful"
+	if !postWorkflowWebhook(n.WebhookURL, n.WebhookBody, wfName, wjID, n.NodeKey) {
+		newSt = "failed"
+	}
+	logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
+	n.Status = newSt
+	logger.Info("workflow node webhook_out", "workflow_id", wjID, "node", n.NodeKey, "status", newSt)
+}
+
 func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 	var wf struct {
 		TemplateID int64  `db:"workflow_template_id"`
@@ -191,36 +235,11 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			continue
 		}
 
-		if n.NodeType == "approval" {
-			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='awaiting_approval' WHERE id=$1`, n.ID)
-			n.Status = "awaiting_approval"
-			continue
-		}
-
-		// webhook_in: pause until an external caller hits the node's callback with
-		// its per-run event_token. Mint the token now so the run detail can surface
-		// the callback URL for whoever needs to release it.
-		if n.NodeType == "webhook_in" {
-			token := newEventToken()
-			logExec(ctx, s.DB,
-				`UPDATE workflow_job_nodes SET status='awaiting_event', event_token=$1 WHERE id=$2`, token, n.ID)
-			n.Status = "awaiting_event"
-			n.EventToken = token
-			logger.Info("workflow node awaiting remote event", "workflow_id", wjID, "node", n.NodeKey)
-			continue
-		}
-
-		// webhook_out: POST to the configured URL and continue immediately. A 2xx
-		// (or 3xx) is success; anything else — or a missing/failed request — fails
-		// the node so its failure edges fire.
-		if n.NodeType == "webhook_out" {
-			newSt := "successful"
-			if !postWorkflowWebhook(n.WebhookURL, n.WebhookBody, wf.Name, wjID, n.NodeKey) {
-				newSt = "failed"
-			}
-			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
-			n.Status = newSt
-			logger.Info("workflow node webhook_out", "workflow_id", wjID, "node", n.NodeKey, "status", newSt)
+		// Start the node by its type. approval/webhook_in/webhook_out have
+		// registered starters (nodeStarters); anything else falls through to the
+		// default job-launch path below. Adding a node type is one map entry.
+		if start, ok := nodeStarters[n.NodeType]; ok {
+			start(s, ctx, wf.Name, wjID, n)
 			continue
 		}
 
