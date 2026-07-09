@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/praetordev/praetor/pkg/crypto"
+	"github.com/praetordev/praetor/pkg/notify"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
 	"github.com/praetordev/praetor/services/api/store"
@@ -44,31 +44,57 @@ func (h *ContentHandler) ListNotificationTemplates(w http.ResponseWriter, r *htt
 	render.JSON(w, r, nts)
 }
 
-// CreateNotificationTemplate POST /api/v1/notification-templates
+// ListNotificationTypes GET /api/v1/notification-types — the registered backends
+// and their config schemas, so the UI renders the create-form dynamically (and
+// so "which types exist" has a source of truth instead of a migration comment).
+func (h *ContentHandler) ListNotificationTypes(w http.ResponseWriter, r *http.Request) {
+	out := make([]map[string]interface{}, 0)
+	for _, name := range notify.Backends.Names() {
+		b, _ := notify.Backends.Get(name)
+		out = append(out, map[string]interface{}{"type": name, "fields": b.ConfigFields()})
+	}
+	render.JSON(w, r, out)
+}
+
+// CreateNotificationTemplate POST /api/v1/notification-templates. Config is
+// validated and encrypted against the selected backend's schema. Accepts either
+// a typed `config` map or, for backward compatibility with the current UI, a
+// bare `url` (mapped to {"url": ...}).
 func (h *ContentHandler) CreateNotificationTemplate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		OrganizationID   int64  `json:"organization_id"`
-		Name             string `json:"name"`
-		NotificationType string `json:"notification_type"`
-		URL              string `json:"url"`
+		OrganizationID   int64             `json:"organization_id"`
+		Name             string            `json:"name"`
+		NotificationType string            `json:"notification_type"`
+		Config           map[string]string `json:"config"`
+		URL              string            `json:"url"` // legacy shorthand for config.url
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" || body.URL == "" {
-		render.ErrInvalidRequest(fmt.Errorf("name, url required")).Render(w, r)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		render.ErrInvalidRequest(fmt.Errorf("name required")).Render(w, r)
 		return
 	}
 	if body.NotificationType == "" {
 		body.NotificationType = "webhook"
 	}
+	if body.Config == nil {
+		body.Config = map[string]string{}
+	}
+	if body.URL != "" {
+		body.Config["url"] = body.URL // back-compat
+	}
 	if !h.authorizeOrgRole(w, r, body.OrganizationID, rbac.RoleFieldNotificationAdmin) {
 		return
 	}
 
-	enc, err := crypto.EncryptSecret(body.URL)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
+	backend, ok := notify.Backends.Get(body.NotificationType)
+	if !ok {
+		render.ErrInvalidRequest(fmt.Errorf("unknown notification type %q", body.NotificationType)).Render(w, r)
 		return
 	}
-	cfg, _ := json.Marshal(map[string]string{"url": enc})
+	cfg, err := notify.EncryptConfig(backend, body.Config)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
 
 	id, err := h.notifications.CreateTemplate(r.Context(), body.OrganizationID, body.Name, body.NotificationType, cfg)
 	if err != nil {

@@ -30,7 +30,11 @@ const TemplatesPage = () => {
   // Notifications (edit mode): org targets + this template's attachments.
   const [notifTargets, setNotifTargets] = useState<any[]>([]);
   const [notifAttached, setNotifAttached] = useState<any[]>([]);
-  const [newNotif, setNewNotif] = useState({ name: '', notification_type: 'webhook', url: '' });
+  // Backend types + their config schema, fetched from the API so the form is
+  // driven by whichever notification backends are registered (webhook/slack/…).
+  const [notifTypes, setNotifTypes] = useState<any[]>([]);
+  const [newNotif, setNewNotif] = useState<{ name: string; notification_type: string; config: Record<string, string> }>(
+    { name: '', notification_type: 'webhook', config: {} });
 
   // Launch dialog
   const [launchTpl, setLaunchTpl] = useState<Template | null>(null);
@@ -93,7 +97,8 @@ const TemplatesPage = () => {
     );
     setSurvey(template.survey_spec?.spec || []);
     setFormMsg('');
-    setNewNotif({ name: '', notification_type: 'webhook', url: '' });
+    setNewNotif({ name: '', notification_type: 'webhook', config: {} });
+    api.getNotificationTypes().then(d => setNotifTypes(d || [])).catch(() => setNotifTypes([]));
     if (template.organization_id) {
       api.getNotificationTemplates(template.organization_id).then(d => setNotifTargets(d || [])).catch(() => setNotifTargets([]));
       api.getTemplateNotifications(template.id).then(d => setNotifAttached(d || [])).catch(() => setNotifAttached([]));
@@ -111,10 +116,21 @@ const TemplatesPage = () => {
     api.getTemplateNotifications(editingTemplate.id).then(d => setNotifAttached(d || [])).catch(() => {});
   };
 
+  // Fields of the currently-selected backend type (drives the dynamic form).
+  const notifFields = (): { id: string; label: string; type: string }[] =>
+    notifTypes.find(t => t.type === newNotif.notification_type)?.fields || [{ id: 'url', label: 'URL', type: 'text' }];
+
   const addNotifTarget = async () => {
-    if (!editingTemplate || !newNotif.name.trim() || !newNotif.url.trim()) return;
-    await api.createNotificationTemplate({ organization_id: editingTemplate.organization_id, ...newNotif });
-    setNewNotif({ name: '', notification_type: 'webhook', url: '' });
+    if (!editingTemplate || !newNotif.name.trim()) return;
+    // Every field the selected backend declares must be filled.
+    if (notifFields().some(f => !(newNotif.config[f.id] || '').trim())) return;
+    await api.createNotificationTemplate({
+      organization_id: editingTemplate.organization_id,
+      name: newNotif.name,
+      notification_type: newNotif.notification_type,
+      config: newNotif.config,
+    });
+    setNewNotif({ name: '', notification_type: 'webhook', config: {} });
     api.getNotificationTemplates(editingTemplate.organization_id).then(d => setNotifTargets(d || [])).catch(() => {});
   };
 
@@ -452,16 +468,24 @@ const TemplatesPage = () => {
                   ))}
                 </div>
               ))}
-              <div className="flex gap-2 mt-2">
+              <div className="flex flex-wrap gap-2 mt-2 items-center">
                 <input placeholder="name" className="border p-1 rounded text-sm w-1/4"
                   value={newNotif.name} onChange={e => setNewNotif({ ...newNotif, name: e.target.value })} />
                 <select className="border p-1 rounded text-sm"
-                  value={newNotif.notification_type} onChange={e => setNewNotif({ ...newNotif, notification_type: e.target.value })}>
-                  <option value="webhook">Webhook</option>
-                  <option value="slack">Slack</option>
+                  value={newNotif.notification_type}
+                  onChange={e => setNewNotif({ ...newNotif, notification_type: e.target.value, config: {} })}>
+                  {(notifTypes.length ? notifTypes.map(t => t.type) : ['webhook', 'slack']).map((tp: string) => (
+                    <option key={tp} value={tp}>{tp.charAt(0).toUpperCase() + tp.slice(1)}</option>
+                  ))}
                 </select>
-                <input placeholder="URL" className="border p-1 rounded text-sm flex-1"
-                  value={newNotif.url} onChange={e => setNewNotif({ ...newNotif, url: e.target.value })} />
+                {/* Inputs rendered from the selected backend's config schema. */}
+                {notifFields().map(f => (
+                  <input key={f.id} placeholder={f.label}
+                    type={f.type === 'password' ? 'password' : 'text'}
+                    className="border p-1 rounded text-sm flex-1 min-w-[120px]"
+                    value={newNotif.config[f.id] || ''}
+                    onChange={e => setNewNotif({ ...newNotif, config: { ...newNotif.config, [f.id]: e.target.value } })} />
+                ))}
                 <Button type="button" variant="secondary" onClick={addNotifTarget}>Add</Button>
               </div>
             </div>

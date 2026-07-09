@@ -1,29 +1,28 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/notify"
 )
 
 // Notifier dispatches notifications when a job reaches a lifecycle event. It is
 // driven off the event projection and fired only when a terminal event is newly
 // projected, so each notification is sent exactly once despite at-least-once
 // delivery. HTTP sends run in the background so projection latency is unaffected.
+//
+// Delivery is delegated to pkg/notify: the notification_type selects a
+// self-registered Backend, so adding a backend needs no change here.
 type Notifier struct {
-	DB     *sqlx.DB
-	client *http.Client
+	DB *sqlx.DB
 }
 
 func NewNotifier(db *sqlx.DB) *Notifier {
-	return &Notifier{DB: db, client: &http.Client{Timeout: 10 * time.Second}}
+	return &Notifier{DB: db}
 }
 
 // notifyEvent maps a job event type to a notification lifecycle event and a
@@ -75,40 +74,22 @@ func (n *Notifier) send(jobID int64, ev, verb string) {
 	}
 
 	for _, r := range rows {
-		var cfg struct {
-			URL string `json:"url"`
-		}
-		_ = json.Unmarshal(r.Config, &cfg)
-		url := cfg.URL
-		if dec, err := crypto.DecryptSecret(url); err == nil {
-			url = dec // stored encrypted; fall back to as-is if not
-		}
-		if url == "" {
+		backend, ok := notify.Backends.Get(r.Type)
+		if !ok {
+			logger.Error("notifier unknown backend", "type", r.Type, "job_id", jobID)
 			continue
 		}
-
-		var payload []byte
-		switch r.Type {
-		case "slack":
-			payload, _ = json.Marshal(map[string]string{"text": fmt.Sprintf("Praetor job %q %s", r.JobName, verb)})
-		default: // webhook
-			payload, _ = json.Marshal(map[string]interface{}{
-				"job_id": jobID, "job_name": r.JobName, "event": ev, "status": verb,
-			})
-		}
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+		cfg, err := notify.DecryptConfig(backend, r.Config)
 		if err != nil {
-			logger.Error("notifier build request failed", "err", err)
+			logger.Error("notifier decode config failed", "type", r.Type, "job_id", jobID, "err", err)
 			continue
 		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := n.client.Do(req)
-		if err != nil {
-			logger.Error("notifier POST failed", "type", r.Type, "job_id", jobID, "err", err)
+		if err := backend.Send(ctx, cfg, notify.Message{
+			JobID: jobID, JobName: r.JobName, Event: ev, Status: verb,
+		}); err != nil {
+			logger.Error("notifier send failed", "type", r.Type, "job_id", jobID, "err", err)
 			continue
 		}
-		resp.Body.Close()
-		logger.Info("notifier sent notification", "type", r.Type, "job_id", jobID, "event", ev, "status", resp.StatusCode)
+		logger.Info("notifier sent notification", "type", r.Type, "job_id", jobID, "event", ev)
 	}
 }

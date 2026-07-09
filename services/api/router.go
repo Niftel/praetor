@@ -218,6 +218,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Mount("/job-templates", templates.Routes())
 
 		// Notification templates (org-scoped targets; attachments live under job-templates)
+		r.Get("/notification-types", content.ListNotificationTypes) // registered backends + their config schema
 		r.Get("/notification-templates", content.ListNotificationTemplates)
 		r.Post("/notification-templates", content.CreateNotificationTemplate)
 		r.Delete("/notification-templates/{id}", content.DeleteNotificationTemplate)
