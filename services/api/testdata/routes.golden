@@ -1,4 +1,5 @@
 CONNECT /metrics
+DELETE  /api/v1/credential-types/{id}
 DELETE  /api/v1/credentials/{id}
 DELETE  /api/v1/event-rules/{id}
 DELETE  /api/v1/event-sources/{id}
@@ -91,6 +92,7 @@ HEAD    /metrics
 OPTIONS /metrics
 PATCH   /metrics
 POST    /api/v1/auth/login
+POST    /api/v1/credential-types/
 POST    /api/v1/credentials/
 POST    /api/v1/event-rules/
 POST    /api/v1/event-sources/
@@ -136,6 +138,7 @@ POST    /api/v1/workflow-job-nodes/{id}/deny
 POST    /api/v1/workflow-templates
 POST    /api/v1/workflow-templates/{id}/launch
 POST    /metrics
+PUT     /api/v1/credential-types/{id}
 PUT     /api/v1/credentials/{id}
 PUT     /api/v1/execution-packs/{id}
 PUT     /api/v1/groups/{groupId}

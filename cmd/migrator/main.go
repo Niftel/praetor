@@ -285,12 +285,13 @@ func seedCredentialTypes(db *sqlx.DB) {
 		// inputs/injectors current (e.g. adding become fields to Machine) on every
 		// migrator run rather than only on first insert.
 		_, err := db.Exec(`
-			INSERT INTO credential_types (name, description, inputs, injectors)
-			VALUES ($1, $2, $3::jsonb, $4::jsonb)
+			INSERT INTO credential_types (name, description, inputs, injectors, managed)
+			VALUES ($1, $2, $3::jsonb, $4::jsonb, true)
 			ON CONFLICT (name) DO UPDATE SET
 				description = EXCLUDED.description,
 				inputs = EXCLUDED.inputs,
 				injectors = EXCLUDED.injectors,
+				managed = true,
 				modified_at = now()
 		`, t.Name, t.Description, t.Inputs, t.Injectors)
 		if err != nil {
