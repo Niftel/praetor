@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/services/api/render"
 	"github.com/praetordev/praetor/services/api/store"
 )
@@ -21,7 +22,7 @@ import (
 type WebhookStore interface {
 	JobTemplateWebhook(ctx context.Context, id int64) (store.JobTemplateWebhook, error)
 	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) (int, error)
-	InsertWebhookJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte) (int64, error)
+	InsertWebhookJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error)
 	WorkflowTemplateWebhook(ctx context.Context, id int64) (store.WorkflowTemplateWebhook, error)
 	LaunchWorkflowSnapshot(ctx context.Context, workflowTemplateID int64) (int64, error)
 	PackWebhook(ctx context.Context, id int64) (store.PackWebhook, error)
@@ -80,7 +81,7 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	jobArgs, _ := json.Marshal(map[string]interface{}{"extra_vars": vars})
+	opts := launch.Options{ExtraVars: vars}
 
 	// Concurrency guard: unless the template allows simultaneous runs, skip this
 	// webhook trigger while a prior run is still active (webhooks can fire in
@@ -93,7 +94,7 @@ func (rs *WebhooksResource) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jobID, err := rs.store.InsertWebhookJob(r.Context(), t.Name+" (webhook)", *t.UJTID, jobArgs)
+	jobID, err := rs.store.InsertWebhookJob(r.Context(), t.Name+" (webhook)", *t.UJTID, opts)
 	if err != nil {
 		if isActiveRunConflict(err) {
 			w.WriteHeader(http.StatusAccepted)

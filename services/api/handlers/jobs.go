@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/render"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/plog"
 	"github.com/praetordev/praetor/pkg/rbac"
@@ -36,7 +37,7 @@ type JobStore interface {
 	// writes
 	LaunchTemplateInfo(ctx context.Context, unifiedTemplateID int64) (store.LaunchTemplateInfo, error)
 	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) (int, error)
-	InsertPendingJob(ctx context.Context, name string, unifiedTemplateID int64, jobArgs []byte, createdAt time.Time) (int64, error)
+	InsertPendingJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error)
 	UnifiedJobIDForRun(ctx context.Context, runID uuid.UUID) (int64, error)
 	InsertJobEvent(ctx context.Context, evt *models.JobEvent) (int64, error)
 	JobCancelInfo(ctx context.Context, jobID int64) (store.JobCancelInfo, error)
@@ -175,25 +176,19 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// validated against the spec (defaults filled, required enforced) and become
 	// extra_vars regardless of ask_variables_on_launch. Otherwise a plain
 	// variables prompt is honored only if the template asks for it.
-	overrides := map[string]interface{}{}
+	var opts launch.Options
 	if jt.SurveyEnabled {
 		answers, serr := applySurvey(jt.SurveySpec, req.ExtraVars)
 		if serr != nil {
 			render.Render(w, r, ErrInvalidRequest(serr))
 			return
 		}
-		overrides["extra_vars"] = answers
+		opts.ExtraVars = answers
 	} else if jt.AskVariablesOnLaunch && len(req.ExtraVars) > 0 {
-		overrides["extra_vars"] = req.ExtraVars
+		opts.ExtraVars = req.ExtraVars
 	}
 	if jt.AskLimitOnLaunch && req.Limit != nil {
-		overrides["limit"] = *req.Limit
-	}
-	jobArgs := []byte("{}")
-	if len(overrides) > 0 {
-		if b, err := json.Marshal(overrides); err == nil {
-			jobArgs = b
-		}
+		opts.Limit = req.Limit
 	}
 
 	// Insert unified_job in 'pending' state with NO current_run_id
@@ -202,7 +197,7 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	// 2. Create execution_run
 	// 3. Set current_run_id and status='queued'
 	// 4. Publish to NATS for execution
-	jobID, err := rs.store.InsertPendingJob(r.Context(), req.Name, req.UnifiedJobTemplateID, jobArgs, time.Now())
+	jobID, err := rs.store.InsertPendingJob(r.Context(), req.Name, req.UnifiedJobTemplateID, opts)
 	if err != nil {
 		// Lost the race to a concurrent launch of a non-simultaneous template.
 		if isActiveRunConflict(err) {

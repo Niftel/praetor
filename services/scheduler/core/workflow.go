@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/praetordev/praetor/pkg/launch"
 )
 
 // processWorkflows advances every running workflow one step per tick: it reaps
@@ -242,10 +244,11 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 			nodeLabel = n.NodeKey
 		}
 		jobName := fmt.Sprintf("%s #%d / %s", wf.Name, wjID, nodeLabel)
-		var jobID int64
-		if err := s.DB.QueryRowContext(ctx,
-			`INSERT INTO unified_jobs (name, unified_job_template_id, status) VALUES ($1,$2,'pending') RETURNING id`,
-			jobName, ujtID).Scan(&jobID); err != nil {
+		// Workflow nodes launch through the single job-creation site. They carry
+		// no per-node overrides today (empty Options); wiring node-level extra_vars
+		// is a future change that now has one place to land.
+		jobID, err := launch.Job(ctx, s.DB, jobName, &ujtID, launch.Options{})
+		if err != nil {
 			logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='failed' WHERE id=$1`, n.ID)
 			n.Status = "failed"
 			continue

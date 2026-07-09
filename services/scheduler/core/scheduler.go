@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/objectstore"
 	"github.com/praetordev/praetor/pkg/plog"
@@ -160,7 +161,7 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		// Inventory-sync jobs carry no template; they reference an
 		// inventory_source and are dispatched to the executor to run
 		// `ansible-inventory` and upsert the result into the inventory.
-		if srcID := inventorySourceID(job.JobArgs); srcID > 0 {
+		if srcID := launch.ParseArgs(job.JobArgs).InventorySourceID; srcID > 0 {
 			var src struct {
 				InventoryID  int64  `db:"inventory_id"`
 				Source       string `db:"source"`
@@ -302,8 +303,9 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		// prompt-on-launch overrides the launcher supplied. The launch handler has
 		// already gated those overrides by the template's ask_* flags, so anything
 		// present in job_args is allowed.
-		extraVars := mergeExtraVars(template.ExtraVars, job.JobArgs)
-		limit := effectiveLimit(template.JobLimit, job.JobArgs)
+		jobOpts := launch.ParseArgs(job.JobArgs)
+		extraVars := jobOpts.MergeExtraVars(template.ExtraVars)
+		limit := jobOpts.EffectiveLimit(template.JobLimit)
 
 		// Fact cache travels by reference too: ship only the UseFactCache flag, and
 		// the executor fetches the inventory's stored facts from ingestion at
@@ -476,8 +478,19 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 	for _, sched := range schedules {
 		logger.Info("processing schedule", "schedule_id", sched.ID, "name", sched.Name, "due_at", sched.NextRun)
 
-		// 2. Launch the schedule's target — a workflow run or a job template.
-		if err := launchTarget(ctx, tx, sched.Name, sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); err != nil {
+		// 2. Launch the schedule's target — a workflow run or a job template —
+		// carrying the schedule's own extra_vars into the job. (Previously these
+		// were persisted on the schedule but silently dropped at launch; #79.)
+		var opts launch.Options
+		if len(sched.ExtraVars) > 0 {
+			var ev map[string]interface{}
+			if err := json.Unmarshal(sched.ExtraVars, &ev); err != nil {
+				logger.Error("schedule extra_vars invalid; launching without them", "schedule_id", sched.ID, "err", err)
+			} else {
+				opts.ExtraVars = ev
+			}
+		}
+		if err := launchTarget(ctx, tx, sched.Name, sched.WorkflowTemplateID, sched.UnifiedJobTemplateID, opts); err != nil {
 			logger.Error("launch target for schedule failed", "schedule_id", sched.ID, "err", err)
 			continue
 		}
@@ -522,9 +535,9 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	// running a long time; it is declared lost only when its liveness signal
 	// disappears. The host-runner stamps execution_runs.last_heartbeat_at every
 	// ~30s during execution, so:
-	lostHeartbeatGrace := 2 * time.Minute // ~4 missed heartbeats
-	startGrace := 5 * time.Minute         // running but never heartbeated
-	queuedTimeout := 10 * time.Minute     // never picked up by an executor
+	lostHeartbeatGrace := 2 * time.Minute  // ~4 missed heartbeats
+	startGrace := 5 * time.Minute          // running but never heartbeated
+	queuedTimeout := 10 * time.Minute      // never picked up by an executor
 	localRecoveryGrace := 10 * time.Minute // window for the executor to resume a local run before true-loss (#45)
 
 	// 1a. Reconcilable runs: a REMOTE run (has a snapshotted runner host) whose
@@ -694,7 +707,6 @@ func findFile(fs billy.Filesystem, path string) (billy.File, error) {
 
 	return nil, fmt.Errorf("file not found: %s", path)
 }
-
 
 // packProjectToTar creates a base64-encoded tar.gz of the entire in-memory filesystem
 func packProjectToTar(fs billy.Filesystem) (string, error) {
