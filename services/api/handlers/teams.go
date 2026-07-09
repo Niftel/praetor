@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,13 +9,40 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
+// TeamStore is the teams-domain data access.
+type TeamStore interface {
+	ListAll(ctx context.Context, limit, offset int) ([]models.Team, error)
+	CountAll(ctx context.Context) (int64, error)
+	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Team, error)
+	Get(ctx context.Context, id int64) (models.Team, error)
+	Create(ctx context.Context, input models.Team) (models.Team, error)
+	Update(ctx context.Context, input models.Team) (models.Team, error)
+	Delete(ctx context.Context, id int64) (int64, error)
+	AddMember(ctx context.Context, teamID, userID int64) error
+	RemoveMember(ctx context.Context, teamID, userID int64) error
+	Members(ctx context.Context, teamID int64) ([]models.User, error)
+}
+
+// TeamsResource is the self-contained teams domain (extracted from ContentHandler — B6/#85).
+type TeamsResource struct {
+	DB *sqlx.DB
+	*Authorizer
+	store TeamStore
+}
+
+func NewTeamsResource(db *sqlx.DB) *TeamsResource {
+	return &TeamsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTeamStore(db)}
+}
+
 // ListTeams GET /api/v1/teams
-func (h *ContentHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) ListTeams(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
 	uc := currentUser(r)
 
@@ -23,18 +51,18 @@ func (h *ContentHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
 		var err error
-		if teams, err = h.teams.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
+		if teams, err = h.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		total, _ = h.teams.CountAll(r.Context())
+		total, _ = h.store.CountAll(r.Context())
 	} else {
 		ids, err := h.readableIDs(r, rbac.ContentTypeTeam)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		if teams, err = h.teams.ListByIDs(r.Context(), ids, pg.Limit, pg.Offset); err != nil {
+		if teams, err = h.store.ListByIDs(r.Context(), ids, pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -50,7 +78,7 @@ func (h *ContentHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateTeam POST /api/v1/teams
-func (h *ContentHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	var input models.Team
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -69,7 +97,7 @@ func (h *ContentHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.teams.Create(r.Context(), input)
+	created, err := h.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -79,12 +107,12 @@ func (h *ContentHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetTeam GET /api/v1/teams/{id}
-func (h *ContentHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) GetTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actRead) {
 		return
 	}
-	team, err := h.teams.Get(r.Context(), id)
+	team, err := h.store.Get(r.Context(), id)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -93,7 +121,7 @@ func (h *ContentHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateTeam PUT /api/v1/teams/{id}
-func (h *ContentHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actAdmin) {
 		return
@@ -105,7 +133,7 @@ func (h *ContentHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	input.ID = id
 
-	updated, err := h.teams.Update(r.Context(), input)
+	updated, err := h.store.Update(r.Context(), input)
 	if errors.Is(err, sql.ErrNoRows) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -117,12 +145,12 @@ func (h *ContentHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteTeam DELETE /api/v1/teams/{id}
-func (h *ContentHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actAdmin) {
 		return
 	}
-	count, err := h.teams.Delete(r.Context(), id)
+	count, err := h.store.Delete(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -135,7 +163,7 @@ func (h *ContentHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 }
 
 // AddTeamMember POST /api/v1/teams/{id}/members
-func (h *ContentHandler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actAdmin) {
 		return
@@ -150,7 +178,7 @@ func (h *ContentHandler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.teams.AddMember(r.Context(), teamID, req.UserID); err != nil {
+	if err := h.store.AddMember(r.Context(), teamID, req.UserID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -158,13 +186,13 @@ func (h *ContentHandler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListTeamMembers GET /api/v1/teams/{id}/members
-func (h *ContentHandler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actRead) {
 		return
 	}
 
-	members, err := h.teams.Members(r.Context(), teamID)
+	members, err := h.store.Members(r.Context(), teamID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -173,7 +201,7 @@ func (h *ContentHandler) ListTeamMembers(w http.ResponseWriter, r *http.Request)
 }
 
 // RemoveTeamMember DELETE /api/v1/teams/{id}/members/{userID}
-func (h *ContentHandler) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
+func (h *TeamsResource) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actAdmin) {
 		return
@@ -186,7 +214,7 @@ func (h *ContentHandler) RemoveTeamMember(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.teams.RemoveMember(r.Context(), teamID, userID); err != nil {
+	if err := h.store.RemoveMember(r.Context(), teamID, userID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

@@ -6,12 +6,31 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/auth"
 	"github.com/praetordev/praetor/pkg/crypto"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// AuthResource handles login/token issuance. It holds the users store and the
+// LDAP config path (LDAP login is enabled when the path is set). Extracted from
+// the former ContentHandler god-object (B6/#85).
+type AuthResource struct {
+	DB *sqlx.DB
+	*Authorizer
+	store UserStore
+
+	// LDAPConfigPath, when set, enables LDAP login (AAP group→role mapping) in
+	// Login. Empty means local auth only. Set by the router from the API config.
+	LDAPConfigPath string
+}
+
+func NewAuthResource(db *sqlx.DB) *AuthResource {
+	return &AuthResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewUserStore(db)}
+}
 
 var jwtSecret = []byte(getJWTSecret())
 
@@ -51,7 +70,7 @@ type AuthClaims struct {
 //     never LDAP-managed, so a broken/unreachable directory can't lock it out.
 //  2. Everything else, when LDAP is configured — bind to the directory and apply
 //     the AAP group→role mapping (auth.Authenticate). No fallback to a local hash.
-func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *AuthResource) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -59,7 +78,7 @@ func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up the local row (may not exist). ByUsernameWithHash includes ldap_dn.
-	user, err := h.users.ByUsernameWithHash(r.Context(), req.Username)
+	user, err := h.store.ByUsernameWithHash(r.Context(), req.Username)
 	isLocalAccount := err == nil && user.PasswordHash != "" && user.LdapDN == nil
 
 	// 1. Local break-glass account.
@@ -98,7 +117,7 @@ func (h *ContentHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // issueToken signs a JWT for an authenticated user and writes the login response.
-func (h *ContentHandler) issueToken(w http.ResponseWriter, r *http.Request, user models.User) {
+func (h *AuthResource) issueToken(w http.ResponseWriter, r *http.Request, user models.User) {
 	claims := AuthClaims{
 		UserID:          user.ID,
 		Username:        user.Username,

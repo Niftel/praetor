@@ -11,13 +11,13 @@ import (
 )
 
 // ListOrgGalaxyCredentials GET /api/v1/organizations/{id}/galaxy-credentials
-func (h *ContentHandler) ListOrgGalaxyCredentials(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrgGalaxyCredentials(w http.ResponseWriter, r *http.Request) {
 	orgID := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actRead) {
 		return
 	}
 
-	creds, err := h.orgs.GalaxyCredentials(r.Context(), orgID)
+	creds, err := h.store.GalaxyCredentials(r.Context(), orgID)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -26,7 +26,7 @@ func (h *ContentHandler) ListOrgGalaxyCredentials(w http.ResponseWriter, r *http
 }
 
 // AddOrgGalaxyCredential POST /api/v1/organizations/{id}/galaxy-credentials
-func (h *ContentHandler) AddOrgGalaxyCredential(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) AddOrgGalaxyCredential(w http.ResponseWriter, r *http.Request) {
 	orgID := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
 		return
@@ -41,7 +41,7 @@ func (h *ContentHandler) AddOrgGalaxyCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := h.orgs.AddGalaxyCredential(r.Context(), orgID, body.CredentialID, body.Position); err != nil {
+	if err := h.store.AddGalaxyCredential(r.Context(), orgID, body.CredentialID, body.Position); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -49,7 +49,7 @@ func (h *ContentHandler) AddOrgGalaxyCredential(w http.ResponseWriter, r *http.R
 }
 
 // RemoveOrgGalaxyCredential DELETE /api/v1/organizations/{id}/galaxy-credentials/{credId}
-func (h *ContentHandler) RemoveOrgGalaxyCredential(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) RemoveOrgGalaxyCredential(w http.ResponseWriter, r *http.Request) {
 	orgID := render.GetIDParam(r)
 	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
 		return
@@ -60,7 +60,7 @@ func (h *ContentHandler) RemoveOrgGalaxyCredential(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := h.orgs.RemoveGalaxyCredential(r.Context(), orgID, credID); err != nil {
+	if err := h.store.RemoveGalaxyCredential(r.Context(), orgID, credID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

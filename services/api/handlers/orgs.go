@@ -35,80 +35,22 @@ type OrgStore interface {
 	RemoveGalaxyCredential(ctx context.Context, orgID, credentialID int64) error
 }
 
-// AccessStore is the access/audit read access the content handler depends on.
-type AccessStore interface {
-	RoleUsers(ctx context.Context, roleID int64) ([]store.AccessUser, error)
-	RoleTeams(ctx context.Context, roleID int64) ([]store.AccessTeam, error)
-	UserAccessRoles(ctx context.Context, userID int64) ([]store.UserAccessRole, error)
-	ActivityStream(ctx context.Context, resourceType, action string, limit int) ([]store.ActivityEntry, error)
-}
-
-// UserStore is the users-domain data access the content handler depends on.
-type UserStore interface {
-	List(ctx context.Context, limit, offset int) ([]models.User, error)
-	Count(ctx context.Context) (int64, error)
-	Get(ctx context.Context, id int64) (models.User, error)
-	Create(ctx context.Context, u models.User) (models.User, error)
-	Update(ctx context.Context, u models.User, setPassword bool) (models.User, error)
-	Delete(ctx context.Context, id int64) (int64, error)
-	Organizations(ctx context.Context, userID int64) ([]models.Organization, error)
-	Teams(ctx context.Context, userID int64) ([]models.Team, error)
-	ByUsernameWithHash(ctx context.Context, username string) (models.User, error)
-}
-
-// RoleStore is the roles-domain read access the content handler depends on
-// (role mutations go through the rbac Access service).
-type RoleStore interface {
-	ListAll(ctx context.Context) ([]rbac.Role, error)
-	ListSingletons(ctx context.Context) ([]rbac.Role, error)
-	GetByID(ctx context.Context, id int64) (rbac.Role, error)
-	UsersForRole(ctx context.Context, roleID int64) ([]models.User, error)
-	TeamsForRole(ctx context.Context, roleID int64) ([]models.Team, error)
-}
-
-// TeamStore is the teams-domain data access the content handler depends on.
-type TeamStore interface {
-	ListAll(ctx context.Context, limit, offset int) ([]models.Team, error)
-	CountAll(ctx context.Context) (int64, error)
-	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Team, error)
-	Get(ctx context.Context, id int64) (models.Team, error)
-	Create(ctx context.Context, input models.Team) (models.Team, error)
-	Update(ctx context.Context, input models.Team) (models.Team, error)
-	Delete(ctx context.Context, id int64) (int64, error)
-	AddMember(ctx context.Context, teamID, userID int64) error
-	RemoveMember(ctx context.Context, teamID, userID int64) error
-	Members(ctx context.Context, teamID int64) ([]models.User, error)
-}
-
-type ContentHandler struct {
+// OrgsResource is the self-contained organizations domain (incl. org membership,
+// sub-resource lists, and galaxy-credential links in galaxy_credentials.go),
+// extracted from the former ContentHandler god-object (B6/#85).
+type OrgsResource struct {
 	DB *sqlx.DB
 	*Authorizer
-	orgs   OrgStore
-	roles  RoleStore
-	teams  TeamStore
-	access AccessStore
-	users  UserStore
-
-	// LDAPConfigPath, when set, enables LDAP login (AAP group→role mapping) in
-	// Login. Empty means local auth only. Set by the router from the API config.
-	LDAPConfigPath string
+	store OrgStore
 }
 
-func NewContentHandler(db *sqlx.DB) *ContentHandler {
-	return &ContentHandler{
-		DB:         db,
-		Authorizer: NewAuthorizer(db),
-		orgs:       store.NewOrgStore(db),
-		roles:      store.NewRoleStore(db),
-		teams:      store.NewTeamStore(db),
-		access:     store.NewAccessStore(db),
-		users:      store.NewUserStore(db),
-	}
+func NewOrgsResource(db *sqlx.DB) *OrgsResource {
+	return &OrgsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewOrgStore(db)}
 }
 
 // ListOrganizations GET /api/v1/organizations
 // Returns organizations the user has read access to
-func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	pg := render.ParsePagination(r)
 
@@ -118,11 +60,11 @@ func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Reques
 	// Superusers and system auditors see all
 	if userCtx.IsSuperuser {
 		var err error
-		if orgs, err = h.orgs.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
+		if orgs, err = h.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		total, _ = h.orgs.CountAll(r.Context())
+		total, _ = h.store.CountAll(r.Context())
 	} else {
 		// Filter by accessible organizations
 		accessibleIDs, err := h.Access.FilterAccessibleIDs(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, rbac.RoleFieldRead)
@@ -130,7 +72,7 @@ func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Reques
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		if orgs, err = h.orgs.ListByIDs(r.Context(), accessibleIDs, pg.Limit, pg.Offset); err != nil {
+		if orgs, err = h.store.ListByIDs(r.Context(), accessibleIDs, pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -151,7 +93,7 @@ func (h *ContentHandler) ListOrganizations(w http.ResponseWriter, r *http.Reques
 
 // CreateOrganization POST /api/v1/organizations
 // Only superusers can create organizations (AWX behavior)
-func (h *ContentHandler) CreateOrganization(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 
 	// Only superusers can create organizations
@@ -166,7 +108,7 @@ func (h *ContentHandler) CreateOrganization(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	created, err := h.orgs.Create(r.Context(), input)
+	created, err := h.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -175,7 +117,7 @@ func (h *ContentHandler) CreateOrganization(w http.ResponseWriter, r *http.Reque
 }
 
 // GetOrganization GET /api/v1/organizations/{id}
-func (h *ContentHandler) GetOrganization(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) GetOrganization(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := render.GetIDParam(r)
 
@@ -190,7 +132,7 @@ func (h *ContentHandler) GetOrganization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	org, err := h.orgs.Get(r.Context(), id)
+	org, err := h.store.Get(r.Context(), id)
 	if err != nil {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -199,7 +141,7 @@ func (h *ContentHandler) GetOrganization(w http.ResponseWriter, r *http.Request)
 }
 
 // UpdateOrganization PUT /api/v1/organizations/{id}
-func (h *ContentHandler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := render.GetIDParam(r)
 
@@ -221,7 +163,7 @@ func (h *ContentHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 	}
 	input.ID = id
 
-	updated, err := h.orgs.Update(r.Context(), input)
+	updated, err := h.store.Update(r.Context(), input)
 	if errors.Is(err, sql.ErrNoRows) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
@@ -234,7 +176,7 @@ func (h *ContentHandler) UpdateOrganization(w http.ResponseWriter, r *http.Reque
 
 // DeleteOrganization DELETE /api/v1/organizations/{id}
 // Only superusers can delete organizations
-func (h *ContentHandler) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := render.GetIDParam(r)
 
@@ -243,7 +185,7 @@ func (h *ContentHandler) DeleteOrganization(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	count, err := h.orgs.Delete(r.Context(), id)
+	count, err := h.store.Delete(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -257,7 +199,7 @@ func (h *ContentHandler) DeleteOrganization(w http.ResponseWriter, r *http.Reque
 
 // ListOrganizationUsers GET /api/v1/organizations/{id}/users
 // Returns users who are members of the organization (have member_role)
-func (h *ContentHandler) ListOrganizationUsers(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrganizationUsers(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
@@ -273,7 +215,7 @@ func (h *ContentHandler) ListOrganizationUsers(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get all users who have the member_role for this org
-	users, err := h.orgs.UsersByRoleField(r.Context(), id, "member_role")
+	users, err := h.store.UsersByRoleField(r.Context(), id, "member_role")
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -283,7 +225,7 @@ func (h *ContentHandler) ListOrganizationUsers(w http.ResponseWriter, r *http.Re
 
 // AddOrganizationUser POST /api/v1/organizations/{id}/users
 // Adds a user as member of the organization
-func (h *ContentHandler) AddOrganizationUser(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) AddOrganizationUser(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	orgID := getOrgIDFromPath(r)
 
@@ -325,7 +267,7 @@ func (h *ContentHandler) AddOrganizationUser(w http.ResponseWriter, r *http.Requ
 }
 
 // RemoveOrganizationUser DELETE /api/v1/organizations/{id}/users/{userId}
-func (h *ContentHandler) RemoveOrganizationUser(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) RemoveOrganizationUser(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	orgID := getOrgIDFromPath(r)
 	userIDStr := chi.URLParam(r, "userId")
@@ -364,7 +306,7 @@ func (h *ContentHandler) RemoveOrganizationUser(w http.ResponseWriter, r *http.R
 }
 
 // ListOrganizationAdmins GET /api/v1/organizations/{id}/admins
-func (h *ContentHandler) ListOrganizationAdmins(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrganizationAdmins(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
@@ -379,7 +321,7 @@ func (h *ContentHandler) ListOrganizationAdmins(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	users, err := h.orgs.UsersByRoleField(r.Context(), id, "admin_role")
+	users, err := h.store.UsersByRoleField(r.Context(), id, "admin_role")
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -388,7 +330,7 @@ func (h *ContentHandler) ListOrganizationAdmins(w http.ResponseWriter, r *http.R
 }
 
 // AddOrganizationAdmin POST /api/v1/organizations/{id}/admins
-func (h *ContentHandler) AddOrganizationAdmin(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) AddOrganizationAdmin(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	orgID := getOrgIDFromPath(r)
 
@@ -428,7 +370,7 @@ func (h *ContentHandler) AddOrganizationAdmin(w http.ResponseWriter, r *http.Req
 }
 
 // ListOrganizationTeams GET /api/v1/organizations/{id}/teams
-func (h *ContentHandler) ListOrganizationTeams(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrganizationTeams(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
@@ -442,7 +384,7 @@ func (h *ContentHandler) ListOrganizationTeams(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	teams, err := h.orgs.ListTeams(r.Context(), id)
+	teams, err := h.store.ListTeams(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -452,7 +394,7 @@ func (h *ContentHandler) ListOrganizationTeams(w http.ResponseWriter, r *http.Re
 
 // ListOrganizationRoles GET /api/v1/organizations/{id}/object_roles
 // Returns all roles for this organization
-func (h *ContentHandler) ListOrganizationRoles(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrganizationRoles(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
@@ -476,7 +418,7 @@ func (h *ContentHandler) ListOrganizationRoles(w http.ResponseWriter, r *http.Re
 }
 
 // ListOrganizationProjects GET /api/v1/organizations/{id}/projects
-func (h *ContentHandler) ListOrganizationProjects(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrganizationProjects(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
@@ -490,7 +432,7 @@ func (h *ContentHandler) ListOrganizationProjects(w http.ResponseWriter, r *http
 		return
 	}
 
-	projects, err := h.orgs.ListProjects(r.Context(), id)
+	projects, err := h.store.ListProjects(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -499,7 +441,7 @@ func (h *ContentHandler) ListOrganizationProjects(w http.ResponseWriter, r *http
 }
 
 // ListOrganizationInventories GET /api/v1/organizations/{id}/inventories
-func (h *ContentHandler) ListOrganizationInventories(w http.ResponseWriter, r *http.Request) {
+func (h *OrgsResource) ListOrganizationInventories(w http.ResponseWriter, r *http.Request) {
 	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
@@ -513,7 +455,7 @@ func (h *ContentHandler) ListOrganizationInventories(w http.ResponseWriter, r *h
 		return
 	}
 
-	inventories, err := h.orgs.ListInventories(r.Context(), id)
+	inventories, err := h.store.ListInventories(r.Context(), id)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
