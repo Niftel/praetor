@@ -52,6 +52,7 @@ GET     /api/v1/jobs/runs/{runID}/events
 GET     /api/v1/jobs/runs/{runID}/logs
 GET     /api/v1/ldap/config
 GET     /api/v1/notification-templates
+GET     /api/v1/notification-types
 GET     /api/v1/organizations/
 GET     /api/v1/organizations/{id}/
 GET     /api/v1/organizations/{id}/admins
