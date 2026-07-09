@@ -22,7 +22,7 @@ func TestDelegatedOrgAdminRoles(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 
-	h := handlers.NewContentHandler(db)
+	h := handlers.NewProjectsResource(db)
 	invRes := handlers.NewInventoriesResource(db)
 	access := rbac.NewAccessChecker(db)
 
@@ -125,7 +125,7 @@ func TestUpdateRoleSyncsWithoutAdmin(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 
-	h := handlers.NewContentHandler(db)
+	h := handlers.NewProjectsResource(db)
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()

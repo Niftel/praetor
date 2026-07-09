@@ -35,7 +35,7 @@ func TestProjectRBAC(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	h := handlers.NewContentHandler(db)
+	h := handlers.NewProjectsResource(db)
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()
@@ -149,7 +149,7 @@ func extractID(t *testing.T, body string) int64 {
 	return id
 }
 
-func listProjectCount(t *testing.T, h *handlers.ContentHandler, uc middleware.UserContext) int {
+func listProjectCount(t *testing.T, h *handlers.ProjectsResource, uc middleware.UserContext) int {
 	t.Helper()
 	rec := callJSON(t, h.ListProjects, http.MethodGet, "", uc, nil)
 	if rec.Code != http.StatusOK {

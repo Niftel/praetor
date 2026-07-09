@@ -56,16 +56,6 @@ type UserStore interface {
 	ByUsernameWithHash(ctx context.Context, username string) (models.User, error)
 }
 
-// ProjectStore is the projects-domain data access the content handler depends on.
-type ProjectStore interface {
-	ListAll(ctx context.Context, limit, offset int) ([]models.Project, error)
-	CountAll(ctx context.Context) (int64, error)
-	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Project, error)
-	Get(ctx context.Context, id int64) (models.Project, error)
-	Create(ctx context.Context, input models.Project) (models.Project, error)
-	TouchModified(ctx context.Context, id int64) error
-}
-
 // RoleStore is the roles-domain read access the content handler depends on
 // (role mutations go through the rbac Access service).
 type RoleStore interface {
@@ -93,13 +83,11 @@ type TeamStore interface {
 type ContentHandler struct {
 	DB *sqlx.DB
 	*Authorizer
-	orgs          OrgStore
-	projects      ProjectStore
-	roles         RoleStore
-	teams         TeamStore
-	access        AccessStore
-	users         UserStore
-	notifications NotificationStore
+	orgs   OrgStore
+	roles  RoleStore
+	teams  TeamStore
+	access AccessStore
+	users  UserStore
 
 	// LDAPConfigPath, when set, enables LDAP login (AAP group→role mapping) in
 	// Login. Empty means local auth only. Set by the router from the API config.
@@ -108,15 +96,13 @@ type ContentHandler struct {
 
 func NewContentHandler(db *sqlx.DB) *ContentHandler {
 	return &ContentHandler{
-		DB:            db,
-		Authorizer:    NewAuthorizer(db),
-		orgs:          store.NewOrgStore(db),
-		projects:      store.NewProjectStore(db),
-		roles:         store.NewRoleStore(db),
-		teams:         store.NewTeamStore(db),
-		access:        store.NewAccessStore(db),
-		users:         store.NewUserStore(db),
-		notifications: store.NewNotificationStore(db),
+		DB:         db,
+		Authorizer: NewAuthorizer(db),
+		orgs:       store.NewOrgStore(db),
+		roles:      store.NewRoleStore(db),
+		teams:      store.NewTeamStore(db),
+		access:     store.NewAccessStore(db),
+		users:      store.NewUserStore(db),
 	}
 }
 

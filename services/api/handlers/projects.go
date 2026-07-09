@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,14 +10,38 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
+// ProjectStore is the projects-domain data access the handler depends on.
+type ProjectStore interface {
+	ListAll(ctx context.Context, limit, offset int) ([]models.Project, error)
+	CountAll(ctx context.Context) (int64, error)
+	ListByIDs(ctx context.Context, ids []int64, limit, offset int) ([]models.Project, error)
+	Get(ctx context.Context, id int64) (models.Project, error)
+	Create(ctx context.Context, input models.Project) (models.Project, error)
+	TouchModified(ctx context.Context, id int64) error
+}
+
+// ProjectsResource is the self-contained projects domain (extracted from the
+// former ContentHandler god-object — B6/#85). It embeds *Authorizer for the
+// shared RBAC helpers.
+type ProjectsResource struct {
+	DB *sqlx.DB
+	*Authorizer
+	store ProjectStore
+}
+
+func NewProjectsResource(db *sqlx.DB) *ProjectsResource {
+	return &ProjectsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewProjectStore(db)}
+}
+
 // ListProjects GET /api/v1/projects
-// ListProjects GET /api/v1/projects
-func (h *ContentHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
+func (h *ProjectsResource) ListProjects(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
 	uc := currentUser(r)
 
@@ -25,18 +50,18 @@ func (h *ContentHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 
 	if uc.IsSuperuser || uc.IsSystemAuditor {
 		var err error
-		if projects, err = h.projects.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
+		if projects, err = h.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		total, _ = h.projects.CountAll(r.Context())
+		total, _ = h.store.CountAll(r.Context())
 	} else {
 		ids, err := h.readableIDs(r, rbac.ContentTypeProject)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		if projects, err = h.projects.ListByIDs(r.Context(), ids, pg.Limit, pg.Offset); err != nil {
+		if projects, err = h.store.ListByIDs(r.Context(), ids, pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -56,7 +81,7 @@ func (h *ContentHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateProject POST /api/v1/projects
-func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
+func (h *ProjectsResource) CreateProject(w http.ResponseWriter, r *http.Request) {
 	var input models.Project
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -80,7 +105,7 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		input.SCMType = "git"
 	}
 
-	created, err := h.projects.Create(r.Context(), input)
+	created, err := h.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -91,7 +116,7 @@ func (h *ContentHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 // SyncProject POST /api/v1/projects/{id}/sync
-func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
+func (h *ProjectsResource) SyncProject(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -105,7 +130,7 @@ func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.projects.Get(r.Context(), id)
+	project, err := h.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
@@ -140,7 +165,7 @@ func (h *ContentHandler) SyncProject(w http.ResponseWriter, r *http.Request) {
 	message := string(msgOutput)
 
 	// Update modified_at to signal sync
-	_ = h.projects.TouchModified(r.Context(), id)
+	_ = h.store.TouchModified(r.Context(), id)
 
 	render.JSON(w, r, map[string]interface{}{
 		"success":    true,
