@@ -18,6 +18,13 @@ import (
 	"github.com/praetordev/praetor/pkg/packspec"
 )
 
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
 	specPath := flag.String("spec", "", "path to the Execution Pack YAML spec")
 	out := flag.String("out", "build/runtime", "output directory for the pack tarball(s)")
@@ -67,8 +74,8 @@ func main() {
 			log.Fatalf("write requirements.txt: %v", werr)
 		}
 
-		log.Printf("Building Execution Pack %q for linux/%s (python %s, %s, %d pip)...",
-			spec.Name, arch, spec.Python, spec.AnsibleRequirement(), len(spec.Pip))
+		log.Printf("Building Execution Pack %q for linux/%s (python %s, %s, host-runner %s, %d pip)...",
+			spec.Name, arch, spec.Python, spec.AnsibleRequirement(), spec.HostRunner, len(spec.Pip))
 		args := []string{
 			"buildx", "build",
 			"--platform", "linux/" + arch,
@@ -76,10 +83,23 @@ func main() {
 			"--build-arg", "TARGETARCH=" + arch,
 			"--build-arg", "PY_VERSION=" + spec.Python,
 			"--build-arg", "PACK_NAME=" + spec.Name,
-			"--target", "export",
-			"-o", "type=local,dest=" + *out,
-			ctx,
+			// The daemon release to bundle is REQUIRED by the Dockerfile (no default);
+			// it's single-sourced from the spec's host_runner field.
+			"--build-arg", "HOST_RUNNER_VERSION=" + spec.HostRunner,
+			"--build-arg", "GITEA_OWNER=" + envOr("GITEA_OWNER", "praetor"),
 		}
+		// GITEA_URL: the mirror the build pulls Python/wheels/host-runner from. The
+		// Dockerfile defaults to the compose name (gitea-host:3000); override via env
+		// for other setups (e.g. GITEA_URL=http://host.docker.internal:3002 to reach a
+		// host-published Gitea from a local buildx build).
+		if u := os.Getenv("GITEA_URL"); u != "" {
+			args = append(args, "--build-arg", "GITEA_URL="+u)
+		}
+		args = append(args,
+			"--target", "export",
+			"-o", "type=local,dest="+*out,
+			ctx,
+		)
 		cmd := exec.Command("docker", args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
