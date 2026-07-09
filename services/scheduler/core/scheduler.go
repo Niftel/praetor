@@ -207,10 +207,11 @@ func (s *Scheduler) processPendingJobs(ctx context.Context) error {
 		// inline. The outbox row commits atomically with the run; the relay
 		// delivers it — no dual-write hazard (orphaned run / stranded job).
 		req := &events.ExecutionRequest{
-			ExecutionRunID: runID,
-			UnifiedJobID:   job.ID,
-			JobManifest:    manifest,
-			CreatedAt:      time.Now(),
+			ManifestVersion: events.CurrentManifestVersion,
+			ExecutionRunID:  runID,
+			UnifiedJobID:    job.ID,
+			JobManifest:     manifest,
+			CreatedAt:       time.Now(),
 		}
 		payload, err := json.Marshal(req)
 		if err != nil {

@@ -30,9 +30,10 @@ func wantUpdate() bool { return *updateGolden || os.Getenv("UPDATE_GOLDEN") == "
 // CI instead of silently on a customer's host. See docs/coupling-decomposition-plan.md (B5).
 func fullyPopulatedRequest() ExecutionRequest {
 	return ExecutionRequest{
-		ExecutionRunID: uuid.MustParse("11111111-2222-3333-4444-555555555555"),
-		UnifiedJobID:   4242,
-		CreatedAt:      time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+		ManifestVersion: CurrentManifestVersion,
+		ExecutionRunID:  uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		UnifiedJobID:    4242,
+		CreatedAt:       time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
 		JobManifest: JobManifest{
 			InventoryID:         7,
 			Inventory:           "[web]\nhost-1 ansible_host=10.0.0.1\n",

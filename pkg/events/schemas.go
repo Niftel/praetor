@@ -36,13 +36,36 @@ const (
 	EventResumedFromCheckpoint = "RESUMED_FROM_CHECKPOINT"
 )
 
+// CurrentManifestVersion stamps every ExecutionRequest the scheduler emits.
+//
+// The manifest is a THREE-party wire contract: the scheduler writes it, the
+// executor mutates it in flight, and the host-runner reads it on target hosts
+// while riding its own release train — so a host-runner in the field can be older
+// than the scheduler that produced the manifest. The compatibility discipline is
+// therefore ADDITIVE-ONLY:
+//
+//   - Only ADD fields; never rename, retype, or repurpose an existing one.
+//     (Removing/renaming a field silently changes meaning for an old reader.)
+//   - New fields must be optional — an old host-runner ignores unknown JSON keys,
+//     and a new host-runner must tolerate a zero/absent value from an old scheduler.
+//   - Bump CurrentManifestVersion when you add fields, so the version is a visible
+//     record of the contract level; readers may log/branch on it but must not hard-
+//     fail on a newer value.
+//
+// The wire shape is frozen by the golden test in schemas_golden_test.go, so any
+// change to it is a deliberate, reviewable diff.
+const CurrentManifestVersion = 1
+
 // ExecutionRequest is the message published effectively to "job-execution-requests"
 // topic. It contains everything an executor needs to start running a job.
 type ExecutionRequest struct {
-	ExecutionRunID uuid.UUID   `json:"execution_run_id"`
-	UnifiedJobID   int64       `json:"unified_job_id"`
-	JobManifest    JobManifest `json:"job_manifest"`
-	CreatedAt      time.Time   `json:"created_at"`
+	// ManifestVersion is the contract level this request was produced at
+	// (CurrentManifestVersion). See the additive-only rule above.
+	ManifestVersion int         `json:"manifest_version"`
+	ExecutionRunID  uuid.UUID   `json:"execution_run_id"`
+	UnifiedJobID    int64       `json:"unified_job_id"`
+	JobManifest     JobManifest `json:"job_manifest"`
+	CreatedAt       time.Time   `json:"created_at"`
 }
 
 // JobManifest contains all resolved configuration for the job execution.
