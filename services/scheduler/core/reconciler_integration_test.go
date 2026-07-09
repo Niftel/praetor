@@ -11,11 +11,13 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// TestReconcilerHeartbeatAware proves the reconciler distinguishes a live
-// long-running job from a lost one:
+// TestReconcilerHeartbeatAware proves the reconciler is heartbeat-aware and, for
+// LOCAL runs, recovery-aware (#45):
 //   - a job running for an hour but heartbeating recently is left alone;
-//   - a run whose heartbeat went stale is marked lost (job -> error);
-//   - a run that started but never heartbeated is marked lost.
+//   - a stale/never-heartbeated LOCAL run is parked in 'reconciling' (its job left
+//     running) to give the executor a window to resume it — not immediately lost;
+//   - a parked LOCAL run whose recovery deadline has passed is then declared lost
+//     (job -> error).
 //
 // Requires TEST_DATABASE_URL (migrated); skips otherwise.
 func TestReconcilerHeartbeatAware(t *testing.T) {
@@ -54,9 +56,18 @@ func TestReconcilerHeartbeatAware(t *testing.T) {
 		return jobID, runID
 	}
 
-	aliveJob, aliveRun := newRun(time.Hour, 10*time.Second)    // long-running but healthy
-	staleJob, staleRun := newRun(time.Hour, 10*time.Minute)    // heartbeat went stale
-	neverJob, neverRun := newRun(10*time.Minute, -1)           // started, never heartbeated
+	aliveJob, aliveRun := newRun(time.Hour, 10*time.Second) // long-running but healthy
+	staleJob, staleRun := newRun(time.Hour, 10*time.Minute) // heartbeat went stale
+	neverJob, neverRun := newRun(10*time.Minute, -1)        // started, never heartbeated
+
+	// A LOCAL run (no runner host) already parked in 'reconciling' whose recovery
+	// deadline has passed: the executor never resumed it, so it is now truly lost.
+	lostJob, lostRun := newRun(time.Hour, 20*time.Minute)
+	if _, err := db.Exec(
+		`UPDATE execution_runs SET state='reconciling', reconcile_after = now() - make_interval(secs => 60) WHERE id = $1`,
+		lostRun); err != nil {
+		t.Fatalf("park run in reconciling: %v", err)
+	}
 
 	if err := sched.processTimedOutJobs(context.Background()); err != nil {
 		t.Fatalf("processTimedOutJobs: %v", err)
@@ -71,20 +82,31 @@ func TestReconcilerHeartbeatAware(t *testing.T) {
 		t.Fatalf("alive job status changed to %q", got)
 	}
 
-	// Stale-heartbeat run is lost; its job is error.
-	if got := runState(t, db, staleRun); got != "lost" {
-		t.Fatalf("stale run state = %q, want lost", got)
+	// A stale LOCAL run is NOT immediately lost: the executor persists the same WAL
+	// and resumes interrupted local runs on startup, so it is parked in
+	// 'reconciling' with a recovery deadline and its job is left running (#45).
+	if got := runState(t, db, staleRun); got != "reconciling" {
+		t.Fatalf("stale local run state = %q, want reconciling (parked for recovery)", got)
 	}
-	if got := jobStatus(t, db, staleJob); got != "error" {
-		t.Fatalf("stale job status = %q, want error", got)
+	if got := jobStatus(t, db, staleJob); got != "running" {
+		t.Fatalf("stale job status = %q, want running (not errored while recoverable)", got)
 	}
 
-	// Never-heartbeated run (past the start grace) is lost too.
-	if got := runState(t, db, neverRun); got != "lost" {
-		t.Fatalf("never-heartbeated run state = %q, want lost", got)
+	// A never-heartbeated LOCAL run (past the start grace) is likewise parked, not
+	// immediately lost.
+	if got := runState(t, db, neverRun); got != "reconciling" {
+		t.Fatalf("never-heartbeated local run state = %q, want reconciling", got)
 	}
-	if got := jobStatus(t, db, neverJob); got != "error" {
-		t.Fatalf("never-heartbeated job status = %q, want error", got)
+	if got := jobStatus(t, db, neverJob); got != "running" {
+		t.Fatalf("never-heartbeated job status = %q, want running", got)
+	}
+
+	// The parked local run past its recovery deadline is now truly lost; job errors.
+	if got := runState(t, db, lostRun); got != "lost" {
+		t.Fatalf("expired-reconciling local run state = %q, want lost", got)
+	}
+	if got := jobStatus(t, db, lostJob); got != "error" {
+		t.Fatalf("lost job status = %q, want error", got)
 	}
 }
 
