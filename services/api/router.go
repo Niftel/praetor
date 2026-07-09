@@ -201,9 +201,10 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// =======================================================================
 		// Projects
 		// =======================================================================
-		r.Get("/projects", content.ListProjects)
-		r.Post("/projects", content.CreateProject)
-		r.Post("/projects/{id}/sync", content.SyncProject)
+		projects := handlers.NewProjectsResource(db)
+		r.Get("/projects", projects.ListProjects)
+		r.Post("/projects", projects.CreateProject)
+		r.Post("/projects/{id}/sync", projects.SyncProject)
 
 		// =======================================================================
 		// Jobs
@@ -218,10 +219,11 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Mount("/job-templates", templates.Routes())
 
 		// Notification templates (org-scoped targets; attachments live under job-templates)
-		r.Get("/notification-types", content.ListNotificationTypes) // registered backends + their config schema
-		r.Get("/notification-templates", content.ListNotificationTemplates)
-		r.Post("/notification-templates", content.CreateNotificationTemplate)
-		r.Delete("/notification-templates/{id}", content.DeleteNotificationTemplate)
+		notifications := handlers.NewNotificationsResource(db)
+		r.Get("/notification-types", notifications.ListNotificationTypes) // registered backends + their config schema
+		r.Get("/notification-templates", notifications.ListNotificationTemplates)
+		r.Post("/notification-templates", notifications.CreateNotificationTemplate)
+		r.Delete("/notification-templates/{id}", notifications.DeleteNotificationTemplate)
 
 		// Workflows (DAG of templates with success/failure/approval edges)
 		wf := handlers.NewWorkflowsResource(db)
