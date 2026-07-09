@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -204,6 +205,18 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 	playArgs := []string{"-i", inventoryPath}
 	if req.JobManifest.Limit != "" {
 		playArgs = append(playArgs, "--limit", req.JobManifest.Limit)
+	}
+	// Verbosity (-v..-vvvvv, capped at 5) and Forks (--forks N) come from the job
+	// template via the manifest (#78). Both were previously dropped between the
+	// template and ansible-playbook, so the UI settings had no effect.
+	if v := req.JobManifest.Verbosity; v > 0 {
+		if v > 5 {
+			v = 5
+		}
+		playArgs = append(playArgs, "-"+strings.Repeat("v", v))
+	}
+	if req.JobManifest.Forks > 0 {
+		playArgs = append(playArgs, "--forks", strconv.Itoa(req.JobManifest.Forks))
 	}
 	if len(req.JobManifest.ExtraVars) > 0 {
 		varsPath := filepath.Join(r.JobDir, "extra_vars.json")

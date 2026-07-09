@@ -61,20 +61,26 @@ type JobManifest struct {
 	PlaybookContent string                 `json:"playbook_content"` // Inline playbook content (optional)
 	ExtraVars       map[string]interface{} `json:"extra_vars"`
 	Limit           string                 `json:"limit,omitempty"` // Ansible --limit host pattern
-	UseFactCache    bool                   `json:"use_fact_cache,omitempty"`
-	CachedFacts     map[string]json.RawMessage `json:"cached_facts,omitempty"` // hostname -> ansible_facts to preload
+	// Verbosity is the ansible-playbook -v level (0–4) and Forks caps parallelism
+	// (ansible-playbook --forks N). Both come from the job template; the host-runner
+	// applies them when it builds the play command. They were previously stored on
+	// the template but dropped in the manifest, so the UI settings did nothing (#78).
+	Verbosity    int                        `json:"verbosity,omitempty"`
+	Forks        int                        `json:"forks,omitempty"`
+	UseFactCache bool                       `json:"use_fact_cache,omitempty"`
+	CachedFacts  map[string]json.RawMessage `json:"cached_facts,omitempty"` // hostname -> ansible_facts to preload
 
 	// Inventory sync (Phase 3a): when InventorySync is set, the executor runs
 	// `ansible-inventory --list` against InventorySource and upserts the result
 	// into inventory SyncInventoryID, instead of running a playbook.
-	InventorySync     bool   `json:"inventory_sync,omitempty"`
-	InventorySource   string `json:"inventory_source,omitempty"`
+	InventorySync       bool   `json:"inventory_sync,omitempty"`
+	InventorySource     string `json:"inventory_source,omitempty"`
 	InventorySourceKind string `json:"inventory_source_kind,omitempty"`
-	SyncInventoryID   int64  `json:"sync_inventory_id,omitempty"`
+	SyncInventoryID     int64  `json:"sync_inventory_id,omitempty"`
 
-	RunnerHost      string                 `json:"runner_host,omitempty"`
-	RunnerHostID    int64                  `json:"runner_host_id,omitempty"` // Host ID for heartbeat calls
-	APIURL          string                 `json:"api_url,omitempty"`        // API URL for heartbeat calls
+	RunnerHost   string `json:"runner_host,omitempty"`
+	RunnerHostID int64  `json:"runner_host_id,omitempty"` // Host ID for heartbeat calls
+	APIURL       string `json:"api_url,omitempty"`        // API URL for heartbeat calls
 
 	// ExecutionPack names the self-contained Python+Ansible runtime to push and
 	// run in (the executor pushes /tmp/build/runtime/<pack>-linux-<arch>.tar.gz,
