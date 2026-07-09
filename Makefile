@@ -68,6 +68,26 @@ test:
 	go test ./services/... ./pkg/...
 	@echo "Tests passed."
 
+# Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
+# tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run
+# against a live/in-use database. Spins up a fresh postgres, migrates it, runs
+# everything with TEST_DATABASE_URL, then tears it down. Needs docker.
+TESTDB_PORT ?= 5434
+TESTDB_URL  := postgres://postgres:postgres@localhost:$(TESTDB_PORT)/praetor?sslmode=disable
+.PHONY: test-db
+test-db:
+	@echo "Starting isolated test DB on :$(TESTDB_PORT)..."
+	@docker rm -f praetor-testdb >/dev/null 2>&1 || true
+	@docker run -d --name praetor-testdb -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=praetor \
+		-p $(TESTDB_PORT):5432 postgres:15 >/dev/null
+	@until docker exec praetor-testdb pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	@echo "Migrating..."
+	@DATABASE_URL="$(TESTDB_URL)" go run ./cmd/migrator >/dev/null
+	@echo "Running full suite against isolated DB..."
+	@TEST_DATABASE_URL="$(TESTDB_URL)" go test -count=1 ./... ; status=$$? ; \
+		echo "Tearing down test DB..." ; docker rm -f praetor-testdb >/dev/null 2>&1 || true ; \
+		exit $$status
+
 clean:
 	rm -rf $(BINARY_DIR)
 	rm -rf $(KEYS_DIR)
