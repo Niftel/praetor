@@ -1,0 +1,157 @@
+# Full working local k3d config (URLs + LDAP + dev secrets), captured from the
+# running release so a plain 'helm upgrade -f values-k3d-local.yaml' reproduces
+# the URL-based env and never silently drops ingress/LDAP again. Committed so it
+# is the single source of truth for the local deploy. Dev-only secrets.
+allowInsecureDefaults: false
+bootstrapAdmin:
+  enabled: true
+  password: admin
+  username: admin
+database:
+  bundled:
+    storage: 1Gi
+executor:
+  persistence:
+    jobs:
+      size: 512Mi
+    packs:
+      size: 512Mi
+    ssh:
+      size: 64Mi
+  shmSize: 256Mi
+gitea:
+  internalUrl: http://host.k3d.internal:3002
+hostRunner:
+  # In-cluster ingestion service: the demo sandbox host-runner runs inside the
+  # cluster and cannot resolve the external ingest.* host, so it reports back here.
+  # (Was ingest.praetor.local, which is unreachable in-cluster.)
+  callbackUrl: http://praetor-ingestion:8081
+image:
+  pullPolicy: IfNotPresent
+  registry: ""
+  tag: dev
+ingestion:
+  logStoreMaxMB: 128
+ingress:
+  className: traefik
+  enabled: true
+  host: praetor.localhost
+  ingestionHost: ingest.praetor.localhost
+  tls:
+    enabled: true
+    secretName: praetor-localhost-tls
+ldap:
+  config:
+    group_type:
+      member_attribute: member
+      search_base: ou=teams,dc=praetor,dc=local
+      search_filter: (objectClass=groupOfNames)
+      type: member_dn
+    organization_map:
+      Data:
+        remove_users: true
+        users:
+        - cn=data-engineering-team,ou=teams,dc=praetor,dc=local
+      Engineering:
+        admins:
+        - cn=platform-team,ou=teams,dc=praetor,dc=local
+        remove_admins: true
+        remove_users: true
+        users:
+        - cn=platform-team,ou=teams,dc=praetor,dc=local
+        - cn=backend-team,ou=teams,dc=praetor,dc=local
+        - cn=frontend-team,ou=teams,dc=praetor,dc=local
+      Operations:
+        remove_users: true
+        users:
+        - cn=sre-team,ou=teams,dc=praetor,dc=local
+        - cn=network-team,ou=teams,dc=praetor,dc=local
+        - cn=admins,ou=teams,dc=praetor,dc=local
+      QualityAssurance:
+        remove_users: true
+        users:
+        - cn=qa-team,ou=teams,dc=praetor,dc=local
+      Security:
+        auditors:
+        - cn=compliance-team,ou=teams,dc=praetor,dc=local
+        remove_auditors: true
+        remove_users: true
+        users:
+        - cn=security-team,ou=teams,dc=praetor,dc=local
+    server:
+      bind_dn: cn=admin,dc=praetor,dc=local
+      bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
+      insecure_skip_verify: true
+      start_tls: false
+      timeout: 30s
+      url: ldap://praetor-openldap:389
+    team_map:
+      backend-team:
+        organization: Engineering
+        remove: true
+        users:
+        - cn=backend-team,ou=teams,dc=praetor,dc=local
+      compliance-team:
+        organization: Security
+        remove: true
+        users:
+        - cn=compliance-team,ou=teams,dc=praetor,dc=local
+      data-engineering-team:
+        organization: Data
+        remove: true
+        users:
+        - cn=data-engineering-team,ou=teams,dc=praetor,dc=local
+      frontend-team:
+        organization: Engineering
+        remove: true
+        users:
+        - cn=frontend-team,ou=teams,dc=praetor,dc=local
+      network-team:
+        organization: Operations
+        remove: true
+        users:
+        - cn=network-team,ou=teams,dc=praetor,dc=local
+      platform-team:
+        organization: Engineering
+        remove: true
+        users:
+        - cn=platform-team,ou=teams,dc=praetor,dc=local
+      qa-team:
+        organization: QualityAssurance
+        remove: true
+        users:
+        - cn=qa-team,ou=teams,dc=praetor,dc=local
+      security-team:
+        organization: Security
+        remove: true
+        users:
+        - cn=security-team,ou=teams,dc=praetor,dc=local
+      sre-team:
+        organization: Operations
+        remove: true
+        users:
+        - cn=sre-team,ou=teams,dc=praetor,dc=local
+    user_flags_by_group:
+      is_superuser:
+      - cn=admins,ou=teams,dc=praetor,dc=local
+      is_system_auditor:
+      - cn=compliance-team,ou=teams,dc=praetor,dc=local
+    users:
+      attributes:
+        email: mail
+        first_name: givenName
+        last_name: sn
+        username: uid
+      search_base: ou=users,dc=praetor,dc=local
+      search_filter: (objectClass=inetOrgPerson)
+      search_scope: sub
+  enabled: true
+nats:
+  bundled:
+    maxFileStore: 512MB
+    storage: 1Gi
+secrets:
+  internalToken: dev-internal-token
+  jwtSecret: dev-jwt-secret
+  ldapBindPassword: admin
+  secretKey: 0123456789abcdef0123456789abcdef
