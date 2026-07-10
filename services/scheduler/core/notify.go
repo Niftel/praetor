@@ -42,7 +42,8 @@ func (s *Scheduler) notifyWorkflow(wjID int64, event, verb string) {
 		// Kind gives the human-facing backends the right noun ("Praetor workflow ..."
 		// / "Praetor workflow approval ...") and tags the webhook body.
 		kind := "workflow"
-		if event == "approval" {
+		switch event {
+		case "approval", "approved", "denied":
 			kind = "workflow approval"
 		}
 		for _, r := range rows {

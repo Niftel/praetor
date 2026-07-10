@@ -16,11 +16,12 @@ import (
 	"github.com/praetordev/praetor/pkg/launch"
 )
 
-// TestWorkflowNotificationsFire proves the scheduler dispatches a workflow
-// template's attached notifications: 'error' when the run finalizes failed, and
-// 'approval' when an approval node starts waiting. It stands up a real HTTP
-// receiver (the webhook backend) and asserts the delivered body carries the
-// workflow kind + event.
+// TestWorkflowNotificationsFire proves the scheduler dispatches every workflow
+// notification event exactly where its transition happens: 'started' on first
+// advance, 'approval' when an approval node starts waiting, 'approved'/'denied' on
+// the approval outcome, and 'success'/'error' on terminal finalize. It stands up a
+// real HTTP receiver (the webhook backend) and asserts each delivery carries the
+// right event + workflow kind.
 //
 // Requires TEST_DATABASE_URL (migrated); skips otherwise.
 func TestWorkflowNotificationsFire(t *testing.T) {
@@ -39,7 +40,7 @@ func TestWorkflowNotificationsFire(t *testing.T) {
 	uniq := time.Now().UnixNano()
 
 	// HTTP receiver for the webhook backend; each delivery is pushed to got.
-	got := make(chan map[string]interface{}, 8)
+	got := make(chan map[string]interface{}, 16)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		var m map[string]interface{}
@@ -50,7 +51,7 @@ func TestWorkflowNotificationsFire(t *testing.T) {
 	defer srv.Close()
 
 	// --- Fixture: org, a webhook notification template pointing at srv, a workflow
-	// template with a single approval node, and both event attachments. ---
+	// template with a single approval node, and an attachment for every event. ---
 	var orgID int64
 	if err := db.QueryRow(`INSERT INTO organizations (name) VALUES ($1) RETURNING id`,
 		fmt.Sprintf("wf-notif-org-%d", uniq)).Scan(&orgID); err != nil {
@@ -79,7 +80,7 @@ func TestWorkflowNotificationsFire(t *testing.T) {
 		 VALUES ($1,'gate','approval','the gate')`, wtID); err != nil {
 		t.Fatalf("insert approval node: %v", err)
 	}
-	for _, ev := range []string{"error", "approval"} {
+	for _, ev := range []string{"started", "success", "error", "approval", "approved", "denied"} {
 		if _, err := db.Exec(
 			`INSERT INTO workflow_template_notifications (workflow_template_id, notification_template_id, event)
 			 VALUES ($1,$2,$3)`, wtID, ntID, ev); err != nil {
@@ -87,50 +88,89 @@ func TestWorkflowNotificationsFire(t *testing.T) {
 		}
 	}
 
-	waitFor := func(t *testing.T, wantEvent, wantKind string) {
+	// seen records every delivery (event -> kind). expect drains until the wanted
+	// event has been seen, recording others along the way (events from two runs
+	// share the channel, and 'started'/'approval' recur).
+	seen := map[string]string{}
+	expect := func(t *testing.T, wantEvent, wantKind string) {
 		t.Helper()
 		for {
+			if k, ok := seen[wantEvent]; ok {
+				if k != wantKind {
+					t.Fatalf("%s delivered with kind=%q, want %q", wantEvent, k, wantKind)
+				}
+				return
+			}
 			select {
 			case m := <-got:
-				if m["event"] == wantEvent {
-					if m["kind"] != wantKind {
-						t.Fatalf("delivered %s: kind=%v, want %v", wantEvent, m["kind"], wantKind)
-					}
-					return
-				}
-				// A different event (e.g. approval arriving before error); keep waiting.
+				ev, _ := m["event"].(string)
+				kind, _ := m["kind"].(string)
+				seen[ev] = kind
 			case <-time.After(3 * time.Second):
-				t.Fatalf("timed out waiting for %q notification delivery", wantEvent)
+				t.Fatalf("timed out waiting for %q notification (seen=%v)", wantEvent, seen)
 			}
 		}
 	}
+	advance := func(t *testing.T, wjID int64, phase string) {
+		t.Helper()
+		if err := sched.advanceWorkflow(ctx, wjID); err != nil {
+			t.Fatalf("advanceWorkflow (%s): %v", phase, err)
+		}
+	}
 
-	// --- 'approval' fires when the approval node starts waiting. ---
-	wjID, err := launch.Workflow(ctx, db, wtID, launch.Options{})
+	// --- Approve path: started + approval, then approved + success. ---
+	wjA, err := launch.Workflow(ctx, db, wtID, launch.Options{})
 	if err != nil {
-		t.Fatalf("launch.Workflow: %v", err)
+		t.Fatalf("launch.Workflow A: %v", err)
 	}
-	if err := sched.advanceWorkflow(ctx, wjID); err != nil {
-		t.Fatalf("advanceWorkflow (approval): %v", err)
-	}
-	waitFor(t, "approval", "workflow approval")
+	advance(t, wjA, "A start")
+	expect(t, "started", "workflow")
+	expect(t, "approval", "workflow approval")
 
-	// --- 'error' fires when the run finalizes failed. Reject the waiting node, then
-	// advance: all nodes terminal, one rejected -> workflow failed. ---
-	if _, err := db.Exec(`UPDATE workflow_job_nodes SET status='rejected' WHERE workflow_job_id=$1 AND node_key='gate'`, wjID); err != nil {
-		t.Fatalf("reject node: %v", err)
+	// Once-only: advancing again while the node is still awaiting approval must not
+	// re-deliver 'started' or 'approval' (the whole point of the watermarks).
+	advance(t, wjA, "A idle re-advance")
+	select {
+	case m := <-got:
+		t.Fatalf("duplicate notification on idle re-advance: %v", m)
+	case <-time.After(500 * time.Millisecond):
 	}
-	if err := sched.advanceWorkflow(ctx, wjID); err != nil {
-		t.Fatalf("advanceWorkflow (finalize): %v", err)
-	}
-	waitFor(t, "error", "workflow")
 
-	// The run must be recorded failed.
+	if _, err := db.Exec(`UPDATE workflow_job_nodes SET status='approved' WHERE workflow_job_id=$1 AND node_key='gate'`, wjA); err != nil {
+		t.Fatalf("approve node: %v", err)
+	}
+	advance(t, wjA, "A finalize")
+	expect(t, "approved", "workflow approval")
+	expect(t, "success", "workflow")
+	assertWFStatus(t, db, wjA, "successful")
+
+	// --- Deny path: a fresh run, then denied + error. (started/approval recur and
+	// are drained by expect.) ---
+	seen = map[string]string{} // reset so recurring started/approval are re-observed
+	wjB, err := launch.Workflow(ctx, db, wtID, launch.Options{})
+	if err != nil {
+		t.Fatalf("launch.Workflow B: %v", err)
+	}
+	advance(t, wjB, "B start")
+	expect(t, "started", "workflow")
+	expect(t, "approval", "workflow approval")
+
+	if _, err := db.Exec(`UPDATE workflow_job_nodes SET status='rejected' WHERE workflow_job_id=$1 AND node_key='gate'`, wjB); err != nil {
+		t.Fatalf("deny node: %v", err)
+	}
+	advance(t, wjB, "B finalize")
+	expect(t, "denied", "workflow approval")
+	expect(t, "error", "workflow")
+	assertWFStatus(t, db, wjB, "failed")
+}
+
+func assertWFStatus(t *testing.T, db *sqlx.DB, wjID int64, want string) {
+	t.Helper()
 	var status string
 	if err := db.Get(&status, `SELECT status FROM workflow_jobs WHERE id=$1`, wjID); err != nil {
 		t.Fatalf("read workflow status: %v", err)
 	}
-	if status != "failed" {
-		t.Fatalf("workflow status = %q, want failed", status)
+	if status != want {
+		t.Fatalf("workflow %d status = %q, want %q", wjID, status, want)
 	}
 }

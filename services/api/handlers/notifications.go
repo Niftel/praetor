@@ -219,8 +219,9 @@ func (rs *WorkflowsResource) ListWorkflowNotifications(w http.ResponseWriter, r 
 }
 
 // AttachWorkflowNotification POST /api/v1/workflow-templates/{id}/notifications.
-// A workflow fires 'success'/'error' on terminal state and 'approval' when one of
-// its approval nodes starts waiting.
+// A workflow fires 'started' on first advance, 'success'/'error' on terminal
+// state, 'approval' when an approval node starts waiting, and 'approved'/'denied'
+// on the approval outcome.
 func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
 	wtID := render.GetIDParam(r)
 	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, wtID, actAdmin) {
@@ -235,9 +236,9 @@ func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r
 		return
 	}
 	switch body.Event {
-	case "success", "error", "approval":
+	case "started", "success", "error", "approval", "approved", "denied":
 	default:
-		render.ErrInvalidRequest(fmt.Errorf("event must be success|error|approval")).Render(w, r)
+		render.ErrInvalidRequest(fmt.Errorf("event must be started|success|error|approval|approved|denied")).Render(w, r)
 		return
 	}
 	if err := rs.notifications.AttachToWorkflowTemplate(r.Context(), wtID, body.NotificationTemplateID, body.Event); err != nil {

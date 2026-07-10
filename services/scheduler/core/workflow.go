@@ -170,6 +170,17 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 	// node job's template defaults below (launch wins), matching AWX workflow
 	// extra_vars semantics.
 	wfOpts := launch.ParseArgs(wf.LaunchArgs)
+
+	// Fire the 'started' notification the first time this run is advanced. The
+	// atomic claim (started_notified false->true) makes it exactly-once on its own,
+	// independent of the advisory lock.
+	if res, err := s.DB.ExecContext(ctx,
+		`UPDATE workflow_jobs SET started_notified=true WHERE id=$1 AND started_notified=false`, wjID); err == nil {
+		if rows, _ := res.RowsAffected(); rows == 1 {
+			s.notifyWorkflow(wjID, "started", "started")
+		}
+	}
+
 	// Read the run's snapshotted graph — not the template — so editing the template
 	// never changes a run in flight.
 	var nodes []wfNode
@@ -210,6 +221,29 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 					logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status=$1 WHERE id=$2`, newSt, n.ID)
 					n.Status = newSt
 				}
+			}
+		}
+	}
+
+	// 1b. Fire approval-outcome notifications once. A user approves/denies an
+	// approval node via the API (status -> approved/rejected); the scheduler
+	// observes the outcome here and notifies, claiming outcome_notified so it fires
+	// exactly once.
+	for i := range nodes {
+		n := &nodes[i]
+		if n.NodeType != "approval" || (n.Status != "approved" && n.Status != "rejected") {
+			continue
+		}
+		res, err := s.DB.ExecContext(ctx,
+			`UPDATE workflow_job_nodes SET outcome_notified=true WHERE id=$1 AND outcome_notified=false`, n.ID)
+		if err != nil {
+			continue
+		}
+		if rows, _ := res.RowsAffected(); rows == 1 {
+			if n.Status == "approved" {
+				s.notifyWorkflow(wjID, "approved", "approved")
+			} else {
+				s.notifyWorkflow(wjID, "denied", "denied")
 			}
 		}
 	}
