@@ -35,6 +35,10 @@ image:
   tag: dev
 ingestion:
   logStoreMaxMB: 128
+scheduler:
+  # Lab: recover fast. A remote job whose result never reached ingestion is handed
+  # to the reconciler after 90s instead of the 10m prod default.
+  reconcileQueuedTimeout: "90s"
 ingress:
   className: traefik
   enabled: true

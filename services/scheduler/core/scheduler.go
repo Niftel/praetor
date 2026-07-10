@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-billy/v5/util"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/models"
@@ -377,16 +378,32 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 }
 
 // processTimedOutJobs marks jobs that are stuck in running/queued state as failed.
+// durationEnv reads a Go duration from an env var (e.g. "90s", "2m"), falling back
+// to def if unset or unparseable. Used to tune the recovery/reconciliation windows
+// without a rebuild.
+func durationEnv(key string, def time.Duration) time.Duration {
+	if v := env.String(key, ""); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+		logger.Warn("ignoring unparseable duration env", "key", key, "value", v)
+	}
+	return def
+}
+
 // This catches cases where the host-runner crashes silently without sending events.
 func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	// Heartbeat-aware reconciliation. A long-running job is NOT failed merely for
 	// running a long time; it is declared lost only when its liveness signal
 	// disappears. The host-runner stamps execution_runs.last_heartbeat_at every
 	// ~30s during execution, so:
-	lostHeartbeatGrace := 2 * time.Minute  // ~4 missed heartbeats
-	startGrace := 5 * time.Minute          // running but never heartbeated
-	queuedTimeout := 10 * time.Minute      // never picked up by an executor
-	localRecoveryGrace := 10 * time.Minute // window for the executor to resume a local run before true-loss (#45)
+	// All four windows are env-tunable (durations, e.g. "90s", "2m") so the recovery
+	// cadence can be lowered in a lab or tightened in prod without a rebuild. Defaults
+	// match the original hard-coded values.
+	lostHeartbeatGrace := durationEnv("RECONCILE_HEARTBEAT_GRACE", 2*time.Minute)  // ~4 missed heartbeats
+	startGrace := durationEnv("RECONCILE_START_GRACE", 5*time.Minute)              // running but never heartbeated
+	queuedTimeout := durationEnv("RECONCILE_QUEUED_TIMEOUT", 10*time.Minute)       // never picked up / never reported (parks remote runs to reconciling)
+	localRecoveryGrace := durationEnv("RECONCILE_LOCAL_GRACE", 10*time.Minute)     // window for the executor to resume a local run before true-loss (#45)
 
 	// 1a. Reconcilable runs: a REMOTE run (has a snapshotted runner host) whose
 	// heartbeat went stale is NOT declared failed — the host may have finished the

@@ -23,6 +23,10 @@ data:
   # Scheduler / reconciler / executor tunables.
   JOB_RETENTION_DAYS: {{ .Values.scheduler.jobRetentionDays | quote }}
   RECONCILE_INTERVAL: {{ .Values.reconciler.interval | quote }}
+  # How long a remote job may sit queued (never reported) before the scheduler hands
+  # it to the pull-based reconciler. Lower = faster automatic recovery when the
+  # host-runner's push can't reach ingestion; the reconciler then harvests the WAL.
+  RECONCILE_QUEUED_TIMEOUT: {{ .Values.scheduler.reconcileQueuedTimeout | default "10m" | quote }}
   EXECUTOR_WORKERS: {{ .Values.executor.workers | quote }}
   ANSIBLE_FORKS: {{ .Values.executor.ansibleForks | quote }}
   # Ingestion log-store bounds.
