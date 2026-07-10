@@ -118,10 +118,14 @@ var nodeStarters = map[string]nodeStarter{
 	"webhook_out": (*Scheduler).startWebhookOutNode,
 }
 
-// startApprovalNode pauses the node until a user approves/denies it.
-func (s *Scheduler) startApprovalNode(ctx context.Context, _ string, _ int64, n *wfNode) {
+// startApprovalNode pauses the node until a user approves/denies it, and fires the
+// workflow template's 'approval' notifications so approvers know to act. The node
+// transitions pending->awaiting_approval exactly once, so the notification is sent
+// once.
+func (s *Scheduler) startApprovalNode(ctx context.Context, _ string, wjID int64, n *wfNode) {
 	logExec(ctx, s.DB, `UPDATE workflow_job_nodes SET status='awaiting_approval' WHERE id=$1`, n.ID)
 	n.Status = "awaiting_approval"
+	s.notifyWorkflow(wjID, "approval", "needs approval")
 }
 
 // startWebhookInNode pauses until an external caller hits the node's callback with
@@ -308,6 +312,14 @@ func (s *Scheduler) advanceWorkflow(ctx context.Context, wjID int64) error {
 		}
 		logExec(ctx, s.DB, `UPDATE workflow_jobs SET status=$1, finished_at=now() WHERE id=$2`, status, wjID)
 		logger.Info("workflow finished", "workflow_id", wjID, "status", status)
+		// Fire the workflow template's terminal-state notifications. This block runs
+		// exactly once per run (processWorkflows only picks up status='running'), so
+		// there is no dedup to do.
+		if status == "successful" {
+			s.notifyWorkflow(wjID, "success", "succeeded")
+		} else {
+			s.notifyWorkflow(wjID, "error", "failed")
+		}
 	}
 	return nil
 }

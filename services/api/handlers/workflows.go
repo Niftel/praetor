@@ -39,11 +39,12 @@ type WorkflowStore interface {
 type WorkflowsResource struct {
 	DB *sqlx.DB
 	*Authorizer
-	store WorkflowStore
+	store         WorkflowStore
+	notifications NotificationStore
 }
 
 func NewWorkflowsResource(db *sqlx.DB) *WorkflowsResource {
-	return &WorkflowsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewWorkflowStore(db)}
+	return &WorkflowsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewWorkflowStore(db), notifications: store.NewNotificationStore(db)}
 }
 
 // workflowNode / workflowEdge alias the store DTOs so handler code reads unchanged.

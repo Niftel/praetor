@@ -74,17 +74,7 @@ func (n *Notifier) send(jobID int64, ev, verb string) {
 	}
 
 	for _, r := range rows {
-		backend, ok := notify.Backends.Get(r.Type)
-		if !ok {
-			logger.Error("notifier unknown backend", "type", r.Type, "job_id", jobID)
-			continue
-		}
-		cfg, err := notify.DecryptConfig(backend, r.Config)
-		if err != nil {
-			logger.Error("notifier decode config failed", "type", r.Type, "job_id", jobID, "err", err)
-			continue
-		}
-		if err := backend.Send(ctx, cfg, notify.Message{
+		if err := notify.SendOne(ctx, r.Type, r.Config, notify.Message{
 			JobID: jobID, JobName: r.JobName, Event: ev, Status: verb,
 		}); err != nil {
 			logger.Error("notifier send failed", "type", r.Type, "job_id", jobID, "err", err)
