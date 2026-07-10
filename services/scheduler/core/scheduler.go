@@ -464,8 +464,32 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 		logger.Warn("marked local runs as lost (recovery deadline passed)", "count", rows)
 	}
 
-	// 2. Queued too long: never picked up by an executor. With the durable
-	// outbox this should be rare, but it remains a safety net.
+	// 2a. A REMOTE queued job stuck past the timeout must NOT be failed: it may have
+	// actually run on its host with the outcome never pushed (ingestion down the
+	// whole time, so no JOB_STARTED ever arrived to move it out of 'queued'). Failing
+	// it here would be terminal and unrecoverable even after the WAL arrives. Instead
+	// hand its run to the pull-based reconciler, which SSHes to the host and either
+	// harvests the true outcome or (dir genuinely absent) declares it lost.
+	if rec, err := s.DB.ExecContext(ctx, `
+		UPDATE execution_runs er
+		SET state = 'reconciling', reconcile_after = now()
+		FROM unified_jobs uj
+		WHERE uj.current_run_id = er.id
+		  AND uj.status = 'queued'
+		  AND uj.created_at < now() - $1::interval
+		  AND er.runner_host_id IS NOT NULL
+		  AND er.state <> 'reconciling' AND NOT run_is_terminal(er.state)`,
+		fmt.Sprintf("%d seconds", int(queuedTimeout.Seconds())),
+	); err != nil {
+		logger.Error("park stuck remote queued runs failed", "err", err)
+	} else if rows, _ := rec.RowsAffected(); rows > 0 {
+		RunsReconciling.Add(float64(rows))
+		logger.Info("parked stuck remote queued runs for reconciliation", "count", rows)
+	}
+
+	// 2b. A queued job with NO runner host was never dispatched to a target (a
+	// genuine stuck-in-queue). With the durable outbox this is rare, but it's a safety
+	// net and is safe to fail — there is no host holding a hidden outcome.
 	result, err = s.DB.ExecContext(ctx, `
 		WITH stuck AS (
 			UPDATE unified_jobs uj
@@ -473,6 +497,9 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 			WHERE uj.status = 'queued'
 			  AND uj.current_run_id IS NOT NULL
 			  AND uj.created_at < now() - $1::interval
+			  AND NOT EXISTS (
+			      SELECT 1 FROM execution_runs er
+			      WHERE er.id = uj.current_run_id AND er.runner_host_id IS NOT NULL)
 			RETURNING uj.current_run_id
 		)
 		UPDATE execution_runs er
@@ -485,7 +512,7 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	if err != nil {
 		logger.Error("reconcile stuck queued jobs failed", "err", err)
 	} else if rows, _ := result.RowsAffected(); rows > 0 {
-		logger.Warn("marked queued jobs as failed (never started)", "count", rows)
+		logger.Warn("marked queued jobs as failed (never dispatched, no host)", "count", rows)
 	}
 
 	// Void any still-pending outbox row whose run is already terminal. Without

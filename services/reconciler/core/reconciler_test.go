@@ -1,6 +1,8 @@
 package core
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -94,5 +96,48 @@ func TestBackoffDelay(t *testing.T) {
 		if got := backoffDelay(c.attempts, max); got != c.want {
 			t.Fatalf("backoffDelay(%d) = %s, want %s", c.attempts, got, c.want)
 		}
+	}
+}
+
+// TestIsTerminalIncludesCanceled guards Bug D: the host-runner writes 'canceled'
+// as a terminal state, so the reconciler must finalize from it — otherwise a
+// canceled run is never resolved from its harvested WAL.
+func TestIsTerminalIncludesCanceled(t *testing.T) {
+	for _, s := range []string{"successful", "failed", "canceled"} {
+		if !isTerminal(s) {
+			t.Errorf("isTerminal(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"running", "reconciling", "pending", ""} {
+		if isTerminal(s) {
+			t.Errorf("isTerminal(%q) = true, want false", s)
+		}
+	}
+}
+
+// TestHarvestSendsInternalToken guards Bug A: harvest POSTs must carry the internal
+// token, or ingestion's runTokenAuth rejects them 401 and no WAL is ever recovered.
+func TestHarvestSendsInternalToken(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r := &Reconciler{Client: srv.Client(), InternalToken: "sekret"}
+	if err := r.postJSON(srv.URL, map[string]string{"x": "y"}); err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+	if gotAuth != "Bearer sekret" {
+		t.Fatalf("Authorization = %q, want %q", gotAuth, "Bearer sekret")
+	}
+
+	// And with no token set, no header is sent (the WARN path), not a stale one.
+	gotAuth = "unset"
+	r2 := &Reconciler{Client: srv.Client()}
+	_ = r2.postJSON(srv.URL, map[string]string{})
+	if gotAuth != "" {
+		t.Fatalf("Authorization with no token = %q, want empty", gotAuth)
 	}
 }

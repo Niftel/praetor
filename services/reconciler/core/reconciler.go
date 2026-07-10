@@ -42,23 +42,27 @@ type Reconciler struct {
 	Interval time.Duration
 	Client   *http.Client
 
-	Batch       int           // runs processed per tick
-	MaxAttempts int           // unproductive attempts before declaring a run lost
-	MaxBackoff  time.Duration // cap on the retry interval
+	// InternalToken authenticates the harvest POSTs to ingestion's run-scoped
+	// endpoints (events/logs/heartbeat live behind runTokenAuth, which accepts the
+	// internal token; see cmd/ingestion/main.go). Without it every harvest 401s and
+	// the WAL never lands — the exact bug that made recovered runs look "lost".
+	InternalToken string
+
+	Batch      int           // runs processed per tick
+	MaxBackoff time.Duration // cap on the retry interval
 
 	stop chan struct{}
 }
 
 func NewReconciler(db *sqlx.DB, interval time.Duration, apiURL string) *Reconciler {
 	return &Reconciler{
-		DB:          db,
-		APIURL:      apiURL,
-		Interval:    interval,
-		Client:      &http.Client{Timeout: 15 * time.Second},
-		Batch:       10,
-		MaxAttempts: 15,
-		MaxBackoff:  5 * time.Minute,
-		stop:        make(chan struct{}),
+		DB:         db,
+		APIURL:     apiURL,
+		Interval:   interval,
+		Client:     &http.Client{Timeout: 15 * time.Second},
+		Batch:      10,
+		MaxBackoff: 5 * time.Minute,
+		stop:       make(chan struct{}),
 	}
 }
 
@@ -118,7 +122,9 @@ func (r *Reconciler) tick() {
 func (r *Reconciler) processRun(ctx context.Context, c candidate) {
 	client, sudo, err := r.connect(ctx, c)
 	if err != nil {
-		r.backoff(ctx, c, "connect: "+err.Error())
+		// Host unreachable is transient by assumption — the run may still hold the
+		// authoritative WAL. Keep probing; never declare it lost from here.
+		r.reschedule(ctx, c, "connect: "+err.Error())
 		return
 	}
 	defer client.Close()
@@ -145,7 +151,10 @@ func (r *Reconciler) processRun(ctx context.Context, c candidate) {
 	// projection error we back off and retry rather than advancing state.
 	newSeq, err := r.projectEvents(ctx, client, sudo, jobDir, c)
 	if err != nil {
-		r.backoff(ctx, c, "project events: "+err.Error())
+		// Control-plane-side failure (ingestion down / 401): the WAL is intact on the
+		// host, we just couldn't deliver it. Keep the run in 'reconciling' and retry —
+		// this is what makes an ingestion outage of ANY length non-fatal.
+		r.reschedule(ctx, c, "project events: "+err.Error())
 		return
 	}
 	if err := r.projectLogs(ctx, client, sudo, jobDir, c.RunID); err != nil {
@@ -165,7 +174,12 @@ func (r *Reconciler) processRun(ctx context.Context, c candidate) {
 		r.advance(ctx, c, newSeq)
 		return
 	}
-	r.backoff(ctx, c, "reachable but no progress and no terminal status")
+	// Reachable, job dir present, no new events, no terminal status: the play is
+	// either still running (slow/quiet task) or the runner died mid-play. Either way
+	// we don't know the outcome, so we keep probing rather than guessing lost. (A
+	// reconciler-driven re-invocation of a dead runner is the follow-up that resolves
+	// the died-mid-play case; until then this holds the run safely, never lies.)
+	r.reschedule(ctx, c, "reachable but no progress and no terminal status")
 }
 
 // connect resolves the SSH identity for a run the same way the executor did (host
@@ -300,22 +314,23 @@ func (r *Reconciler) advance(ctx context.Context, c candidate, newSeq int64) {
 	ReconcileOutcomes.WithLabelValues("still_running").Inc()
 }
 
-// backoff schedules the next attempt with exponential delay, giving up (marking
-// the run lost) once MaxAttempts unproductive tries have elapsed.
-func (r *Reconciler) backoff(ctx context.Context, c candidate, reason string) {
+// reschedule parks the run for another attempt with exponential-but-capped delay.
+// It NEVER gives up: a run is declared lost only on positive proof the result is
+// gone (the job dir missing on a reachable host — see processRun), never because a
+// transient outage — of ANY duration — kept us from harvesting. A host that stays
+// unreachable, or a control plane that stays down, simply keeps this run in
+// 'reconciling' and re-probes at MaxBackoff until it can be resolved. attempts only
+// drives the backoff curve now, not a give-up verdict.
+func (r *Reconciler) reschedule(ctx context.Context, c candidate, reason string) {
 	attempts := c.Attempts + 1
 	ReconcileAttempts.Inc()
-	if attempts >= r.MaxAttempts {
-		r.markLost(ctx, c, fmt.Sprintf("gave up after %d attempts (%s)", attempts, reason))
-		return
-	}
 	delay := backoffDelay(attempts, r.MaxBackoff)
-	logger.Info("run retry scheduled", "run_id", c.RunID, "attempt", attempts, "delay", delay, "reason", reason)
+	logger.Info("run recovery retry scheduled", "run_id", c.RunID, "attempt", attempts, "delay", delay, "reason", reason)
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE execution_runs
 		SET reconcile_attempts = $2, reconcile_after = now() + ($3 || ' seconds')::interval
 		WHERE id = $1`, c.RunID, attempts, strconv.Itoa(int(delay.Seconds()))); err != nil {
-		logger.Error("backoff run failed", "run_id", c.RunID, "err", err)
+		logger.Error("reschedule run failed", "run_id", c.RunID, "err", err)
 	}
 }
 
@@ -360,6 +375,12 @@ func (r *Reconciler) postBytes(url string, data []byte) error {
 }
 
 func (r *Reconciler) do(req *http.Request) error {
+	// The run-scoped ingestion endpoints require auth (runTokenAuth). The internal
+	// token is accepted for any run, which is exactly what a control-plane harvester
+	// needs. Without this header every POST is rejected 401.
+	if r.InternalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+r.InternalToken)
+	}
 	resp, err := r.Client.Do(req)
 	if err != nil {
 		return err
@@ -373,8 +394,12 @@ func (r *Reconciler) do(req *http.Request) error {
 
 // --- pure helpers (unit-tested) ---
 
-// isTerminal reports whether a status.json state is a finished outcome.
-func isTerminal(state string) bool { return state == "successful" || state == "failed" }
+// isTerminal reports whether a status.json state is a finished outcome. Must match
+// the states the host-runner writes as terminal (main.go writeTerminal), including
+// canceled — otherwise a canceled run is never finalized from its WAL.
+func isTerminal(state string) bool {
+	return state == "successful" || state == "failed" || state == "canceled"
+}
 
 // filterNewEvents parses an events.jsonl blob and returns the records with
 // seq > persisted (to project) plus the highest seq seen across the whole log

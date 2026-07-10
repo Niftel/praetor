@@ -50,6 +50,14 @@ func main() {
 	metrics.Serve("")
 
 	rec := core.NewReconciler(database, interval, apiURL)
+	// Harvest POSTs hit ingestion's run-scoped endpoints, which require auth. The
+	// internal token is accepted for any run (see cmd/ingestion runTokenAuth); without
+	// it every harvest is rejected 401 and recovered runs are falsely declared lost.
+	if tok := env.String("PRAETOR_INTERNAL_TOKEN", ""); tok != "" {
+		rec.InternalToken = tok
+	} else {
+		log.Println("WARNING: PRAETOR_INTERNAL_TOKEN unset — WAL harvest POSTs will be rejected 401 and runs cannot be recovered")
+	}
 	go rec.Start()
 
 	sigs := make(chan os.Signal, 1)
