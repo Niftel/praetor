@@ -115,6 +115,70 @@ func TestIsTerminalIncludesCanceled(t *testing.T) {
 	}
 }
 
+// TestReconcileSchedule verifies the hot→cold demotion cadence: a run stays on the
+// exponential-capped hot backoff until it has failed ColdAfterAttempts consecutive
+// probes, then is demoted to the flat cold cadence. Crucially the helper only ever
+// returns "hot" or "cold" — never a lost verdict — so persistent failure can slow a
+// run down but can NEVER declare it lost (that requires positive proof in markLost).
+func TestReconcileSchedule(t *testing.T) {
+	const coldAfter = 10
+	hotMax := 5 * time.Minute
+	cold := time.Hour
+
+	cases := []struct {
+		attempts  int
+		wantDelay time.Duration
+		wantTier  string
+	}{
+		{1, 60 * time.Second, "hot"},  // early: exponential backoff, hot
+		{3, 240 * time.Second, "hot"}, // still hot
+		{9, hotMax, "hot"},            // last hot attempt (capped)
+		{10, cold, "cold"},            // demotion boundary
+		{50, cold, "cold"},            // stays cold, flat cadence
+	}
+	for _, c := range cases {
+		gotDelay, gotTier := reconcileSchedule(c.attempts, coldAfter, hotMax, cold)
+		if gotDelay != c.wantDelay || gotTier != c.wantTier {
+			t.Errorf("reconcileSchedule(%d) = (%s, %q), want (%s, %q)",
+				c.attempts, gotDelay, gotTier, c.wantDelay, c.wantTier)
+		}
+		if gotTier != "hot" && gotTier != "cold" {
+			t.Errorf("reconcileSchedule(%d) returned tier %q — must never be a lost verdict", c.attempts, gotTier)
+		}
+	}
+}
+
+// TestReconcileScheduleDemotionDisabled: ColdAfterAttempts=0 keeps every run hot,
+// however many times it fails — an escape hatch that reverts to the old behaviour.
+func TestReconcileScheduleDemotionDisabled(t *testing.T) {
+	for _, attempts := range []int{1, 10, 100, 1000} {
+		delay, tier := reconcileSchedule(attempts, 0, 5*time.Minute, time.Hour)
+		if tier != "hot" {
+			t.Errorf("attempts=%d with demotion disabled: tier=%q, want hot", attempts, tier)
+		}
+		if delay > 5*time.Minute {
+			t.Errorf("attempts=%d: delay=%s exceeds hot cap", attempts, delay)
+		}
+	}
+}
+
+// TestJitterBounds: the re-arm interval stays within [interval, interval+~17%] so K
+// replicas spread their ticks without ever stalling past ~one extra sixth of a cycle.
+func TestJitterBounds(t *testing.T) {
+	r := &Reconciler{Interval: 30 * time.Second}
+	for i := 0; i < 200; i++ {
+		d := r.jitter()
+		if d < r.Interval || d > r.Interval+r.Interval/6+time.Nanosecond {
+			t.Fatalf("jitter() = %s, out of [%s, %s]", d, r.Interval, r.Interval+r.Interval/6)
+		}
+	}
+	// A zero/unset interval must not panic (rand.Int63n(0) would) and falls back.
+	z := &Reconciler{Interval: 0}
+	if got := z.jitter(); got != 30*time.Second {
+		t.Fatalf("jitter() with zero interval = %s, want 30s fallback", got)
+	}
+}
+
 // TestHarvestSendsInternalToken guards Bug A: harvest POSTs must carry the internal
 // token, or ingestion's runTokenAuth rejects them 401 and no WAL is ever recovered.
 func TestHarvestSendsInternalToken(t *testing.T) {

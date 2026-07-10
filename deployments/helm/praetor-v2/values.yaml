@@ -140,8 +140,16 @@ consumer:
   extraEnv: []
 
 reconciler:
+  # Safe to scale >1: candidates are claimed with FOR UPDATE SKIP LOCKED and leased
+  # via reconcile_after, so K replicas never double-harvest the same run. Throughput
+  # is replicas × concurrency.
   replicas: 1
-  interval: "30s"
+  interval: "30s"          # RECONCILE_INTERVAL — hot-sweep cadence
+  batch: 10                # RECONCILE_BATCH — candidates claimed per tick per replica
+  concurrency: 5           # RECONCILE_CONCURRENCY — parallel harvests per tick
+  claimTTL: "3m"           # RECONCILE_CLAIM_TTL — lease length; must exceed one batch wave's harvest time
+  coldAfterAttempts: 10    # RECONCILE_COLD_AFTER_ATTEMPTS — consecutive failures before demotion to the cold tier (0 disables)
+  coldBackoff: "1h"        # RECONCILE_COLD_BACKOFF — cold-tier (probably-dead host) re-probe cadence
   resources: {}
   podAnnotations: {}
   extraEnv: []
