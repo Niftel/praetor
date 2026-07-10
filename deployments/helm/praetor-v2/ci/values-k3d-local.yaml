@@ -22,10 +22,13 @@ executor:
 gitea:
   internalUrl: http://host.k3d.internal:3002
 hostRunner:
-  # In-cluster ingestion service: the demo sandbox host-runner runs inside the
-  # cluster and cannot resolve the external ingest.* host, so it reports back here.
-  # (Was ingest.praetor.local, which is unreachable in-cluster.)
-  callbackUrl: http://praetor-ingestion:8081
+  # Host-runner callback. Uses the Docker Desktop host IP (192.168.65.254) so it is
+  # reachable from BOTH in-cluster targets (via host.k3d.internal) AND host-based
+  # Docker target containers like the RHEL 9 home lab (via host.docker.internal) —
+  # both resolve to this same host IP. Requires ingestion exposed on the host at
+  # :8081 (kubectl port-forward --address 0.0.0.0 svc/praetor-ingestion 8081:8081).
+  # In-cluster-only setups can use http://praetor-ingestion:8081 instead.
+  callbackUrl: http://192.168.65.254:8081
 image:
   pullPolicy: IfNotPresent
   registry: ""
