@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -111,12 +112,30 @@ func runJob(jobDir, apiURL, runID string) error {
 			hbDone <- true
 			log.Println("Waiting for syncers to finish...")
 			time.Sleep(100 * time.Millisecond)
+			// The play is done and its WAL on disk holds every event + the terminal
+			// status. Keep the syncers running until that WAL is fully delivered to the
+			// control plane (or a bounded deadline) so an ingestion outage during/after
+			// the run doesn't strand the result — delivery is part of the job.
+			waitForDelivery(jobDir, syncDrainDeadline)
 			done <- true
 			logDone <- true
 			<-finished
 			<-logFinished
-			log.Println("Syncers finished.")
+			if jobDelivered(jobDir) {
+				log.Println("Syncers finished; results delivered.")
+			} else {
+				log.Printf("Syncers stopping with results NOT yet delivered after %s — a resume will re-deliver from the WAL.", syncDrainDeadline)
+			}
 		}()
+	}
+
+	// A job whose status.json is already terminal ran to completion in a prior
+	// invocation; do NOT re-run the play (that would re-execute tasks). Just let the
+	// syncers above drain its persisted WAL. This is the recovery path for a run that
+	// finished while ingestion was unreachable and is now being re-driven.
+	if isTerminalStatus(jobDir) {
+		log.Printf("job %s already terminal — delivering persisted results without re-running", jobDir)
+		return nil
 	}
 
 	return NewRunner(jobDir, apiURL).Execute(ctx)
@@ -167,9 +186,9 @@ func resumeAll(root string) {
 	log.Printf("resume: scan complete (%d job(s) resumed)", resumed)
 }
 
-// isComplete reports whether a job already reached a terminal state, per its
-// status.json. A missing or non-terminal status means the job was interrupted.
-func isComplete(jobDir string) bool {
+// isTerminalStatus reports whether the play itself reached a terminal state, per
+// status.json. A missing or non-terminal status means the play was interrupted.
+func isTerminalStatus(jobDir string) bool {
 	data, err := os.ReadFile(filepath.Join(jobDir, "status.json"))
 	if err != nil {
 		return false
@@ -185,6 +204,62 @@ func isComplete(jobDir string) bool {
 		return true
 	}
 	return false
+}
+
+// isComplete reports whether a job is fully done: it both reached a terminal state
+// AND delivered its results (events + logs) to the control plane. A terminal-but-
+// undelivered job — one that finished while ingestion was unreachable — is NOT
+// complete, so resumeAll re-drives its syncers rather than stranding the outcome.
+// Delivery is part of the job the pushed engine owns, not a best-effort side effect:
+// losing ingestion must never lose a job's result, only delay when it is reported.
+func isComplete(jobDir string) bool {
+	return isTerminalStatus(jobDir) && jobDelivered(jobDir)
+}
+
+// delivered reports whether a WAL file has been fully shipped: its persisted sync
+// cursor has reached the file's end. A missing WAL counts as delivered (nothing to
+// ship). Compares on-disk cursor vs WAL size, so it is race-free w.r.t. the syncer.
+func delivered(walPath, cursorPath string) bool {
+	fi, err := os.Stat(walPath)
+	if err != nil {
+		return true
+	}
+	var off int64
+	if data, rerr := os.ReadFile(cursorPath); rerr == nil {
+		_, _ = fmt.Sscanf(string(data), "%d", &off)
+	}
+	return off >= fi.Size()
+}
+
+// jobDelivered reports whether both the event WAL (events.jsonl) and the stdout log
+// (stdout.log) have been fully synced to the control plane.
+func jobDelivered(jobDir string) bool {
+	return delivered(filepath.Join(jobDir, "events.jsonl"), filepath.Join(jobDir, "events.cursor")) &&
+		delivered(filepath.Join(jobDir, "stdout.log"), filepath.Join(jobDir, "stdout.cursor"))
+}
+
+// syncDrainDeadline bounds how long a finished runner keeps retrying delivery of its
+// WAL through an ingestion outage before exiting. A boot-time resume (or any later
+// re-invocation) re-drives anything still undelivered, so this only needs to be long
+// enough to ride out a routine blip/restart without leaving a zombie forever.
+const syncDrainDeadline = 30 * time.Minute
+
+// waitForDelivery blocks until the job's WAL is fully synced or the deadline
+// elapses, while the still-running syncer goroutines keep flushing. It returns
+// immediately when nothing is outstanding, so a healthy run pays no penalty.
+func waitForDelivery(jobDir string, deadline time.Duration) {
+	if jobDelivered(jobDir) {
+		return
+	}
+	log.Printf("results not yet delivered (ingestion unreachable?); retrying for up to %s", deadline)
+	stop := time.Now().Add(deadline)
+	for time.Now().Before(stop) {
+		time.Sleep(time.Second)
+		if jobDelivered(jobDir) {
+			log.Println("results delivered.")
+			return
+		}
+	}
 }
 
 func writeRunnerMeta(jobDir string, m runnerMeta) {
