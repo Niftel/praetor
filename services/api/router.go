@@ -242,6 +242,10 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Get("/workflow-jobs/{id}", wf.GetWorkflowJob)
 		r.Post("/workflow-job-nodes/{id}/approve", wf.ApproveNode)
 		r.Post("/workflow-job-nodes/{id}/deny", wf.DenyNode)
+		// Workflow-level notification attachments (success | error | approval).
+		r.Get("/workflow-templates/{id}/notifications", wf.ListWorkflowNotifications)
+		r.Post("/workflow-templates/{id}/notifications", wf.AttachWorkflowNotification)
+		r.Delete("/workflow-templates/{id}/notifications/{ntId}/{event}", wf.DetachWorkflowNotification)
 
 		// Triggers: event triggers (job outcome -> launch) + webhook trigger surface
 		r.Mount("/triggers", handlers.NewTriggersResource(db).Routes())

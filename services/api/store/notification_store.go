@@ -91,3 +91,33 @@ func (s *NotificationStore) DetachFromJobTemplate(ctx context.Context, jobTempla
 		jobTemplateID, notificationTemplateID, event)
 	return wrap("NotificationStore.DetachFromJobTemplate", err)
 }
+
+// WorkflowTemplateAttachments lists the notifications attached to a workflow
+// template (same row shape as job-template attachments).
+func (s *NotificationStore) WorkflowTemplateAttachments(ctx context.Context, workflowTemplateID int64) ([]JobTemplateNotification, error) {
+	rows := []JobTemplateNotification{}
+	err := s.db.SelectContext(ctx, &rows, `
+		SELECT wtn.notification_template_id, nt.name, nt.notification_type, wtn.event
+		FROM workflow_template_notifications wtn
+		JOIN notification_templates nt ON nt.id = wtn.notification_template_id
+		WHERE wtn.workflow_template_id = $1
+		ORDER BY wtn.event, nt.name`, workflowTemplateID)
+	return rows, wrap("NotificationStore.WorkflowTemplateAttachments", err)
+}
+
+// AttachToWorkflowTemplate attaches a notification to a workflow template for an
+// event (idempotent).
+func (s *NotificationStore) AttachToWorkflowTemplate(ctx context.Context, workflowTemplateID, notificationTemplateID int64, event string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO workflow_template_notifications (workflow_template_id, notification_template_id, event)
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, workflowTemplateID, notificationTemplateID, event)
+	return wrap("NotificationStore.AttachToWorkflowTemplate", err)
+}
+
+// DetachFromWorkflowTemplate removes a workflow-template notification attachment.
+func (s *NotificationStore) DetachFromWorkflowTemplate(ctx context.Context, workflowTemplateID, notificationTemplateID int64, event string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM workflow_template_notifications WHERE workflow_template_id=$1 AND notification_template_id=$2 AND event=$3`,
+		workflowTemplateID, notificationTemplateID, event)
+	return wrap("NotificationStore.DetachFromWorkflowTemplate", err)
+}

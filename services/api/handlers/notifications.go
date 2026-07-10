@@ -25,6 +25,9 @@ type NotificationStore interface {
 	JobTemplateAttachments(ctx context.Context, jobTemplateID int64) ([]store.JobTemplateNotification, error)
 	AttachToJobTemplate(ctx context.Context, jobTemplateID, notificationTemplateID int64, event string) error
 	DetachFromJobTemplate(ctx context.Context, jobTemplateID, notificationTemplateID int64, event string) error
+	WorkflowTemplateAttachments(ctx context.Context, workflowTemplateID int64) ([]store.JobTemplateNotification, error)
+	AttachToWorkflowTemplate(ctx context.Context, workflowTemplateID, notificationTemplateID int64, event string) error
+	DetachFromWorkflowTemplate(ctx context.Context, workflowTemplateID, notificationTemplateID int64, event string) error
 }
 
 // NotificationsResource is the self-contained notification-templates domain
@@ -195,6 +198,68 @@ func (rs *TemplatesResource) DetachJobTemplateNotification(w http.ResponseWriter
 	}
 	event := chi.URLParam(r, "event")
 	if err := rs.notifications.DetachFromJobTemplate(r.Context(), jtID, ntID, event); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListWorkflowNotifications GET /api/v1/workflow-templates/{id}/notifications
+func (rs *WorkflowsResource) ListWorkflowNotifications(w http.ResponseWriter, r *http.Request) {
+	wtID := render.GetIDParam(r)
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, wtID, actRead) {
+		return
+	}
+	rows, err := rs.notifications.WorkflowTemplateAttachments(r.Context(), wtID)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, rows)
+}
+
+// AttachWorkflowNotification POST /api/v1/workflow-templates/{id}/notifications.
+// A workflow fires 'success'/'error' on terminal state and 'approval' when one of
+// its approval nodes starts waiting.
+func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
+	wtID := render.GetIDParam(r)
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, wtID, actAdmin) {
+		return
+	}
+	var body struct {
+		NotificationTemplateID int64  `json:"notification_template_id"`
+		Event                  string `json:"event"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NotificationTemplateID == 0 {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	switch body.Event {
+	case "success", "error", "approval":
+	default:
+		render.ErrInvalidRequest(fmt.Errorf("event must be success|error|approval")).Render(w, r)
+		return
+	}
+	if err := rs.notifications.AttachToWorkflowTemplate(r.Context(), wtID, body.NotificationTemplateID, body.Event); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DetachWorkflowNotification DELETE /api/v1/workflow-templates/{id}/notifications/{ntId}/{event}
+func (rs *WorkflowsResource) DetachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
+	wtID := render.GetIDParam(r)
+	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, wtID, actAdmin) {
+		return
+	}
+	ntID, err := strconv.ParseInt(chi.URLParam(r, "ntId"), 10, 64)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	event := chi.URLParam(r, "event")
+	if err := rs.notifications.DetachFromWorkflowTemplate(r.Context(), wtID, ntID, event); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
