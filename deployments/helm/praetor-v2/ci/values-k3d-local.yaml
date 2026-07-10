@@ -39,6 +39,12 @@ scheduler:
   # Lab: recover fast. A remote job whose result never reached ingestion is handed
   # to the reconciler after 90s instead of the 10m prod default.
   reconcileQueuedTimeout: "90s"
+reconciler:
+  # HA: two replicas, safe because candidates are claimed with FOR UPDATE SKIP LOCKED
+  # and leased via reconcile_after — the two pods partition each batch, never
+  # double-harvest. Throughput is replicas × concurrency. Defaults for the other
+  # tunables (batch/concurrency/claimTTL/cold*) come from the chart.
+  replicas: 2
 ingress:
   className: traefik
   enabled: true

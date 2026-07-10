@@ -12,18 +12,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/praetordev/praetor/pkg/plog"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"github.com/praetordev/praetor/pkg/credentials"
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/hostconn"
+	"github.com/praetordev/praetor/pkg/plog"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -48,36 +51,71 @@ type Reconciler struct {
 	// the WAL never lands — the exact bug that made recovered runs look "lost".
 	InternalToken string
 
-	Batch      int           // runs processed per tick
-	MaxBackoff time.Duration // cap on the retry interval
+	Batch      int           // candidates claimed per tick
+	MaxBackoff time.Duration // cap on the hot-tier retry interval
+
+	// Concurrency bounds how many claimed candidates a single replica harvests in
+	// parallel within a tick. Harvest is network-bound (SSH RTT + sudo cat + chunked
+	// POSTs), so this multiplies throughput without meaningful CPU cost.
+	Concurrency int
+
+	// ClaimTTL is how far forward a claim pushes reconcile_after, leasing the run to
+	// this replica. It must exceed the worst-case time to harvest one batch wave; if
+	// a pod dies mid-harvest the lease simply lapses and the run comes due again, so
+	// crash recovery costs no extra code. See tick() / claim().
+	ClaimTTL time.Duration
+
+	// ColdAfterAttempts is the consecutive-failure count at which a run is demoted
+	// from the 30s hot sweep to the ColdBackoff cadence, so a permanently-unreachable
+	// host stops diluting throughput for recoverable runs. Demotion is a cadence
+	// change only — it NEVER declares a run lost. See reschedule().
+	ColdAfterAttempts int
+	ColdBackoff       time.Duration
 
 	stop chan struct{}
 }
 
 func NewReconciler(db *sqlx.DB, interval time.Duration, apiURL string) *Reconciler {
 	return &Reconciler{
-		DB:         db,
-		APIURL:     apiURL,
-		Interval:   interval,
-		Client:     &http.Client{Timeout: 15 * time.Second},
-		Batch:      10,
-		MaxBackoff: 5 * time.Minute,
-		stop:       make(chan struct{}),
+		DB:                db,
+		APIURL:            apiURL,
+		Interval:          interval,
+		Client:            &http.Client{Timeout: 15 * time.Second},
+		Batch:             10,
+		MaxBackoff:        5 * time.Minute,
+		Concurrency:       5,
+		ClaimTTL:          3 * time.Minute,
+		ColdAfterAttempts: 10,
+		ColdBackoff:       time.Hour,
+		stop:              make(chan struct{}),
 	}
 }
 
 func (r *Reconciler) Start() {
-	logger.Info("reconciler started", "interval", r.Interval, "api", r.APIURL)
-	ticker := time.NewTicker(r.Interval)
-	defer ticker.Stop()
+	logger.Info("reconciler started", "interval", r.Interval, "api", r.APIURL,
+		"batch", r.Batch, "concurrency", r.Concurrency, "claim_ttl", r.ClaimTTL)
+	// Re-arm with a fresh jittered interval each tick so K replicas don't fall into
+	// lockstep and contend on the same candidates every cycle. SKIP LOCKED already
+	// makes a collision harmless; the jitter just spreads the DB load.
+	timer := time.NewTimer(r.jitter())
+	defer timer.Stop()
 	for {
 		select {
 		case <-r.stop:
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			r.tick()
+			timer.Reset(r.jitter())
 		}
 	}
+}
+
+// jitter returns the base interval plus up to ~15% random spread.
+func (r *Reconciler) jitter() time.Duration {
+	if r.Interval <= 0 {
+		return 30 * time.Second
+	}
+	return r.Interval + time.Duration(rand.Int63n(int64(r.Interval/6)+1))
 }
 
 func (r *Reconciler) Stop() { close(r.stop) }
@@ -97,6 +135,76 @@ type candidate struct {
 func (r *Reconciler) tick() {
 	defer func(start time.Time) { ReconcileTick.Observe(time.Since(start).Seconds()) }(time.Now())
 	ctx := context.Background()
+
+	ids, err := r.claim(ctx)
+	if err != nil {
+		logger.Error("claim query failed", "err", err)
+		return
+	}
+	if len(ids) == 0 {
+		return
+	}
+	cs, err := r.hydrate(ctx, ids)
+	if err != nil {
+		logger.Error("hydrate candidates failed", "err", err)
+		return
+	}
+
+	// Harvest the claimed batch in parallel, bounded by Concurrency. Each processRun
+	// uses its own SSH client and the shared (goroutine-safe) sqlx pool + http.Client,
+	// so no per-run state is shared. The tick stays synchronous (wg.Wait) — the ticker
+	// cadence is the natural re-entry guard.
+	sem := make(chan struct{}, r.Concurrency)
+	var wg sync.WaitGroup
+	for _, c := range cs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(c candidate) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			// Bound a single harvest so a wedged run can't be held past its lease; the
+			// deadline sits just inside ClaimTTL so another replica may safely re-claim.
+			rctx, cancel := context.WithTimeout(ctx, r.ClaimTTL-15*time.Second)
+			defer cancel()
+			r.processRun(rctx, c)
+		}(c)
+	}
+	wg.Wait()
+}
+
+// claim atomically leases up to Batch due 'reconciling' runs to THIS replica by
+// pushing their reconcile_after forward by ClaimTTL under FOR UPDATE SKIP LOCKED,
+// and returns the claimed run ids. Because reconcile_after is the same cell the
+// candidate scan filters on, the claim itself is the lease: a claimed run is
+// invisible to every other replica until it comes due again (either sooner, when
+// processRun writes its verdict, or at TTL lapse if this pod dies mid-harvest).
+// Hot-tier runs are ordered ahead of cold so a due cold run can never starve the
+// hot set. FOR UPDATE OF er confines the row locks to execution_runs (not hosts).
+func (r *Reconciler) claim(ctx context.Context) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.DB.SelectContext(ctx, &ids, `
+		WITH due AS (
+			SELECT er.id
+			FROM execution_runs er
+			JOIN hosts h ON h.id = er.runner_host_id
+			WHERE er.state = 'reconciling'
+			  AND (er.reconcile_after IS NULL OR er.reconcile_after <= now())
+			ORDER BY (er.reconcile_tier = 'hot') DESC, er.reconcile_after NULLS FIRST
+			LIMIT $1
+			FOR UPDATE OF er SKIP LOCKED
+		)
+		UPDATE execution_runs er
+		SET reconcile_after = now() + ($2 || ' seconds')::interval
+		FROM due
+		WHERE er.id = due.id
+		RETURNING er.id`, r.Batch, strconv.Itoa(int(r.ClaimTTL.Seconds())))
+	return ids, err
+}
+
+// hydrate loads the full candidate rows for a set of claimed ids, resolving the
+// host and the job's credential needed to reach it. Ordering is irrelevant here —
+// the batch is already claimed; claim() applied the hot-before-cold priority.
+func (r *Reconciler) hydrate(ctx context.Context, ids []uuid.UUID) ([]candidate, error) {
 	var cs []candidate
 	err := r.DB.SelectContext(ctx, &cs, `
 		SELECT er.id, er.unified_job_id, er.persisted_event_seq,
@@ -106,17 +214,8 @@ func (r *Reconciler) tick() {
 		JOIN hosts h ON h.id = er.runner_host_id
 		JOIN unified_jobs uj ON uj.id = er.unified_job_id
 		LEFT JOIN job_templates jt ON jt.unified_job_template_id = uj.unified_job_template_id
-		WHERE er.state = 'reconciling'
-		  AND (er.reconcile_after IS NULL OR er.reconcile_after <= now())
-		ORDER BY er.reconcile_after NULLS FIRST
-		LIMIT $1`, r.Batch)
-	if err != nil {
-		logger.Error("candidate query failed", "err", err)
-		return
-	}
-	for _, c := range cs {
-		r.processRun(ctx, c)
-	}
+		WHERE er.id = ANY($1)`, pq.Array(ids))
+	return cs, err
 }
 
 func (r *Reconciler) processRun(ctx context.Context, c candidate) {
@@ -305,9 +404,12 @@ func (r *Reconciler) finalize(ctx context.Context, c candidate, state string, ma
 // advance records progress on a still-running job: bump persisted_event_seq,
 // reset the give-up counter, and re-check soon.
 func (r *Reconciler) advance(ctx context.Context, c candidate, newSeq int64) {
+	// Progress is evidence of life: reset the backoff counter AND promote back to the
+	// hot tier, so a run that had been demoted to the cold sweep resumes 30s cadence.
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE execution_runs
-		SET persisted_event_seq = $2, reconcile_attempts = 0, reconcile_after = now() + interval '30 seconds'
+		SET persisted_event_seq = $2, reconcile_attempts = 0,
+		    reconcile_tier = 'hot', reconcile_after = now() + interval '30 seconds'
 		WHERE id = $1`, c.RunID, newSeq); err != nil {
 		logger.Error("advance run failed", "run_id", c.RunID, "err", err)
 	}
@@ -324,14 +426,33 @@ func (r *Reconciler) advance(ctx context.Context, c candidate, newSeq int64) {
 func (r *Reconciler) reschedule(ctx context.Context, c candidate, reason string) {
 	attempts := c.Attempts + 1
 	ReconcileAttempts.Inc()
-	delay := backoffDelay(attempts, r.MaxBackoff)
-	logger.Info("run recovery retry scheduled", "run_id", c.RunID, "attempt", attempts, "delay", delay, "reason", reason)
+	delay, tier := reconcileSchedule(attempts, r.ColdAfterAttempts, r.MaxBackoff, r.ColdBackoff)
+	if tier == "cold" {
+		ReconcileDemotions.Inc()
+	}
+	logger.Info("run recovery retry scheduled", "run_id", c.RunID, "attempt", attempts, "delay", delay, "tier", tier, "reason", reason)
 	if _, err := r.DB.ExecContext(ctx, `
 		UPDATE execution_runs
-		SET reconcile_attempts = $2, reconcile_after = now() + ($3 || ' seconds')::interval
-		WHERE id = $1`, c.RunID, attempts, strconv.Itoa(int(delay.Seconds()))); err != nil {
+		SET reconcile_attempts = $2,
+		    reconcile_after = now() + ($3 || ' seconds')::interval,
+		    reconcile_tier = $4
+		WHERE id = $1`, c.RunID, attempts, strconv.Itoa(int(delay.Seconds())), tier); err != nil {
 		logger.Error("reschedule run failed", "run_id", c.RunID, "err", err)
 	}
+}
+
+// reconcileSchedule decides the next retry delay and tier for a run that just
+// failed a probe. Below coldAfter consecutive failures it stays 'hot' on the
+// exponential-capped backoff; at or beyond it, the run is demoted to 'cold' on the
+// coldBackoff cadence so a permanently-unreachable host stops consuming hot-set
+// throughput. This is purely a CADENCE decision — a run is never declared lost
+// here (that requires positive proof; see markLost). A coldAfter of 0 disables
+// demotion (everything stays hot).
+func reconcileSchedule(attempts, coldAfter int, hotMax, coldBackoff time.Duration) (time.Duration, string) {
+	if coldAfter > 0 && attempts >= coldAfter {
+		return coldBackoff, "cold"
+	}
+	return backoffDelay(attempts, hotMax), "hot"
 }
 
 // markLost declares a run unrecoverable: host is gone or persistently unreachable.

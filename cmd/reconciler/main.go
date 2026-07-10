@@ -40,16 +40,33 @@ func main() {
 	// API_URL, then the in-cluster default.
 	apiURL := env.String("INGESTION_URL", env.String("API_URL", "http://ingestion:8081"))
 
-	interval := 30 * time.Second
-	if v := env.String("RECONCILE_INTERVAL", ""); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			interval = d
-		}
+	interval := durationEnv("RECONCILE_INTERVAL")
+	if interval <= 0 {
+		interval = 30 * time.Second
 	}
 
 	metrics.Serve("")
 
 	rec := core.NewReconciler(database, interval, apiURL)
+	// Horizontal-scale + tiering tunables (all optional; NewReconciler sets sane
+	// defaults). Batch/Concurrency set per-replica throughput; ClaimTTL leases a
+	// claimed run so K replicas never double-harvest; ColdAfter/ColdBackoff move
+	// probably-dead hosts to a cheap sweep. See services/reconciler/core.
+	if n := env.Int("RECONCILE_BATCH", 0); n > 0 {
+		rec.Batch = n
+	}
+	if n := env.Int("RECONCILE_CONCURRENCY", 0); n > 0 {
+		rec.Concurrency = n
+	}
+	if n := env.Int("RECONCILE_COLD_AFTER_ATTEMPTS", -1); n >= 0 {
+		rec.ColdAfterAttempts = n
+	}
+	if d := durationEnv("RECONCILE_CLAIM_TTL"); d > 0 {
+		rec.ClaimTTL = d
+	}
+	if d := durationEnv("RECONCILE_COLD_BACKOFF"); d > 0 {
+		rec.ColdBackoff = d
+	}
 	// Harvest POSTs hit ingestion's run-scoped endpoints, which require auth. The
 	// internal token is accepted for any run (see cmd/ingestion runTokenAuth); without
 	// it every harvest is rejected 401 and recovered runs are falsely declared lost.
@@ -66,4 +83,15 @@ func main() {
 
 	log.Println("Shutting down...")
 	rec.Stop()
+}
+
+// durationEnv parses key as a Go duration (e.g. "30s", "3m", "1h"); returns 0 if
+// unset or unparseable, letting the caller apply its own default.
+func durationEnv(key string) time.Duration {
+	if v := env.String(key, ""); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return 0
 }

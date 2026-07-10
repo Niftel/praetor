@@ -23,6 +23,12 @@ data:
   # Scheduler / reconciler / executor tunables.
   JOB_RETENTION_DAYS: {{ .Values.scheduler.jobRetentionDays | quote }}
   RECONCILE_INTERVAL: {{ .Values.reconciler.interval | quote }}
+  # Reconciler horizontal-scale + cold-tier tunables (see values.yaml reconciler.*).
+  RECONCILE_BATCH: {{ .Values.reconciler.batch | default 10 | quote }}
+  RECONCILE_CONCURRENCY: {{ .Values.reconciler.concurrency | default 5 | quote }}
+  RECONCILE_CLAIM_TTL: {{ .Values.reconciler.claimTTL | default "3m" | quote }}
+  RECONCILE_COLD_AFTER_ATTEMPTS: {{ .Values.reconciler.coldAfterAttempts | default 10 | quote }}
+  RECONCILE_COLD_BACKOFF: {{ .Values.reconciler.coldBackoff | default "1h" | quote }}
   # How long a remote job may sit queued (never reported) before the scheduler hands
   # it to the pull-based reconciler. Lower = faster automatic recovery when the
   # host-runner's push can't reach ingestion; the reconciler then harvests the WAL.
