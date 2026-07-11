@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -63,7 +61,6 @@ func main() {
 		seedCredentialTypes(database)
 		seedRBACPermissions(database)
 		seedManagedRoleDefinitions(database)
-		seedBackfill(database)
 		seedBootstrapAdmin(database)
 		log.Println("Migration complete (baselined).")
 		return
@@ -91,7 +88,6 @@ func main() {
 	// Seed the DAB capability catalog + managed-mirror role definitions (idempotent).
 	seedRBACPermissions(database)
 	seedManagedRoleDefinitions(database)
-	seedBackfill(database)
 
 	// Optionally ensure a break-glass local superuser (opt-in via env).
 	seedBootstrapAdmin(database)
@@ -167,21 +163,6 @@ func seedManagedRoleDefinitions(database *sqlx.DB) {
 		}
 	}
 	log.Printf("Seeded %d managed role definitions", len(roles))
-}
-
-// seedBackfill translates existing legacy grants into the DAB capability model (Gitea
-// #96/#97) so dual-run enforcement has assignments to check against. Idempotent — safe on
-// every migrate. No-ops if the assignment tables are absent.
-func seedBackfill(database *sqlx.DB) {
-	if !tableExists(database, "object_roles") {
-		return
-	}
-	n, err := store.NewCapabilityStore(database).BackfillFromLegacy(context.Background())
-	if err != nil {
-		log.Printf("RBAC capability backfill failed: %v", err)
-		return
-	}
-	log.Printf("RBAC capability backfill: %d assignments", n)
 }
 
 // seedBootstrapAdmin ensures a break-glass LOCAL superuser exists when

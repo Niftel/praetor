@@ -34,7 +34,6 @@ func TestProjectRBAC(t *testing.T) {
 	}
 	defer db.Close()
 
-	ctx := context.Background()
 	h := handlers.NewProjectsResource(db)
 	access := rbac.NewAccessChecker(db)
 
@@ -45,13 +44,7 @@ func TestProjectRBAC(t *testing.T) {
 	nobody := createUser(t, db, fmt.Sprintf("rbac-nobody-%d", uniq)) // no roles
 
 	// Make `admin` an administrator of org A only.
-	roleA, err := access.GetObjectRole(ctx, rbac.ContentTypeOrganization, orgA, rbac.RoleFieldAdmin)
-	if err != nil {
-		t.Fatalf("org A admin_role (trigger should have created it): %v", err)
-	}
-	if err := access.AddUserToRole(ctx, roleA.ID, admin); err != nil {
-		t.Fatalf("grant org A admin: %v", err)
-	}
+	grantObjectRole(t, access, rbac.ContentTypeOrganization, orgA, rbac.RoleFieldAdmin, admin)
 
 	adminUC := middleware.UserContext{UserID: admin, Username: "rbac-admin"}
 	nobodyUC := middleware.UserContext{UserID: nobody, Username: "rbac-nobody"}
@@ -71,7 +64,7 @@ func TestProjectRBAC(t *testing.T) {
 	}
 
 	// 3. Creator was granted admin on the new project (creator-grants-admin).
-	canAdmin, err := access.CanAdmin(ctx, admin, rbac.ContentTypeProject, projectA)
+	canAdmin, err := capCheck(access, admin, rbac.ContentTypeProject, projectA, rbac.ActionManage)
 	if err != nil || !canAdmin {
 		t.Fatalf("creator should administer the project they made: canAdmin=%v err=%v", canAdmin, err)
 	}

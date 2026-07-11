@@ -10,6 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	"github.com/praetordev/praetor/pkg/rbac"
 )
 
 // fakeResolver returns a canned identity so the mapper is testable without a live
@@ -37,16 +38,23 @@ func mapperTestDB(t *testing.T) *sqlx.DB {
 	return db
 }
 
+// objRoleMemberCount counts a user's capability assignment of the managed RoleDefinition
+// mirroring a legacy (content_type, role_field) on an object.
 func objRoleMemberCount(t *testing.T, db *sqlx.DB, ct string, objID, userID int64, field string) int {
 	t.Helper()
+	name, ok := rbac.ManagedNameForLegacy(rbac.ContentType(ct), rbac.RoleField(field))
+	if !ok {
+		t.Fatalf("no managed role for %s/%s", ct, field)
+	}
 	var n int
 	err := db.Get(&n, `
-		SELECT count(*) FROM role_members rm
-		JOIN roles r ON r.id = rm.role_id
-		WHERE r.content_type=$1 AND r.object_id=$2 AND r.role_field=$3 AND rm.user_id=$4`,
-		ct, objID, field, userID)
+		SELECT count(*) FROM role_user_assignments ua
+		JOIN object_roles orl ON orl.id = ua.object_role_id
+		JOIN role_definitions d ON d.id = ua.role_definition_id
+		WHERE orl.content_type=$1 AND orl.object_id=$2 AND d.name=$3 AND ua.user_id=$4`,
+		ct, objID, name, userID)
 	if err != nil {
-		t.Fatalf("role count: %v", err)
+		t.Fatalf("assignment count: %v", err)
 	}
 	return n
 }
@@ -156,7 +164,7 @@ func TestMapperIntegration(t *testing.T) {
 	teamGroup := "cn=plat-" + sfx + ",ou=teams,dc=x"
 
 	t.Cleanup(func() {
-		db.Exec(`DELETE FROM role_members WHERE user_id IN (SELECT id FROM users WHERE username IN ($1,$2))`, userName, localName)
+		db.Exec(`DELETE FROM role_user_assignments WHERE user_id IN (SELECT id FROM users WHERE username IN ($1,$2))`, userName, localName)
 		db.Exec(`DELETE FROM users WHERE username IN ($1,$2)`, userName, localName)
 		db.Exec(`DELETE FROM teams WHERE name=$1`, teamName)
 		db.Exec(`DELETE FROM organizations WHERE name=$1`, orgName)

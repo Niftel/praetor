@@ -14,6 +14,7 @@ import (
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
+	"github.com/praetordev/praetor/services/api/store"
 )
 
 func rbacTestDB(t *testing.T) *sqlx.DB {
@@ -29,15 +30,19 @@ func rbacTestDB(t *testing.T) *sqlx.DB {
 	return db
 }
 
+// grantObjectRole grants the mirror capability RoleDefinition for a legacy field on an
+// object (the capability model's assignment path), for test setup.
 func grantObjectRole(t *testing.T, access *rbac.AccessChecker, ct rbac.ContentType, objID int64, field rbac.RoleField, userID int64) {
 	t.Helper()
-	role, err := access.GetObjectRole(context.Background(), ct, objID, field)
-	if err != nil {
-		t.Fatalf("get %s role for %s/%d (trigger should have created it): %v", field, ct, objID, err)
-	}
-	if err := access.AddUserToRole(context.Background(), role.ID, userID); err != nil {
+	if _, err := rbac.GrantCapabilityForLegacyFields(context.Background(), access.DB, string(ct), objID, string(field), userID, true); err != nil {
 		t.Fatalf("grant %s on %s/%d to user %d: %v", field, ct, objID, userID, err)
 	}
+}
+
+// capCheck answers a capability question with the same (bool, error) shape the legacy
+// Can* checks had, so the RBAC tests read the same after the cutover.
+func capCheck(access *rbac.AccessChecker, user int64, ct rbac.ContentType, id int64, a rbac.Action) (bool, error) {
+	return store.NewCapabilityStore(access.DB).HasCapability(context.Background(), user, ct, id, rbac.Codename(ct, a))
 }
 
 // TestInventoryHostRBAC covers inventory create-scoping, the creator-admin

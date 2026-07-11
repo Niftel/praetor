@@ -322,39 +322,16 @@ func selectOrCreateTeam(ctx context.Context, tx *sqlx.Tx, orgID int64, name stri
 	return id, err
 }
 
+// grantRole grants a user the RoleDefinition mirroring a legacy org/team role_field,
+// scoped to the object, via the capability assignment tables.
 func grantRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID int64, roleField string, userID int64) error {
-	var roleID int64
-	if err := tx.GetContext(ctx, &roleID,
-		`SELECT id FROM roles WHERE content_type=$1 AND object_id=$2 AND role_field=$3`,
-		contentType, objectID, roleField); err != nil {
-		return fmt.Errorf("lookup role %s/%d/%s: %w", contentType, objectID, roleField, err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO role_members (role_id, user_id) VALUES ($1, $2) ON CONFLICT (role_id, user_id) DO NOTHING`,
-		roleID, userID); err != nil {
-		return err
-	}
-	// Dual-write the capability mirror so LDAP-granted org/team roles are enforceable
-	// under the capability model (#97/#99), not just the legacy hierarchy.
 	_, err := rbac.GrantCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
 	return err
 }
 
+// revokeRole is grantRole's inverse.
 func revokeRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID int64, roleField string, userID int64) error {
-	var roleID int64
-	err := tx.GetContext(ctx, &roleID,
-		`SELECT id FROM roles WHERE content_type=$1 AND object_id=$2 AND role_field=$3`,
-		contentType, objectID, roleField)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM role_members WHERE role_id=$1 AND user_id=$2`, roleID, userID); err != nil {
-		return err
-	}
-	_, err = rbac.RevokeCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
+	_, err := rbac.RevokeCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
 	return err
 }
 
