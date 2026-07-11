@@ -69,6 +69,20 @@ func (s *CapabilityStore) HasCapability(ctx context.Context, userID int64, conte
 	return ok, wrap("CapabilityStore.HasCapability", err)
 }
 
+// HasGlobalCapability reports whether the user holds a global (system) role whose
+// definition grants `codename` — the "see everything" tier for system roles.
+func (s *CapabilityStore) HasGlobalCapability(ctx context.Context, userID int64, codename string) (bool, error) {
+	var ok bool
+	err := s.db.GetContext(ctx, &ok, `
+		SELECT EXISTS (
+			SELECT 1 FROM object_roles orl
+			JOIN role_definition_permissions rdp ON rdp.role_definition_id = orl.role_definition_id
+			JOIN dab_permissions p ON p.id = rdp.permission_id
+			WHERE orl.content_type IS NULL AND p.codename = $2 AND `+actorHolds+`
+		)`, userID, codename)
+	return ok, wrap("CapabilityStore.HasGlobalCapability", err)
+}
+
 // AccessibleIDs returns the object ids of contentType on which the user holds `codename`
 // via the scoped tier (materialised rows). The global tier (system roles) grants every
 // object and is handled by the flag bypass during dual-run, so it is not expanded here.

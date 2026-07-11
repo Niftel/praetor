@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -62,6 +63,7 @@ func main() {
 		seedRBACPermissions(database)
 		seedManagedRoleDefinitions(database)
 		seedBootstrapAdmin(database)
+		seedSystemRoleAssignments(database)
 		log.Println("Migration complete (baselined).")
 		return
 	}
@@ -91,6 +93,9 @@ func main() {
 
 	// Optionally ensure a break-glass local superuser (opt-in via env).
 	seedBootstrapAdmin(database)
+
+	// Sync global System Administrator / Auditor assignments from the user flags.
+	seedSystemRoleAssignments(database)
 }
 
 // seedRBACPermissions upserts the DAB capability catalog (dab_permissions) from the
@@ -163,6 +168,43 @@ func seedManagedRoleDefinitions(database *sqlx.DB) {
 		}
 	}
 	log.Printf("Seeded %d managed role definitions", len(roles))
+}
+
+// seedSystemRoleAssignments keeps the global System Administrator / System Auditor
+// RoleDefinition assignments in sync with the is_superuser / is_system_auditor user flags
+// (Gitea #99 cleanup): the flags are the input, the global object-role assignment is the
+// capability-model representation enforcement reads. Idempotent — assigns matching users
+// and prunes the rest on every migrate.
+func seedSystemRoleAssignments(database *sqlx.DB) {
+	if !tableExists(database, "object_roles") || !tableExists(database, "role_definitions") {
+		return
+	}
+	ctx := context.Background()
+	syncSystemRole(ctx, database, "System Administrator", "is_superuser = true")
+	syncSystemRole(ctx, database, "System Auditor", "COALESCE(is_system_auditor, false) = true AND is_superuser = false")
+}
+
+// syncSystemRole assigns the named global role to every user matching predicate (a trusted
+// literal) and removes it from all others.
+func syncSystemRole(ctx context.Context, database *sqlx.DB, defName, predicate string) {
+	var ids []int64
+	if err := database.Select(&ids, `SELECT id FROM users WHERE `+predicate); err != nil {
+		log.Printf("system role %q: select users: %v", defName, err)
+		return
+	}
+	for _, uid := range ids {
+		if err := rbac.EnsureGlobalRole(ctx, database, defName, uid); err != nil {
+			log.Printf("system role %q: assign user %d: %v", defName, uid, err)
+		}
+	}
+	if _, err := database.Exec(`
+		DELETE FROM role_user_assignments ua USING object_roles orl, role_definitions d
+		WHERE ua.object_role_id = orl.id AND orl.role_definition_id = d.id
+		  AND d.name = $1 AND orl.content_type IS NULL
+		  AND ua.user_id NOT IN (SELECT id FROM users WHERE `+predicate+`)`, defName); err != nil {
+		log.Printf("system role %q: prune: %v", defName, err)
+	}
+	log.Printf("Synced %q global assignments (%d holders)", defName, len(ids))
 }
 
 // seedBootstrapAdmin ensures a break-glass LOCAL superuser exists when

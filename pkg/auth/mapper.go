@@ -132,13 +132,28 @@ func applyUserFlags(ctx context.Context, tx *sqlx.Tx, cfg *LDAPConfig, userID in
 		if _, err := tx.ExecContext(ctx, `UPDATE users SET is_superuser=$2, modified_at=NOW() WHERE id=$1`, userID, v); err != nil {
 			return err
 		}
+		// Mirror the flag into the global System Administrator capability assignment.
+		if err := syncSystemRole(ctx, tx, "System Administrator", userID, v); err != nil {
+			return err
+		}
 	}
 	if v, assign := cfg.UserFlags.IsSystemAuditor.Resolve(groups); assign {
 		if _, err := tx.ExecContext(ctx, `UPDATE users SET is_system_auditor=$2, modified_at=NOW() WHERE id=$1`, userID, v); err != nil {
 			return err
 		}
+		if err := syncSystemRole(ctx, tx, "System Auditor", userID, v); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// syncSystemRole grants or revokes a user's global system RoleDefinition to match a flag.
+func syncSystemRole(ctx context.Context, tx *sqlx.Tx, defName string, userID int64, on bool) error {
+	if on {
+		return rbac.EnsureGlobalRole(ctx, tx, defName, userID)
+	}
+	return rbac.RemoveGlobalRole(ctx, tx, defName, userID)
 }
 
 // applyOrganizationMap grants/revokes org admin/member/auditor roles per the map.
