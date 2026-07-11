@@ -192,17 +192,3 @@ func (h *UsersResource) ListUserTeams(w http.ResponseWriter, r *http.Request) {
 	}
 	render.JSON(w, r, teams)
 }
-
-// ListUserRoles GET /api/v1/users/{id}/roles
-// Returns all roles the user has (directly or through teams)
-func (h *UsersResource) ListUserRoles(w http.ResponseWriter, r *http.Request) {
-	userID := render.GetIDParam(r)
-
-	roles, err := h.Access.GetUserRoles(r.Context(), userID)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
-	render.JSON(w, r, roles)
-}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -67,7 +68,7 @@ func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request)
 		total, _ = h.store.CountAll(r.Context())
 	} else {
 		// Filter by accessible organizations
-		accessibleIDs, err := h.Access.FilterAccessibleIDs(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, rbac.RoleFieldRead)
+		accessibleIDs, err := h.readableIDs(r, rbac.ContentTypeOrganization)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
@@ -94,10 +95,9 @@ func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request)
 // CreateOrganization POST /api/v1/organizations
 // Only superusers can create organizations (AWX behavior)
 func (h *OrgsResource) CreateOrganization(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 
 	// Only superusers can create organizations
-	if !userCtx.IsSuperuser {
+	if !currentUser(r).IsSuperuser {
 		render.ErrForbidden(nil).Render(w, r)
 		return
 	}
@@ -118,17 +118,10 @@ func (h *OrgsResource) CreateOrganization(w http.ResponseWriter, r *http.Request
 
 // GetOrganization GET /api/v1/organizations/{id}
 func (h *OrgsResource) GetOrganization(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := render.GetIDParam(r)
 
 	// Check read permission
-	canRead, err := h.Access.CanRead(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canRead && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
 		return
 	}
 
@@ -142,17 +135,10 @@ func (h *OrgsResource) GetOrganization(w http.ResponseWriter, r *http.Request) {
 
 // UpdateOrganization PUT /api/v1/organizations/{id}
 func (h *OrgsResource) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := render.GetIDParam(r)
 
 	// Check admin permission
-	canAdmin, err := h.Access.CanAdmin(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canAdmin && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actAdmin) {
 		return
 	}
 
@@ -177,10 +163,9 @@ func (h *OrgsResource) UpdateOrganization(w http.ResponseWriter, r *http.Request
 // DeleteOrganization DELETE /api/v1/organizations/{id}
 // Only superusers can delete organizations
 func (h *OrgsResource) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := render.GetIDParam(r)
 
-	if !userCtx.IsSuperuser {
+	if !currentUser(r).IsSuperuser {
 		render.ErrForbidden(nil).Render(w, r)
 		return
 	}
@@ -200,17 +185,10 @@ func (h *OrgsResource) DeleteOrganization(w http.ResponseWriter, r *http.Request
 // ListOrganizationUsers GET /api/v1/organizations/{id}/users
 // Returns users who are members of the organization (have member_role)
 func (h *OrgsResource) ListOrganizationUsers(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
 	// Check read permission
-	canRead, err := h.Access.CanRead(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canRead && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
 		return
 	}
 
@@ -226,17 +204,10 @@ func (h *OrgsResource) ListOrganizationUsers(w http.ResponseWriter, r *http.Requ
 // AddOrganizationUser POST /api/v1/organizations/{id}/users
 // Adds a user as member of the organization
 func (h *OrgsResource) AddOrganizationUser(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	orgID := getOrgIDFromPath(r)
 
 	// Check admin permission
-	canAdmin, err := h.Access.CanAdmin(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, orgID)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canAdmin && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
 		return
 	}
 
@@ -249,26 +220,15 @@ func (h *OrgsResource) AddOrganizationUser(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Get the member_role for this org
-	role, err := h.Access.GetObjectRole(r.Context(), rbac.ContentTypeOrganization, orgID, rbac.RoleFieldMember)
-	if err != nil {
+	if err := h.setOrgRole(r.Context(), orgID, rbac.RoleFieldMember, req.UserID, true); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-
-	// Add user to role
-	err = h.Access.AddUserToRole(r.Context(), role.ID, req.UserID)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
 	render.NoContent(w, r)
 }
 
 // RemoveOrganizationUser DELETE /api/v1/organizations/{id}/users/{userId}
 func (h *OrgsResource) RemoveOrganizationUser(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	orgID := getOrgIDFromPath(r)
 	userIDStr := chi.URLParam(r, "userId")
 	userID, err := strconv.ParseInt(userIDStr, 10, 64)
@@ -278,26 +238,11 @@ func (h *OrgsResource) RemoveOrganizationUser(w http.ResponseWriter, r *http.Req
 	}
 
 	// Check admin permission
-	canAdmin, err := h.Access.CanAdmin(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, orgID)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canAdmin && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
 		return
 	}
 
-	// Get the member_role for this org
-	role, err := h.Access.GetObjectRole(r.Context(), rbac.ContentTypeOrganization, orgID, rbac.RoleFieldMember)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
-	// Remove user from role
-	err = h.Access.RemoveUserFromRole(r.Context(), role.ID, userID)
-	if err != nil {
+	if err := h.setOrgRole(r.Context(), orgID, rbac.RoleFieldMember, userID, false); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -307,17 +252,10 @@ func (h *OrgsResource) RemoveOrganizationUser(w http.ResponseWriter, r *http.Req
 
 // ListOrganizationAdmins GET /api/v1/organizations/{id}/admins
 func (h *OrgsResource) ListOrganizationAdmins(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
 	// Check read permission
-	canRead, err := h.Access.CanRead(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canRead && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
 		return
 	}
 
@@ -331,17 +269,10 @@ func (h *OrgsResource) ListOrganizationAdmins(w http.ResponseWriter, r *http.Req
 
 // AddOrganizationAdmin POST /api/v1/organizations/{id}/admins
 func (h *OrgsResource) AddOrganizationAdmin(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	orgID := getOrgIDFromPath(r)
 
 	// Only superusers or existing org admins can add admins
-	canAdmin, err := h.Access.CanAdmin(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, orgID)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canAdmin && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
 		return
 	}
 
@@ -354,33 +285,36 @@ func (h *OrgsResource) AddOrganizationAdmin(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	role, err := h.Access.GetObjectRole(r.Context(), rbac.ContentTypeOrganization, orgID, rbac.RoleFieldAdmin)
-	if err != nil {
+	if err := h.setOrgRole(r.Context(), orgID, rbac.RoleFieldAdmin, req.UserID, true); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-
-	err = h.Access.AddUserToRole(r.Context(), role.ID, req.UserID)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
 	render.NoContent(w, r)
+}
+
+// setOrgRole grants or revokes the managed RoleDefinition mirroring an org role_field
+// (member/admin) for a user, scoped to the organization.
+func (h *OrgsResource) setOrgRole(ctx context.Context, orgID int64, rf rbac.RoleField, userID int64, grant bool) error {
+	name, ok := rbac.ManagedNameForLegacy(rbac.ContentTypeOrganization, rf)
+	if !ok {
+		return fmt.Errorf("no managed role definition for %s", rf)
+	}
+	def, err := h.caps.GetRoleDefinitionByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	ct := string(rbac.ContentTypeOrganization)
+	if grant {
+		return h.caps.GiveUserPermission(ctx, def.ID, &ct, &orgID, userID)
+	}
+	return h.caps.RevokeUserPermission(ctx, def.ID, ct, orgID, userID)
 }
 
 // ListOrganizationTeams GET /api/v1/organizations/{id}/teams
 func (h *OrgsResource) ListOrganizationTeams(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
-	canRead, err := h.Access.CanRead(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canRead && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
 		return
 	}
 
@@ -395,40 +329,25 @@ func (h *OrgsResource) ListOrganizationTeams(w http.ResponseWriter, r *http.Requ
 // ListOrganizationRoles GET /api/v1/organizations/{id}/object_roles
 // Returns all roles for this organization
 func (h *OrgsResource) ListOrganizationRoles(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
-	canRead, err := h.Access.CanRead(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+		return
+	}
+
+	roles, err := h.caps.AssignableRoles(r.Context(), string(rbac.ContentTypeOrganization))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	if !canRead && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
-		return
-	}
-
-	roles, err := h.Access.GetObjectRoles(r.Context(), rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-
 	render.JSON(w, r, roles)
 }
 
 // ListOrganizationProjects GET /api/v1/organizations/{id}/projects
 func (h *OrgsResource) ListOrganizationProjects(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
-	canRead, err := h.Access.CanRead(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canRead && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
 		return
 	}
 
@@ -442,16 +361,9 @@ func (h *OrgsResource) ListOrganizationProjects(w http.ResponseWriter, r *http.R
 
 // ListOrganizationInventories GET /api/v1/organizations/{id}/inventories
 func (h *OrgsResource) ListOrganizationInventories(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	id := getOrgIDFromPath(r)
 
-	canRead, err := h.Access.CanRead(r.Context(), userCtx.UserID, rbac.ContentTypeOrganization, id)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if !canRead && !userCtx.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
 		return
 	}
 
