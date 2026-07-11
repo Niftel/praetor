@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -58,6 +59,7 @@ func main() {
 			recordApplied(database, name)
 		}
 		seedCredentialTypes(database)
+		seedRBACPermissions(database)
 		seedBootstrapAdmin(database)
 		log.Println("Migration complete (baselined).")
 		return
@@ -82,8 +84,36 @@ func main() {
 	// Seed Credential Types (idempotent).
 	seedCredentialTypes(database)
 
+	// Seed the DAB capability catalog (idempotent).
+	seedRBACPermissions(database)
+
 	// Optionally ensure a break-glass local superuser (opt-in via env).
 	seedBootstrapAdmin(database)
+}
+
+// seedRBACPermissions upserts the DAB capability catalog (dab_permissions) from the
+// canonical list in pkg/rbac (Gitea #94). Idempotent: run on every migrate, it inserts
+// new capabilities and refreshes labels without disturbing existing rows or their ids
+// (so role_definition_permissions references stay valid). No-ops cleanly if the table
+// isn't present yet (e.g. a DB predating migration 000055).
+func seedRBACPermissions(database *sqlx.DB) {
+	if !tableExists(database, "dab_permissions") {
+		return
+	}
+	catalog := rbac.PermissionCatalog()
+	for _, p := range catalog {
+		if _, err := database.Exec(`
+			INSERT INTO dab_permissions (codename, content_type, action, name)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (codename) DO UPDATE SET
+				content_type = EXCLUDED.content_type,
+				action = EXCLUDED.action,
+				name = EXCLUDED.name`,
+			p.Codename, p.ContentType, p.Action, p.Name); err != nil {
+			log.Printf("Failed to seed capability %s: %v", p.Codename, err)
+		}
+	}
+	log.Printf("Seeded %d RBAC capabilities", len(catalog))
 }
 
 // seedBootstrapAdmin ensures a break-glass LOCAL superuser exists when
