@@ -149,6 +149,38 @@ func (s *CapabilityStore) GiveTeamPermission(ctx context.Context, defID int64, c
 	return wrap("CapabilityStore.GiveTeamPermission", err)
 }
 
+// AssignableRoles returns the RoleDefinitions that can be granted on an object of the
+// given content type: the managed roles scoped to that type, plus any custom (unscoped or
+// matching) definitions.
+func (s *CapabilityStore) AssignableRoles(ctx context.Context, contentType string) ([]rbac.RoleDefinition, error) {
+	defs := []rbac.RoleDefinition{}
+	err := s.db.SelectContext(ctx, &defs,
+		`SELECT `+roleDefinitionCols+` FROM role_definitions
+		 WHERE content_type = $1 OR (managed = false AND content_type IS NULL)
+		 ORDER BY managed DESC, name`, contentType)
+	return defs, wrap("CapabilityStore.AssignableRoles", err)
+}
+
+// RevokeUserPermission removes a user's assignment of a definition scoped to an object.
+func (s *CapabilityStore) RevokeUserPermission(ctx context.Context, defID int64, contentType string, objectID, userID int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM role_user_assignments ua USING object_roles orl
+		WHERE ua.object_role_id = orl.id AND ua.user_id = $1
+		  AND orl.role_definition_id = $2 AND orl.content_type = $3 AND orl.object_id = $4`,
+		userID, defID, contentType, objectID)
+	return wrap("CapabilityStore.RevokeUserPermission", err)
+}
+
+// RevokeTeamPermission removes a team's assignment of a definition scoped to an object.
+func (s *CapabilityStore) RevokeTeamPermission(ctx context.Context, defID int64, contentType string, objectID, teamID int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM role_team_assignments ta USING object_roles orl
+		WHERE ta.object_role_id = orl.id AND ta.team_id = $1
+		  AND orl.role_definition_id = $2 AND orl.content_type = $3 AND orl.object_id = $4`,
+		teamID, defID, contentType, objectID)
+	return wrap("CapabilityStore.RevokeTeamPermission", err)
+}
+
 // RebuildAllForDefinition refreshes the evaluation cache for every object_role of a
 // definition — used after a custom role's permission set changes.
 func (s *CapabilityStore) RebuildAllForDefinition(ctx context.Context, defID int64) error {

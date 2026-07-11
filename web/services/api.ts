@@ -242,18 +242,15 @@ export const api = {
     addTeamMember: (teamId: number, userId: number) => fetchWithAuth(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
     removeTeamMember: (teamId: number, userId: number) => fetchWithAuth(`/teams/${teamId}/members/${userId}`, { method: 'DELETE' }),
 
-    // Roles (AWX-style)
-    getRoles: () => fetchWithAuth('/roles').then(r => r.json()),
-    getRole: (id: number) => fetchWithAuth(`/roles/${id}`).then(r => r.json()),
-    // AWX-style access: roles on a resource, and roles a user holds.
+    // Capability RBAC: who holds which RoleDefinition on a resource, the roles
+    // assignable on a type, the roles a user holds, and grant/revoke.
     getResourceAccess: (contentType: string, objectId: number) => fetchWithAuth(`/access?content_type=${contentType}&object_id=${objectId}`).then(r => r.json()),
+    getAssignableRoles: (contentType: string) => fetchWithAuth(`/role-definitions?content_type=${contentType}`).then(r => r.json()),
     getUserAccess: (userId: number) => fetchWithAuth(`/users/${userId}/access`).then(r => r.json()),
-    getRoleUsers: (roleId: number) => fetchWithAuth(`/roles/${roleId}/users`).then(r => r.json()),
-    addRoleUser: (roleId: number, userId: number) => fetchWithAuth(`/roles/${roleId}/users`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
-    removeRoleUser: (roleId: number, userId: number) => fetchWithAuth(`/roles/${roleId}/users/${userId}`, { method: 'DELETE' }),
-    getRoleTeams: (roleId: number) => fetchWithAuth(`/roles/${roleId}/teams`).then(r => r.json()),
-    addRoleTeam: (roleId: number, teamId: number) => fetchWithAuth(`/roles/${roleId}/teams`, { method: 'POST', body: JSON.stringify({ team_id: teamId }) }),
-    removeRoleTeam: (roleId: number, teamId: number) => fetchWithAuth(`/roles/${roleId}/teams/${teamId}`, { method: 'DELETE' }),
+    grantAccess: (body: { content_type: string; object_id: number; role_definition_id: number; user_id?: number; team_id?: number }) =>
+        fetchWithAuth('/access', { method: 'POST', body: JSON.stringify(body) }),
+    revokeAccess: (body: { content_type: string; object_id: number; role_definition_id: number; user_id?: number; team_id?: number }) =>
+        fetchWithAuth('/access', { method: 'DELETE', body: JSON.stringify(body) }),
 
     // Organizations
     getOrganizations: () => fetchWithAuth('/organizations').then(r => r.json()),
@@ -275,7 +272,6 @@ export const api = {
     // User relationships
     getUserOrganizations: (userId: number) => fetchWithAuth(`/users/${userId}/organizations`).then(r => r.json()),
     getUserTeams: (userId: number) => fetchWithAuth(`/users/${userId}/teams`).then(r => r.json()),
-    getUserRoles: (userId: number) => fetchWithAuth(`/users/${userId}/roles`).then(r => r.json()),
 
     // Legacy role bindings (kept for backwards compat)
     getRoleBindings: () => fetchWithAuth('/role_bindings').then(r => r.json()),

@@ -1,21 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { api, unwrap } from '../services/api';
 import { User } from '../types';
-import Card from '../components/ui/Card';
-import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Input } from '../components/ui/Input';
-import { roleLabel } from '../components/ResourceAccess';
-import { UserPlus, Shield, Trash2, Loader, KeyRound } from 'lucide-react';
-import { toast, confirmDialog } from '../components/ui/toast';
+import { Shield, Trash2, KeyRound, Building2, UserRound } from 'lucide-react';
+import { confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
+
+interface Org { id: number; name: string; }
+interface OrgRoster { members: User[]; admins: User[]; }
 
 const UsersPage = () => {
   const [users, setUsers] = useState<User[]>([]);
+  const [orgs, setOrgs] = useState<Org[]>([]);
+  const [roster, setRoster] = useState<Record<number, OrgRoster>>({});
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ username: '', email: '', password: '', is_superuser: false });
   const [accessUser, setAccessUser] = useState<User | null>(null);
   const [accessRows, setAccessRows] = useState<any[]>([]);
 
@@ -25,12 +24,22 @@ const UsersPage = () => {
     api.getUserAccess(user.id).then(d => setAccessRows(d || [])).catch(() => setAccessRows([]));
   };
 
-  const fetchUsers = async () => {
+  const fetchAll = async () => {
     try {
       setLoading(true);
-      const response = await api.getUsers();
-      const items = unwrap(response);
-      setUsers(items);
+      const [usersRes, orgsRes] = await Promise.all([api.getUsers(), api.getOrganizations()]);
+      const allUsers = unwrap<User>(usersRes);
+      const allOrgs = unwrap<Org>(orgsRes);
+      setUsers(allUsers);
+      setOrgs(allOrgs);
+      const entries = await Promise.all(allOrgs.map(async o => {
+        const [members, admins] = await Promise.all([
+          api.getOrganizationUsers(o.id).catch(() => []),
+          api.getOrganizationAdmins(o.id).catch(() => []),
+        ]);
+        return [o.id, { members: members || [], admins: admins || [] }] as const;
+      }));
+      setRoster(Object.fromEntries(entries));
     } catch (err) {
       console.error('Failed to load users', err);
     } finally {
@@ -38,186 +47,116 @@ const UsersPage = () => {
     }
   };
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  useEffect(() => { fetchAll(); }, []);
 
-  const handleCreate = async () => {
-    if (!formData.username || !formData.email || !formData.password) return;
-    try {
-      await api.createUser(formData);
-      setShowModal(false);
-      setFormData({ username: '', email: '', password: '', is_superuser: false });
-      fetchUsers();
-    } catch (err) {
-      console.error('Failed to create user', err);
-      toast.error('Failed to create user');
-    }
-  };
+  // Build one group per org (members ∪ admins, deduped, admins flagged), plus an
+  // "unassigned" group for users who belong to no organization.
+  const groups = useMemo(() => {
+    const assigned = new Set<number>();
+    const orgGroups = orgs.map(o => {
+      const r = roster[o.id] || { members: [], admins: [] };
+      const adminIds = new Set(r.admins.map(u => u.id));
+      const byId = new Map<number, User>();
+      [...r.members, ...r.admins].forEach(u => { byId.set(u.id, u); assigned.add(u.id); });
+      const list = [...byId.values()].sort((a, b) => a.username.localeCompare(b.username));
+      return { org: o, users: list, adminIds };
+    });
+    const unassigned = users.filter(u => !assigned.has(u.id)).sort((a, b) => a.username.localeCompare(b.username));
+    return { orgGroups, unassigned };
+  }, [orgs, roster, users]);
 
   const handleDelete = async (id: number) => {
-    if (!(await confirmDialog('Delete this user?'))) return;
-    try {
-      await api.deleteUser(id);
-      fetchUsers();
-    } catch (err) {
-      console.error('Failed to delete user', err);
-    }
+    if (!(await confirmDialog('Delete this user?', { destructive: true, confirmText: 'Delete' }))) return;
+    try { await api.deleteUser(id); fetchAll(); } catch (err) { console.error('Failed to delete user', err); }
   };
 
-  if (loading) {
-    return (
-      <PageSpinner />
-    );
-  }
+  if (loading) return <PageSpinner />;
+
+  const UserRow = (user: User, isOrgAdmin: boolean) => (
+    <div key={user.id} onClick={() => openAccess(user)}
+      className="group flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.025] cursor-pointer">
+      <div className="h-8 w-8 rounded-full bg-acc/15 grid place-items-center text-acc text-[13px] font-medium shrink-0">{user.username.charAt(0).toUpperCase()}</div>
+      <div className="min-w-0">
+        <div className="text-[13.5px] font-medium text-ink truncate">{user.username}{user.first_name ? <span className="text-mut font-normal"> · {user.first_name} {user.last_name}</span> : ''}</div>
+        <div className="font-mono text-[11px] text-dim truncate">{user.email}</div>
+      </div>
+      <div className="ml-auto flex items-center gap-2.5 shrink-0">
+        {user.is_superuser
+          ? <Badge variant="warning"><Shield size={11} className="mr-1" />System admin</Badge>
+          : isOrgAdmin ? <Badge variant="warning">Org admin</Badge> : <Badge variant="neutral">Member</Badge>}
+        {user.is_active === false && <Badge variant="neutral">Inactive</Badge>}
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          <button onClick={() => openAccess(user)} className="p-1.5 rounded-md text-dim hover:text-acc hover:bg-white/5" title="View access"><KeyRound size={16} /></button>
+          <button onClick={() => handleDelete(user.id)} className="p-1.5 rounded-md text-dim hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={16} /></button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Users</h1>
-        <Button icon={<UserPlus size={16} />} onClick={() => setShowModal(true)}>Add User</Button>
+    <div className="p-8 max-w-[1100px] mx-auto bg-bg text-ink">
+      <div className="mb-6">
+        <h1 className="text-[21px] font-semibold tracking-tight">Users</h1>
+        <p className="text-[13px] text-mut mt-1">{users.length} total, grouped by organization membership.</p>
       </div>
 
-      <Card>
-        <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {users.map((user) => (
-              <tr key={user.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openAccess(user)}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <div className="h-8 w-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-medium">
-                      {user.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="ml-3">
-                      <div className="text-sm font-medium text-gray-900">{user.username}</div>
-                      {user.first_name && <div className="text-sm text-gray-500">{user.first_name} {user.last_name}</div>}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {user.is_superuser ? (
-                    <Badge variant="info"><Shield size={12} className="mr-1" />Admin</Badge>
-                  ) : (
-                    <Badge variant="neutral">User</Badge>
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <Badge variant={user.is_active !== false ? 'success' : 'neutral'}>
-                    {user.is_active !== false ? 'Active' : 'Inactive'}
-                  </Badge>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
-                  <button
-                    onClick={() => openAccess(user)}
-                    className="text-gray-400 hover:text-brand-600 mr-3"
-                    title="View access"
-                  >
-                    <KeyRound size={18} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(user.id)}
-                    className="text-gray-400 hover:text-red-600"
-                    title="Delete"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {users.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-gray-500">No users found.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        </div>
-      </Card>
+      <div className="rounded-xl border border-line overflow-hidden divide-y divide-line">
+        {groups.orgGroups.map(({ org, users: list, adminIds }) => (
+          <React.Fragment key={org.id}>
+            <div className="flex items-center gap-2.5 px-4 h-10 bg-panel2 sticky top-0 z-[1]">
+              <Building2 size={14} className="text-grp" />
+              <span className="text-[13px] font-semibold text-ink">{org.name}</span>
+              <span className="font-mono text-[10.5px] text-dim">{list.length} member{list.length === 1 ? '' : 's'}</span>
+            </div>
+            {list.length ? list.map(u => UserRow(u, adminIds.has(u.id)))
+              : <p className="px-4 py-4 text-[12.5px] text-dim">No members in this organization.</p>}
+          </React.Fragment>
+        ))}
 
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Add User">
-        <div className="space-y-4">
-          <Input
-            label="Username"
-            type="text"
-            value={formData.username}
-            onChange={e => setFormData({ ...formData, username: e.target.value })}
-          />
-          <Input
-            label="Email"
-            type="email"
-            value={formData.email}
-            onChange={e => setFormData({ ...formData, email: e.target.value })}
-          />
-          <Input
-            label="Password"
-            type="password"
-            autoComplete="new-password"
-            value={formData.password}
-            onChange={e => setFormData({ ...formData, password: e.target.value })}
-          />
-          <div>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={formData.is_superuser}
-                onChange={e => setFormData({ ...formData, is_superuser: e.target.checked })}
-              />
-              <span className="text-sm text-gray-700">Admin user</span>
-            </label>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleCreate}>Create</Button>
-          </div>
-        </div>
-      </Modal>
+        {groups.unassigned.length > 0 && (
+          <React.Fragment>
+            <div className="flex items-center gap-2.5 px-4 h-10 bg-panel2 sticky top-0 z-[1]">
+              <UserRound size={14} className="text-dim" />
+              <span className="text-[13px] font-semibold text-ink2">No organization</span>
+              <span className="font-mono text-[10.5px] text-dim">{groups.unassigned.length}</span>
+            </div>
+            {groups.unassigned.map(u => UserRow(u, false))}
+          </React.Fragment>
+        )}
 
-      {/* Per-user access: the roles this user holds and where */}
+        {users.length === 0 && <p className="text-center text-mut py-10">No users found.</p>}
+      </div>
+
       <Modal isOpen={!!accessUser} onClose={() => setAccessUser(null)} title={accessUser ? `Access — ${accessUser.username}` : ''} size="lg">
         {accessUser && (
           <div className="space-y-4">
             {accessUser.is_superuser && (
-              <div className="text-sm bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-800">
+              <div className="text-sm bg-changed/10 border border-changed/30 rounded-md px-3 py-2 text-changed">
                 <Shield size={14} className="inline mr-1" /> System Administrator — full access to everything.
               </div>
             )}
             <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Resource</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {accessRows.map((r, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-sm text-gray-500 capitalize">{r.singleton_name ? 'System' : (r.content_type || '').replace('_', ' ')}</td>
-                    <td className="px-4 py-2 text-sm font-medium text-gray-900">{r.singleton_name ? '—' : (r.resource_name || `#${r.object_id}`)}</td>
-                    <td className="px-4 py-2 text-sm">
-                      <Badge variant={r.singleton_name === 'system_administrator' ? 'warning' : r.role_field === 'admin_role' ? 'warning' : r.role_field === 'member_role' ? 'info' : 'neutral'}>
-                        {r.singleton_name ? r.singleton_name.replace(/_/g, ' ') : roleLabel(r.role_field)}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-                {accessRows.length === 0 && (
-                  <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-400">No roles assigned. Grant access from a resource's Access tab.</td></tr>
-                )}
-              </tbody>
-            </table>
+              <table className="min-w-full divide-y divide-line">
+                <thead className="bg-panel2"><tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-mut uppercase">Scope</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-mut uppercase">Resource</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-mut uppercase">Role</th>
+                </tr></thead>
+                <tbody className="divide-y divide-line">
+                  {accessRows.map((r, i) => (
+                    <tr key={i} className="hover:bg-white/[0.03]">
+                      <td className="px-4 py-2 text-sm text-mut capitalize">{r.content_type ? r.content_type.replace('_', ' ') : 'System'}</td>
+                      <td className="px-4 py-2 text-sm font-medium text-ink">{r.content_type ? (r.resource_name || `#${r.object_id}`) : '—'}</td>
+                      <td className="px-4 py-2 text-sm">
+                        <Badge variant={/Admin(istrator)?$/.test(r.role) ? 'warning' : /Member$/.test(r.role) ? 'info' : 'neutral'}>
+                          {r.role}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                  {accessRows.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-dim">No roles assigned. Grant access from a resource's Access tab.</td></tr>}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
