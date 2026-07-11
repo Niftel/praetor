@@ -47,15 +47,13 @@ func (a permAction) String() string {
 	return "unknown"
 }
 
-// rbacMode selects how authorize() decides (Gitea #97, epic #93). The legacy AWX-style
-// hierarchy is on a deprecation track; the capability model is the target.
+// rbacMode selects how authorize() decides (Gitea #97, epic #93). The capability model is
+// the default/target; the legacy AWX-style hierarchy is on a deprecation track (#99).
 //
-//	dual (default) — allow if legacy OR capability grants; log every divergence. Never
-//	                 regresses access (legacy still governs) while surfacing where the
-//	                 capability model disagrees, so the legacy path can be removed once
-//	                 the divergence logs go quiet.
-//	capability     — capability model only (post-cutover).
-//	legacy         — legacy hierarchy only (emergency rollback).
+//	capability (default) — capability model only.
+//	dual                 — allow if legacy OR capability grants; log every divergence.
+//	                       No access regression; use to soak before/after cutover.
+//	legacy               — legacy hierarchy only (emergency rollback).
 type rbacMode string
 
 const (
@@ -65,13 +63,13 @@ const (
 )
 
 func resolveRBACMode() rbacMode {
-	switch rbacMode(env.String("PRAETOR_RBAC_MODE", string(modeDual))) {
-	case modeCapability:
-		return modeCapability
+	switch rbacMode(env.String("PRAETOR_RBAC_MODE", string(modeCapability))) {
+	case modeDual:
+		return modeDual
 	case modeLegacy:
 		return modeLegacy
 	default:
-		return modeDual
+		return modeCapability
 	}
 }
 

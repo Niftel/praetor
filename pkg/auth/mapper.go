@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 )
 
 // UserIdentity is what an LDAP bind + group resolution yields for one user.
@@ -328,9 +329,14 @@ func grantRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID in
 		contentType, objectID, roleField); err != nil {
 		return fmt.Errorf("lookup role %s/%d/%s: %w", contentType, objectID, roleField, err)
 	}
-	_, err := tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO role_members (role_id, user_id) VALUES ($1, $2) ON CONFLICT (role_id, user_id) DO NOTHING`,
-		roleID, userID)
+		roleID, userID); err != nil {
+		return err
+	}
+	// Dual-write the capability mirror so LDAP-granted org/team roles are enforceable
+	// under the capability model (#97/#99), not just the legacy hierarchy.
+	_, err := rbac.GrantCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
 	return err
 }
 
@@ -345,7 +351,10 @@ func revokeRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID i
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM role_members WHERE role_id=$1 AND user_id=$2`, roleID, userID)
+	if _, err = tx.ExecContext(ctx, `DELETE FROM role_members WHERE role_id=$1 AND user_id=$2`, roleID, userID); err != nil {
+		return err
+	}
+	_, err = rbac.RevokeCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
 	return err
 }
 
