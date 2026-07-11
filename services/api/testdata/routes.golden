@@ -1,4 +1,5 @@
 CONNECT /metrics
+DELETE  /api/v1/access
 DELETE  /api/v1/credential-types/{id}
 DELETE  /api/v1/credentials/{id}
 DELETE  /api/v1/event-rules/{id}
@@ -15,8 +16,6 @@ DELETE  /api/v1/notification-templates/{id}
 DELETE  /api/v1/organizations/{id}/
 DELETE  /api/v1/organizations/{id}/galaxy-credentials/{credId}
 DELETE  /api/v1/organizations/{id}/users/{userId}
-DELETE  /api/v1/roles/{id}/teams/{teamId}
-DELETE  /api/v1/roles/{id}/users/{userId}
 DELETE  /api/v1/schedules/{id}/
 DELETE  /api/v1/teams/{id}/
 DELETE  /api/v1/teams/{id}/members/{userID}
@@ -66,10 +65,7 @@ GET     /api/v1/organizations/{id}/teams
 GET     /api/v1/organizations/{id}/users
 GET     /api/v1/ping
 GET     /api/v1/projects
-GET     /api/v1/roles/
-GET     /api/v1/roles/{id}/
-GET     /api/v1/roles/{id}/teams
-GET     /api/v1/roles/{id}/users
+GET     /api/v1/role-definitions
 GET     /api/v1/schedules/
 GET     /api/v1/schedules/{id}/
 GET     /api/v1/teams/
@@ -82,7 +78,6 @@ GET     /api/v1/users/
 GET     /api/v1/users/{id}/
 GET     /api/v1/users/{id}/access
 GET     /api/v1/users/{id}/organizations
-GET     /api/v1/users/{id}/roles
 GET     /api/v1/users/{id}/teams
 GET     /api/v1/workflow-jobs
 GET     /api/v1/workflow-jobs/{id}
@@ -93,6 +88,7 @@ GET     /metrics
 HEAD    /metrics
 OPTIONS /metrics
 PATCH   /metrics
+POST    /api/v1/access
 POST    /api/v1/auth/login
 POST    /api/v1/credential-types/
 POST    /api/v1/credentials/
@@ -123,8 +119,6 @@ POST    /api/v1/organizations/{id}/galaxy-credentials
 POST    /api/v1/organizations/{id}/users
 POST    /api/v1/projects
 POST    /api/v1/projects/{id}/sync
-POST    /api/v1/roles/{id}/teams
-POST    /api/v1/roles/{id}/users
 POST    /api/v1/schedules/
 POST    /api/v1/teams/
 POST    /api/v1/teams/{id}/members

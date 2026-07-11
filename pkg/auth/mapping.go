@@ -48,6 +48,16 @@ type LDAPOrgMapEntry struct {
 	RemoveAdmins   bool       `yaml:"remove_admins"`
 	RemoveUsers    bool       `yaml:"remove_users"`
 	RemoveAuditors bool       `yaml:"remove_auditors"`
+
+	// Roles maps a DAB RoleDefinition NAME (managed or custom, e.g. "Organization
+	// Auditor" or a bespoke "Engineer Audit") to the LDAP group that grants it,
+	// scoped to this organization (Gitea #98). This is what lets an operator bind a
+	// directory group to an arbitrary capability bundle, not just the fixed
+	// admin/member/auditor triple. An unknown role name is a hard config error.
+	Roles map[string]GroupMatch `yaml:"roles"`
+	// RemoveRoles revokes a Roles entry when the user is no longer in its group
+	// (same semantics as remove_admins/users/auditors).
+	RemoveRoles bool `yaml:"remove_roles"`
 }
 
 // LDAPTeamMapEntry binds an LDAP group to a team's membership. Keyed by team name

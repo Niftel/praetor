@@ -78,7 +78,7 @@ func TestUpdateTemplateRechecksUse(t *testing.T) {
 func TestCredentialGrantOrgFence(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	h := handlers.NewRolesResource(db)
+	h := handlers.NewAccessResource(db)
 	access := rbac.NewAccessChecker(db)
 	ctx := context.Background()
 
@@ -100,20 +100,22 @@ func TestCredentialGrantOrgFence(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`, granter, outsider, member)
 	})
 
-	useRole, err := access.GetObjectRole(ctx, rbac.ContentTypeCredential, credID, rbac.RoleFieldUse)
-	if err != nil {
-		t.Fatalf("credential use_role: %v", err)
+	var useDefID int64
+	if err := db.Get(&useDefID, `SELECT id FROM role_definitions WHERE name='Credential Use'`); err != nil {
+		t.Fatalf("Credential Use definition: %v", err)
 	}
 	granterUC := middleware.UserContext{UserID: granter}
-	roleParam := map[string]string{"id": fmt.Sprint(useRole.ID)}
+	body := func(uid int64) string {
+		return fmt.Sprintf(`{"content_type":"credential","object_id":%d,"role_definition_id":%d,"user_id":%d}`, credID, useDefID, uid)
+	}
 
-	// Granting use to a non-member is forbidden.
-	rec := callJSON(t, h.AddRoleUser, http.MethodPost, fmt.Sprintf(`{"user_id":%d}`, outsider), granterUC, roleParam)
+	// Granting use to a non-member is forbidden (org fence).
+	rec := callJSON(t, h.GrantAccess, http.MethodPost, body(outsider), granterUC, map[string]string{})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("grant to non-member: want 403, got %d (%s)", rec.Code, rec.Body)
 	}
 	// Granting use to an org member succeeds.
-	rec = callJSON(t, h.AddRoleUser, http.MethodPost, fmt.Sprintf(`{"user_id":%d}`, member), granterUC, roleParam)
+	rec = callJSON(t, h.GrantAccess, http.MethodPost, body(member), granterUC, map[string]string{})
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("grant to member: want 204, got %d (%s)", rec.Code, rec.Body)
 	}

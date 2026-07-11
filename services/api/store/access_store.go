@@ -22,13 +22,22 @@ type AccessTeam struct {
 	Name string `json:"name" db:"name"`
 }
 
-// UserAccessRole is a role a user holds, resolved to its resource name.
+// ObjectRoleAccess is one RoleDefinition granted on an object, with its holders.
+type ObjectRoleAccess struct {
+	ObjectRoleID     int64        `json:"object_role_id" db:"object_role_id"`
+	RoleDefinitionID int64        `json:"role_definition_id" db:"role_definition_id"`
+	Role             string       `json:"role" db:"role"`
+	Managed          bool         `json:"managed" db:"managed"`
+	Users            []AccessUser `json:"users"`
+	Teams            []AccessTeam `json:"teams"`
+}
+
+// UserAccessRole is a capability role a user holds, resolved to its resource name. A NULL
+// content_type is a global/system role.
 type UserAccessRole struct {
-	RoleID       int64   `json:"role_id" db:"role_id"`
-	RoleField    string  `json:"role_field" db:"role_field"`
-	ContentType  string  `json:"content_type" db:"content_type"`
+	Role         string  `json:"role" db:"role"`
+	ContentType  *string `json:"content_type" db:"content_type"`
 	ObjectID     *int64  `json:"object_id" db:"object_id"`
-	Singleton    *string `json:"singleton_name" db:"singleton_name"`
 	ResourceName *string `json:"resource_name" db:"resource_name"`
 }
 
@@ -53,43 +62,57 @@ type AccessStore struct {
 
 func NewAccessStore(db *sqlx.DB) *AccessStore { return &AccessStore{db: db} }
 
-// RoleUsers returns the users directly holding a role (compact view).
-func (s *AccessStore) RoleUsers(ctx context.Context, roleID int64) ([]AccessUser, error) {
-	users := []AccessUser{}
-	err := s.db.SelectContext(ctx, &users, `
-		SELECT u.id, u.username, COALESCE(u.first_name,'') AS first_name, COALESCE(u.last_name,'') AS last_name
-		FROM role_members rm JOIN users u ON u.id = rm.user_id
-		WHERE rm.role_id = $1 ORDER BY u.username`, roleID)
-	return users, wrap("AccessStore.RoleUsers", err)
+// resourceNameCase resolves an object's display name from its content_type/object_id.
+const resourceNameCase = `
+	CASE orl.content_type
+	  WHEN 'organization'      THEN (SELECT name FROM organizations      WHERE id = orl.object_id)
+	  WHEN 'team'              THEN (SELECT name FROM teams              WHERE id = orl.object_id)
+	  WHEN 'project'           THEN (SELECT name FROM projects           WHERE id = orl.object_id)
+	  WHEN 'inventory'         THEN (SELECT name FROM inventories        WHERE id = orl.object_id)
+	  WHEN 'job_template'      THEN (SELECT name FROM job_templates      WHERE id = orl.object_id)
+	  WHEN 'workflow_template' THEN (SELECT name FROM workflow_templates WHERE id = orl.object_id)
+	  WHEN 'credential'        THEN (SELECT name FROM credentials        WHERE id = orl.object_id)
+	END`
+
+// ObjectAccess returns the RoleDefinitions granted on an object, each with its holders.
+func (s *AccessStore) ObjectAccess(ctx context.Context, contentType string, objectID int64) ([]ObjectRoleAccess, error) {
+	roles := []ObjectRoleAccess{}
+	if err := s.db.SelectContext(ctx, &roles, `
+		SELECT orl.id AS object_role_id, d.id AS role_definition_id, d.name AS role, d.managed
+		FROM object_roles orl JOIN role_definitions d ON d.id = orl.role_definition_id
+		WHERE orl.content_type = $1 AND orl.object_id = $2
+		ORDER BY d.name`, contentType, objectID); err != nil {
+		return nil, wrap("AccessStore.ObjectAccess", err)
+	}
+	for i := range roles {
+		users := []AccessUser{}
+		if err := s.db.SelectContext(ctx, &users, `
+			SELECT u.id, u.username, COALESCE(u.first_name,'') AS first_name, COALESCE(u.last_name,'') AS last_name
+			FROM role_user_assignments ua JOIN users u ON u.id = ua.user_id
+			WHERE ua.object_role_id = $1 ORDER BY u.username`, roles[i].ObjectRoleID); err == nil {
+			roles[i].Users = users
+		}
+		teams := []AccessTeam{}
+		if err := s.db.SelectContext(ctx, &teams, `
+			SELECT t.id, t.name FROM role_team_assignments ta JOIN teams t ON t.id = ta.team_id
+			WHERE ta.object_role_id = $1 ORDER BY t.name`, roles[i].ObjectRoleID); err == nil {
+			roles[i].Teams = teams
+		}
+	}
+	return roles, nil
 }
 
-// RoleTeams returns the teams holding a role (compact view).
-func (s *AccessStore) RoleTeams(ctx context.Context, roleID int64) ([]AccessTeam, error) {
-	teams := []AccessTeam{}
-	err := s.db.SelectContext(ctx, &teams, `
-		SELECT t.id, t.name FROM team_roles tr JOIN teams t ON t.id = tr.team_id
-		WHERE tr.role_id = $1 ORDER BY t.name`, roleID)
-	return teams, wrap("AccessStore.RoleTeams", err)
-}
-
-// UserAccessRoles returns the roles a user holds directly, resolved to a name.
+// UserAccessRoles returns the capability roles a user holds (direct assignments),
+// resolved to a resource name; a NULL content_type is a global/system role.
 func (s *AccessStore) UserAccessRoles(ctx context.Context, userID int64) ([]UserAccessRole, error) {
 	rows := []UserAccessRole{}
 	err := s.db.SelectContext(ctx, &rows, `
-		SELECT r.id AS role_id, r.role_field, COALESCE(r.content_type, '') AS content_type,
-		       r.object_id, r.singleton_name,
-		       CASE r.content_type
-		         WHEN 'organization' THEN (SELECT name FROM organizations WHERE id = r.object_id)
-		         WHEN 'team'         THEN (SELECT name FROM teams         WHERE id = r.object_id)
-		         WHEN 'project'      THEN (SELECT name FROM projects      WHERE id = r.object_id)
-		         WHEN 'inventory'    THEN (SELECT name FROM inventories   WHERE id = r.object_id)
-		         WHEN 'job_template' THEN (SELECT name FROM job_templates WHERE id = r.object_id)
-		         WHEN 'credential'   THEN (SELECT name FROM credentials   WHERE id = r.object_id)
-		       END AS resource_name
-		FROM role_members rm
-		JOIN roles r ON r.id = rm.role_id
-		WHERE rm.user_id = $1
-		ORDER BY r.content_type NULLS FIRST, resource_name, r.role_field`, userID)
+		SELECT d.name AS role, orl.content_type, orl.object_id, `+resourceNameCase+` AS resource_name
+		FROM role_user_assignments ua
+		JOIN object_roles orl ON orl.id = ua.object_role_id
+		JOIN role_definitions d ON d.id = ua.role_definition_id
+		WHERE ua.user_id = $1
+		ORDER BY orl.content_type NULLS FIRST, resource_name, d.name`, userID)
 	return rows, wrap("AccessStore.UserAccessRoles", err)
 }
 

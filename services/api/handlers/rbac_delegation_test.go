@@ -103,16 +103,16 @@ func TestOrgExecuteRunsJobTemplates(t *testing.T) {
 
 	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldExecute, runner)
 
-	if ok, err := access.CanExecute(ctx, runner, rbac.ContentTypeJobTemplate, jtID); err != nil || !ok {
+	if ok, err := capCheck(access, runner, rbac.ContentTypeJobTemplate, jtID, rbac.ActionExecute); err != nil || !ok {
 		t.Fatalf("org-execute holder should execute org JT: ok=%v err=%v", ok, err)
 	}
-	if ok, err := access.CanRead(ctx, runner, rbac.ContentTypeJobTemplate, jtID); err != nil || !ok {
+	if ok, err := capCheck(access, runner, rbac.ContentTypeJobTemplate, jtID, rbac.ActionView); err != nil || !ok {
 		t.Fatalf("org-execute holder should read org JT: ok=%v err=%v", ok, err)
 	}
-	if ok, _ := access.CanAdmin(ctx, runner, rbac.ContentTypeJobTemplate, jtID); ok {
+	if ok, _ := capCheck(access, runner, rbac.ContentTypeJobTemplate, jtID, rbac.ActionManage); ok {
 		t.Fatalf("org-execute holder must NOT administer the JT")
 	}
-	if ok, _ := access.CanExecute(ctx, nobody, rbac.ContentTypeJobTemplate, jtID); ok {
+	if ok, _ := capCheck(access, nobody, rbac.ContentTypeJobTemplate, jtID, rbac.ActionExecute); ok {
 		t.Fatalf("unrelated user must not execute the JT")
 	}
 }

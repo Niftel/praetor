@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 )
 
 // UserIdentity is what an LDAP bind + group resolution yields for one user.
@@ -169,8 +170,96 @@ func applyOrganizationMap(ctx context.Context, tx *sqlx.Tx, cfg *LDAPConfig, use
 				}
 			}
 		}
+
+		// Named RoleDefinition bindings (#98): bind a directory group to any capability
+		// role, scoped to this org. Resolve the definition whenever configured so a
+		// mistyped role name fails loudly on login rather than silently no-op'ing.
+		for roleName, match := range entry.Roles {
+			if !match.Configured() {
+				continue
+			}
+			defID, err := resolveRoleDefinition(ctx, tx, roleName)
+			if err != nil {
+				return fmt.Errorf("organization_map %q roles %q: %w", name, roleName, err)
+			}
+			grant, revoke := decideRole(match.Matches(groups), true, entry.RemoveRoles)
+			if grant {
+				if err := grantRoleDefinition(ctx, tx, orgID, defID, userID); err != nil {
+					return fmt.Errorf("organization_map %q roles %q: %w", name, roleName, err)
+				}
+			}
+			if revoke {
+				if err := revokeRoleDefinition(ctx, tx, orgID, defID, userID); err != nil {
+					return fmt.Errorf("organization_map %q roles %q: %w", name, roleName, err)
+				}
+			}
+		}
 	}
 	return nil
+}
+
+// resolveRoleDefinition looks up a RoleDefinition id by name, returning a clear error if
+// it does not exist so a misconfigured organization_map fails loudly.
+func resolveRoleDefinition(ctx context.Context, tx *sqlx.Tx, name string) (int64, error) {
+	var id int64
+	err := tx.GetContext(ctx, &id, `SELECT id FROM role_definitions WHERE name = $1`, name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("role definition %q does not exist", name)
+	}
+	return id, err
+}
+
+// grantRoleDefinition assigns a user a RoleDefinition scoped to an organization,
+// creating the object_role if needed and refreshing the evaluation cache. Idempotent.
+func grantRoleDefinition(ctx context.Context, tx *sqlx.Tx, orgID, defID, userID int64) error {
+	orID, err := ensureOrgObjectRole(ctx, tx, defID, orgID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO role_user_assignments (role_definition_id, user_id, object_role_id)
+		VALUES ($1, $2, $3) ON CONFLICT (user_id, object_role_id) DO NOTHING`, defID, userID, orID); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `SELECT rebuild_object_role_evaluations($1)`, orID)
+	return err
+}
+
+// revokeRoleDefinition removes a user's org-scoped assignment of a RoleDefinition. The
+// object_role and its evaluation rows are left in place (shared with other actors).
+func revokeRoleDefinition(ctx context.Context, tx *sqlx.Tx, orgID, defID, userID int64) error {
+	var orID int64
+	err := tx.GetContext(ctx, &orID,
+		`SELECT id FROM object_roles WHERE role_definition_id = $1 AND content_type = 'organization' AND object_id = $2`,
+		defID, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // nothing assigned
+	}
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx,
+		`DELETE FROM role_user_assignments WHERE object_role_id = $1 AND user_id = $2`, orID, userID)
+	return err
+}
+
+// ensureOrgObjectRole returns the object_role id for (definition, organization), creating
+// it if absent.
+func ensureOrgObjectRole(ctx context.Context, tx *sqlx.Tx, defID, orgID int64) (int64, error) {
+	var orID int64
+	err := tx.GetContext(ctx, &orID,
+		`SELECT id FROM object_roles WHERE role_definition_id = $1 AND content_type = 'organization' AND object_id = $2`,
+		defID, orgID)
+	if err == nil {
+		return orID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	err = tx.GetContext(ctx, &orID,
+		`INSERT INTO object_roles (role_definition_id, content_type, object_id) VALUES ($1, 'organization', $2) RETURNING id`,
+		defID, orgID)
+	return orID, err
 }
 
 // applyTeamMap grants/revokes team member_role per the map, resolving each team
@@ -233,31 +322,16 @@ func selectOrCreateTeam(ctx context.Context, tx *sqlx.Tx, orgID int64, name stri
 	return id, err
 }
 
+// grantRole grants a user the RoleDefinition mirroring a legacy org/team role_field,
+// scoped to the object, via the capability assignment tables.
 func grantRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID int64, roleField string, userID int64) error {
-	var roleID int64
-	if err := tx.GetContext(ctx, &roleID,
-		`SELECT id FROM roles WHERE content_type=$1 AND object_id=$2 AND role_field=$3`,
-		contentType, objectID, roleField); err != nil {
-		return fmt.Errorf("lookup role %s/%d/%s: %w", contentType, objectID, roleField, err)
-	}
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO role_members (role_id, user_id) VALUES ($1, $2) ON CONFLICT (role_id, user_id) DO NOTHING`,
-		roleID, userID)
+	_, err := rbac.GrantCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
 	return err
 }
 
+// revokeRole is grantRole's inverse.
 func revokeRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID int64, roleField string, userID int64) error {
-	var roleID int64
-	err := tx.GetContext(ctx, &roleID,
-		`SELECT id FROM roles WHERE content_type=$1 AND object_id=$2 AND role_field=$3`,
-		contentType, objectID, roleField)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM role_members WHERE role_id=$1 AND user_id=$2`, roleID, userID)
+	_, err := rbac.RevokeCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
 	return err
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -58,6 +59,8 @@ func main() {
 			recordApplied(database, name)
 		}
 		seedCredentialTypes(database)
+		seedRBACPermissions(database)
+		seedManagedRoleDefinitions(database)
 		seedBootstrapAdmin(database)
 		log.Println("Migration complete (baselined).")
 		return
@@ -82,8 +85,84 @@ func main() {
 	// Seed Credential Types (idempotent).
 	seedCredentialTypes(database)
 
+	// Seed the DAB capability catalog + managed-mirror role definitions (idempotent).
+	seedRBACPermissions(database)
+	seedManagedRoleDefinitions(database)
+
 	// Optionally ensure a break-glass local superuser (opt-in via env).
 	seedBootstrapAdmin(database)
+}
+
+// seedRBACPermissions upserts the DAB capability catalog (dab_permissions) from the
+// canonical list in pkg/rbac (Gitea #94). Idempotent: run on every migrate, it inserts
+// new capabilities and refreshes labels without disturbing existing rows or their ids
+// (so role_definition_permissions references stay valid). No-ops cleanly if the table
+// isn't present yet (e.g. a DB predating migration 000055).
+func seedRBACPermissions(database *sqlx.DB) {
+	if !tableExists(database, "dab_permissions") {
+		return
+	}
+	catalog := rbac.PermissionCatalog()
+	for _, p := range catalog {
+		if _, err := database.Exec(`
+			INSERT INTO dab_permissions (codename, content_type, action, name)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (codename) DO UPDATE SET
+				content_type = EXCLUDED.content_type,
+				action = EXCLUDED.action,
+				name = EXCLUDED.name`,
+			p.Codename, p.ContentType, p.Action, p.Name); err != nil {
+			log.Printf("Failed to seed capability %s: %v", p.Codename, err)
+		}
+	}
+	log.Printf("Seeded %d RBAC capabilities", len(catalog))
+}
+
+// seedManagedRoleDefinitions upserts the managed-mirror RoleDefinitions (Gitea #95) from
+// pkg/rbac.ManagedRoles: one managed=true definition per legacy role, with the capability
+// set that reproduces what the legacy role grants. Idempotent and id-stable (upsert by
+// unique name keeps the row's id so role_definition_permissions references survive), and
+// it refreshes each definition's permission set to exactly the declaration. Depends on
+// dab_permissions being seeded first; no-ops if the tables are absent.
+func seedManagedRoleDefinitions(database *sqlx.DB) {
+	if !tableExists(database, "role_definitions") {
+		return
+	}
+	roles := rbac.ManagedRoles()
+	for _, mr := range roles {
+		var ct interface{}
+		if mr.ContentType != "" {
+			ct = string(mr.ContentType)
+		}
+		var defID int64
+		if err := database.Get(&defID, `
+			INSERT INTO role_definitions (name, description, managed, content_type)
+			VALUES ($1, $2, true, $3)
+			ON CONFLICT (name) DO UPDATE SET
+				description = EXCLUDED.description,
+				managed = true,
+				content_type = EXCLUDED.content_type,
+				modified_at = now()
+			RETURNING id`, mr.Name, mr.Description, ct); err != nil {
+			log.Printf("Failed to seed managed role %q: %v", mr.Name, err)
+			continue
+		}
+		// Refresh the permission set to exactly the declaration.
+		if _, err := database.Exec(
+			`DELETE FROM role_definition_permissions WHERE role_definition_id = $1`, defID); err != nil {
+			log.Printf("Managed role %q: clearing permissions failed: %v", mr.Name, err)
+			continue
+		}
+		for _, cn := range mr.Codenames {
+			if _, err := database.Exec(`
+				INSERT INTO role_definition_permissions (role_definition_id, permission_id)
+				SELECT $1, p.id FROM dab_permissions p WHERE p.codename = $2
+				ON CONFLICT DO NOTHING`, defID, cn); err != nil {
+				log.Printf("Managed role %q: attaching %q failed: %v", mr.Name, cn, err)
+			}
+		}
+	}
+	log.Printf("Seeded %d managed role definitions", len(roles))
 }
 
 // seedBootstrapAdmin ensures a break-glass LOCAL superuser exists when

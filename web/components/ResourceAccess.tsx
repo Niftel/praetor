@@ -4,15 +4,24 @@ import Button from './ui/Button';
 import { Plus, X, Users as UsersIcon, User as UserIcon } from 'lucide-react';
 
 interface AccessRole {
-  role_id: number;
-  role_field: string;
+  object_role_id: number;
+  role_definition_id: number;
+  role: string;                // RoleDefinition name, already human-readable
+  managed: boolean;
   users: { id: number; username: string; first_name?: string; last_name?: string }[];
   teams: { id: number; name: string }[];
 }
 
-// admin_role -> "Admin", project_admin_role -> "Project Admin", use_role -> "Use".
-export const roleLabel = (f: string) =>
-  f.replace(/_role$/, '').split('_').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+interface RoleDefinition {
+  id: number;
+  name: string;
+  description?: string;
+  managed: boolean;
+}
+
+// RoleDefinition names are already display-ready ("Inventory Admin"); kept for callers
+// that still want a formatter.
+export const roleLabel = (name: string) => name;
 
 interface Props {
   contentType: string;   // 'organization' | 'inventory' | 'project' | 'job_template' | 'credential' | 'team'
@@ -22,13 +31,14 @@ interface Props {
 
 const ResourceAccess: React.FC<Props> = ({ contentType, objectId, canManage = true }) => {
   const [roles, setRoles] = useState<AccessRole[]>([]);
+  const [assignable, setAssignable] = useState<RoleDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
   const [adding, setAdding] = useState(false);
   const [principalType, setPrincipalType] = useState<'user' | 'team'>('user');
   const [principalId, setPrincipalId] = useState<number | ''>('');
-  const [roleId, setRoleId] = useState<number | ''>('');
+  const [defId, setDefId] = useState<number | ''>('');
   const [error, setError] = useState('');
 
   const load = () => {
@@ -42,21 +52,22 @@ const ResourceAccess: React.FC<Props> = ({ contentType, objectId, canManage = tr
   useEffect(() => {
     api.getUsers().then(r => setUsers(r?.items || r || [])).catch(() => { });
     api.getTeams().then(r => setTeams(r?.items || r || [])).catch(() => { });
-  }, []);
+    api.getAssignableRoles(contentType).then(d => setAssignable(d || [])).catch(() => setAssignable([]));
+  }, [contentType]);
 
-  // One row per principal (user/team), collecting all the roles they hold here.
+  // One row per principal (user/team), collecting the RoleDefinitions they hold here.
   const principals = (() => {
-    const m = new Map<string, { kind: 'user' | 'team'; id: number; name: string; roles: { roleId: number; roleField: string }[] }>();
+    const m = new Map<string, { kind: 'user' | 'team'; id: number; name: string; roles: { defId: number; role: string }[] }>();
     for (const r of roles) {
       for (const u of r.users) {
         const k = `user-${u.id}`;
         if (!m.has(k)) m.set(k, { kind: 'user', id: u.id, name: u.username, roles: [] });
-        m.get(k)!.roles.push({ roleId: r.role_id, roleField: r.role_field });
+        m.get(k)!.roles.push({ defId: r.role_definition_id, role: r.role });
       }
       for (const t of r.teams) {
         const k = `team-${t.id}`;
         if (!m.has(k)) m.set(k, { kind: 'team', id: t.id, name: t.name, roles: [] });
-        m.get(k)!.roles.push({ roleId: r.role_id, roleField: r.role_field });
+        m.get(k)!.roles.push({ defId: r.role_definition_id, role: r.role });
       }
     }
     return [...m.values()];
@@ -64,80 +75,79 @@ const ResourceAccess: React.FC<Props> = ({ contentType, objectId, canManage = tr
 
   const grant = async () => {
     setError('');
-    if (principalId === '' || roleId === '') { setError('Pick a user/team and a role.'); return; }
+    if (principalId === '' || defId === '') { setError('Pick a user/team and a role.'); return; }
+    const body: any = { content_type: contentType, object_id: objectId, role_definition_id: Number(defId) };
+    if (principalType === 'user') body.user_id = Number(principalId); else body.team_id = Number(principalId);
     try {
-      if (principalType === 'user') await api.addRoleUser(Number(roleId), Number(principalId));
-      else await api.addRoleTeam(Number(roleId), Number(principalId));
-      setAdding(false); setPrincipalId(''); setRoleId(''); load();
+      await api.grantAccess(body);
+      setAdding(false); setPrincipalId(''); setDefId(''); load();
     } catch (e: any) { setError(e.message || 'Failed to grant access. You need admin on this resource.'); }
   };
-  const revoke = async (g: { kind: 'user' | 'team'; id: number; roleId: number }) => {
-    try {
-      if (g.kind === 'user') await api.removeRoleUser(g.roleId, g.id);
-      else await api.removeRoleTeam(g.roleId, g.id);
-      load();
-    } catch { /* ignore */ }
+  const revoke = async (g: { kind: 'user' | 'team'; id: number; defId: number }) => {
+    const body: any = { content_type: contentType, object_id: objectId, role_definition_id: g.defId };
+    if (g.kind === 'user') body.user_id = g.id; else body.team_id = g.id;
+    try { await api.revokeAccess(body); load(); } catch { /* ignore */ }
   };
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">Users and teams with a role on this {contentType.replace('_', ' ')}.</p>
+        <p className="text-sm text-mut">Users and teams with a role on this {contentType.replace('_', ' ')}.</p>
         {canManage && (
           <Button size="sm" icon={<Plus size={14} />} onClick={() => { setAdding(a => !a); setError(''); }}>Add access</Button>
         )}
       </div>
 
       {adding && (
-        <div className="bg-gray-50 border border-gray-200 rounded-md p-3 space-y-2">
+        <div className="bg-panel2 border border-line rounded-md p-3 space-y-2">
           <div className="flex flex-wrap gap-2 items-center">
-            <select value={principalType} onChange={e => { setPrincipalType(e.target.value as any); setPrincipalId(''); }} className="border border-gray-300 rounded px-2 py-1.5 text-sm">
+            <select value={principalType} onChange={e => { setPrincipalType(e.target.value as any); setPrincipalId(''); }} className="border border-line2 rounded px-2 py-1.5 text-sm">
               <option value="user">User</option>
               <option value="team">Team</option>
             </select>
-            <select value={principalId} onChange={e => setPrincipalId(e.target.value === '' ? '' : Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1.5 text-sm flex-1 min-w-[140px]">
+            <select value={principalId} onChange={e => setPrincipalId(e.target.value === '' ? '' : Number(e.target.value))} className="border border-line2 rounded px-2 py-1.5 text-sm flex-1 min-w-[140px]">
               <option value="">{principalType === 'user' ? 'Select user…' : 'Select team…'}</option>
               {(principalType === 'user' ? users : teams).map(p => (
                 <option key={p.id} value={p.id}>{principalType === 'user' ? p.username : p.name}</option>
               ))}
             </select>
-            <select value={roleId} onChange={e => setRoleId(e.target.value === '' ? '' : Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1.5 text-sm">
+            <select value={defId} onChange={e => setDefId(e.target.value === '' ? '' : Number(e.target.value))} className="border border-line2 rounded px-2 py-1.5 text-sm">
               <option value="">Select role…</option>
-              {roles.map(r => <option key={r.role_id} value={r.role_id}>{roleLabel(r.role_field)}</option>)}
+              {assignable.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
             <Button size="sm" onClick={grant}>Grant</Button>
             <Button size="sm" variant="secondary" onClick={() => setAdding(false)}>Cancel</Button>
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-err">{error}</p>}
         </div>
       )}
 
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+      <table className="min-w-full divide-y divide-line">
+        <thead className="bg-panel2">
           <tr>
-            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Roles</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-mut uppercase">Name</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-mut uppercase">Type</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-mut uppercase">Roles</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-line">
           {principals.map(p => (
-            <tr key={`${p.kind}-${p.id}`} className="hover:bg-gray-50">
-              <td className="px-4 py-2.5 text-sm font-medium text-gray-900">
+            <tr key={`${p.kind}-${p.id}`} className="hover:bg-white/[0.03]">
+              <td className="px-4 py-2.5 text-sm font-medium text-ink">
                 <span className="flex items-center gap-2">
-                  {p.kind === 'user' ? <UserIcon size={14} className="text-gray-400" /> : <UsersIcon size={14} className="text-blue-500" />}
+                  {p.kind === 'user' ? <UserIcon size={14} className="text-dim" /> : <UsersIcon size={14} className="text-run" />}
                   {p.name}
                 </span>
               </td>
-              <td className="px-4 py-2.5 text-sm text-gray-500 capitalize align-top">{p.kind}</td>
+              <td className="px-4 py-2.5 text-sm text-mut capitalize align-top">{p.kind}</td>
               <td className="px-4 py-2.5">
                 <div className="flex flex-wrap gap-1.5">
                   {p.roles.map(role => (
-                    <span key={role.roleId}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${role.roleField === 'admin_role' ? 'bg-amber-100 text-amber-800' : role.roleField === 'member_role' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'}`}>
-                      {roleLabel(role.roleField)}
+                    <span key={role.defId}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${/Admin$/.test(role.role) ? 'bg-changed/15 text-changed' : /Member$/.test(role.role) ? 'bg-run/15 text-run' : 'bg-white/5 text-ink2'}`}>
+                      {role.role}
                       {canManage && (
-                        <button onClick={() => revoke({ kind: p.kind, id: p.id, roleId: role.roleId })} className="ml-0.5 -mr-0.5 hover:text-red-600" title="Remove role">
+                        <button onClick={() => revoke({ kind: p.kind, id: p.id, defId: role.defId })} className="ml-0.5 -mr-0.5 hover:text-err" title="Remove role">
                           <X size={11} />
                         </button>
                       )}
@@ -148,7 +158,7 @@ const ResourceAccess: React.FC<Props> = ({ contentType, objectId, canManage = tr
             </tr>
           ))}
           {principals.length === 0 && !loading && (
-            <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-400">No one has explicit access yet.</td></tr>
+            <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-dim">No one has explicit access yet.</td></tr>
           )}
         </tbody>
       </table>

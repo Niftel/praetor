@@ -104,16 +104,22 @@ func (s *OrgStore) Delete(ctx context.Context, id int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// UsersByRoleField returns the users holding a given org role_field (e.g.
-// member_role, admin_role) for the organization.
+// UsersByRoleField returns the users holding the org's member/admin RoleDefinition via
+// the capability assignment tables. roleField is the legacy field ('member_role' /
+// 'admin_role'), mapped to its managed RoleDefinition name.
 func (s *OrgStore) UsersByRoleField(ctx context.Context, orgID int64, roleField string) ([]models.User, error) {
 	users := []models.User{}
 	err := s.db.SelectContext(ctx, &users, `
 		SELECT DISTINCT `+orgUserCols+`
 		FROM users u
-		JOIN role_members rm ON u.id = rm.user_id
-		JOIN roles r ON rm.role_id = r.id
-		WHERE r.content_type = 'organization' AND r.object_id = $1 AND r.role_field = $2`, orgID, roleField)
+		JOIN role_user_assignments ua ON u.id = ua.user_id
+		JOIN object_roles orl ON orl.id = ua.object_role_id
+		JOIN role_definitions d ON d.id = ua.role_definition_id
+		WHERE orl.content_type = 'organization' AND orl.object_id = $1
+		  AND d.name = CASE $2
+		                 WHEN 'admin_role'  THEN 'Organization Admin'
+		                 WHEN 'member_role' THEN 'Organization Member'
+		               END`, orgID, roleField)
 	return users, wrap("OrgStore.UsersByRoleField", err)
 }
 

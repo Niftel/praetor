@@ -56,7 +56,6 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	orgs := handlers.NewOrgsResource(db)
 	users := handlers.NewUsersResource(db)
 	teams := handlers.NewTeamsResource(db)
-	roles := handlers.NewRolesResource(db)
 	access := handlers.NewAccessResource(db)
 
 	// Auth Routes (Public). Login is rate-limited per IP to blunt password
@@ -153,13 +152,16 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 				r.Delete("/", users.DeleteUser)
 				r.Get("/organizations", users.ListUserOrganizations)
 				r.Get("/teams", users.ListUserTeams)
-				r.Get("/roles", users.ListUserRoles)
-				r.Get("/access", access.UserAccess) // roles a user holds, with resource names
+				r.Get("/access", access.UserAccess) // capability roles a user holds
 			})
 		})
 
-		// Per-resource access (who holds which role on an object): AWX-style.
+		// Per-resource access (who holds which RoleDefinition on an object), the
+		// RoleDefinitions assignable on a type, and grant/revoke.
 		r.Get("/access", access.ResourceAccess)
+		r.Post("/access", access.GrantAccess)
+		r.Delete("/access", access.RevokeAccess)
+		r.Get("/role-definitions", access.AssignableRoles)
 
 		// =======================================================================
 		// Teams
@@ -175,22 +177,6 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 				r.Get("/members", teams.ListTeamMembers)
 				r.Post("/members", teams.AddTeamMember)
 				r.Delete("/members/{userID}", teams.RemoveTeamMember)
-			})
-		})
-
-		// =======================================================================
-		// Roles (AWX-style)
-		// =======================================================================
-		r.Route("/roles", func(r chi.Router) {
-			r.Get("/", roles.ListRoles)
-			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", roles.GetRole)
-				r.Get("/users", roles.ListRoleUsers)
-				r.Post("/users", roles.AddRoleUser)
-				r.Delete("/users/{userId}", roles.RemoveRoleUser)
-				r.Get("/teams", roles.ListRoleTeams)
-				r.Post("/teams", roles.AddRoleTeam)
-				r.Delete("/teams/{teamId}", roles.RemoveRoleTeam)
 			})
 		})
 

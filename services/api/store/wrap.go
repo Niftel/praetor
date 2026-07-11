@@ -1,6 +1,11 @@
 package store
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+
+	"github.com/jmoiron/sqlx"
+)
 
 // wrap annotates a store error with the operation that produced it, so a bubbled
 // DB error carries context ("list templates: pq: ...") instead of a bare,
@@ -12,4 +17,22 @@ func wrap(op string, err error) error {
 		return nil
 	}
 	return fmt.Errorf("%s: %w", op, err)
+}
+
+// runInTx runs fn inside a transaction, committing on success and rolling back on any
+// error (or panic). It saves each multi-statement store method from repeating the
+// begin/defer-rollback/commit dance.
+func runInTx(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }

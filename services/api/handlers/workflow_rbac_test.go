@@ -1,7 +1,6 @@
 package handlers_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,11 +21,10 @@ func TestWorkflowRBAC(t *testing.T) {
 	defer db.Close()
 	wf := handlers.NewWorkflowsResource(db)
 	access := rbac.NewAccessChecker(db)
-	ctx := context.Background()
 
 	uniq := time.Now().UnixNano()
 	org := createOrg(t, db, fmt.Sprintf("wf-rbac-org-%d", uniq))
-	creator := createUser(t, db, fmt.Sprintf("wf-creator-%d", uniq))   // org workflow_admin
+	creator := createUser(t, db, fmt.Sprintf("wf-creator-%d", uniq))    // org workflow_admin
 	perWfAdmin := createUser(t, db, fmt.Sprintf("wf-wfadmin-%d", uniq)) // only wfA admin_role
 	execOnly := createUser(t, db, fmt.Sprintf("wf-exec-%d", uniq))      // only wfA execute_role
 	orgExec := createUser(t, db, fmt.Sprintf("wf-orgexec-%d", uniq))    // org execute_role
@@ -55,7 +53,7 @@ func TestWorkflowRBAC(t *testing.T) {
 	}
 	wfB := extractID(t, rec.Body.String())
 
-	if ok, err := access.CanAdmin(ctx, creator, rbac.ContentTypeWorkflowTemplate, wfA); err != nil || !ok {
+	if ok, err := capCheck(access, creator, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionManage); err != nil || !ok {
 		t.Fatalf("creator should administer wfA (creator-admin grant): ok=%v err=%v", ok, err)
 	}
 
@@ -73,13 +71,13 @@ func TestWorkflowRBAC(t *testing.T) {
 
 	// 3. Execute-only: launch authz passes (not 403) + read, but cannot edit.
 	grantObjectRole(t, access, rbac.ContentTypeWorkflowTemplate, wfA, rbac.RoleFieldExecute, execOnly)
-	if ok, err := access.CanExecute(ctx, execOnly, rbac.ContentTypeWorkflowTemplate, wfA); err != nil || !ok {
+	if ok, err := capCheck(access, execOnly, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionExecute); err != nil || !ok {
 		t.Fatalf("execute-only should have execute on wfA: ok=%v err=%v", ok, err)
 	}
-	if ok, _ := access.CanRead(ctx, execOnly, rbac.ContentTypeWorkflowTemplate, wfA); !ok {
+	if ok, _ := capCheck(access, execOnly, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionView); !ok {
 		t.Fatalf("execute-only should read wfA (read is a child of execute)")
 	}
-	if ok, _ := access.CanAdmin(ctx, execOnly, rbac.ContentTypeWorkflowTemplate, wfA); ok {
+	if ok, _ := capCheck(access, execOnly, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionManage); ok {
 		t.Fatalf("execute-only must NOT admin wfA")
 	}
 	execUC := middleware.UserContext{UserID: execOnly}
@@ -93,12 +91,12 @@ func TestWorkflowRBAC(t *testing.T) {
 	}
 
 	// 4. Org execute_role holder can execute any workflow in the org (parent edge).
-	if ok, err := access.CanExecute(ctx, orgExec, rbac.ContentTypeWorkflowTemplate, wfB); err != nil || !ok {
+	if ok, err := capCheck(access, orgExec, rbac.ContentTypeWorkflowTemplate, wfB, rbac.ActionExecute); err != nil || !ok {
 		t.Fatalf("org-execute should run any org workflow (wfB): ok=%v err=%v", ok, err)
 	}
 
 	// 5. Approval is NOT inherited from the workflow admin_role.
-	if ok, _ := access.HasObjectRole(ctx, creator, rbac.ContentTypeWorkflowTemplate, wfA, rbac.RoleFieldApproval); ok {
+	if ok, _ := capCheck(access, creator, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionApprove); ok {
 		t.Fatalf("workflow admin must NOT inherit approval_role (manage != approve)")
 	}
 
@@ -114,17 +112,17 @@ func TestWorkflowRBAC(t *testing.T) {
 		t.Fatalf("org workflow_admin should see both workflows, saw %d", got)
 	}
 
-	// 7. Delete removes the workflow's roles (delete_object_roles arm).
+	// 7. Delete removes the workflow's capability object_roles (rbac_on_object_delete).
 	rec = callJSON(t, wf.DeleteWorkflow, http.MethodDelete, "", creatorUC, map[string]string{"id": fmt.Sprint(wfB)})
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete wfB: want 204, got %d", rec.Code)
 	}
 	var n int
-	if err := db.Get(&n, `SELECT count(*) FROM roles WHERE content_type='workflow_template' AND object_id=$1`, wfB); err != nil {
-		t.Fatalf("count roles: %v", err)
+	if err := db.Get(&n, `SELECT count(*) FROM object_roles WHERE content_type='workflow_template' AND object_id=$1`, wfB); err != nil {
+		t.Fatalf("count object_roles: %v", err)
 	}
 	if n != 0 {
-		t.Fatalf("deleted workflow should have no roles left, found %d", n)
+		t.Fatalf("deleted workflow should have no object_roles left, found %d", n)
 	}
 }
 
