@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/env"
 	"github.com/praetordev/praetor/pkg/plog"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
@@ -16,8 +15,8 @@ import (
 // logger is the api handlers component logger (handler installed by pkg/plog).
 var logger = plog.New("api")
 
-// permAction is the kind of access an endpoint requires on an object. Each maps
-// to an AWX object role field via the AccessChecker.
+// permAction is the kind of access an endpoint requires on an object. Each maps to a DAB
+// capability verb via actionVerb.
 type permAction int
 
 const (
@@ -29,8 +28,8 @@ const (
 	actApprove // approval_role: approve or deny workflow approval nodes
 )
 
-// actionVerb maps a permAction to the DAB capability verb the capability check uses
-// (Gitea #97). actAdmin -> manage is the "administer" capability (see pkg/rbac).
+// actionVerb maps a permAction to the capability verb it requires. actAdmin -> manage is
+// the "administer" capability (see pkg/rbac).
 var actionVerb = map[permAction]rbac.Action{
 	actRead:    rbac.ActionView,
 	actAdmin:   rbac.ActionManage,
@@ -40,55 +39,28 @@ var actionVerb = map[permAction]rbac.Action{
 	actApprove: rbac.ActionApprove,
 }
 
-func (a permAction) String() string {
-	if v, ok := actionVerb[a]; ok {
-		return string(v)
-	}
-	return "unknown"
+// orgCreateCapability maps a delegated org admin role_field to the capability that gates
+// creating that child type, checked on the organization object. Notifications are not a
+// capability content type, so their create is gated on org manage instead (see
+// authorizeOrgRole).
+var orgCreateCapability = map[rbac.RoleField]string{
+	rbac.RoleFieldProjectAdmin:     rbac.Codename(rbac.ContentTypeProject, rbac.ActionAdd),
+	rbac.RoleFieldInventoryAdmin:   rbac.Codename(rbac.ContentTypeInventory, rbac.ActionAdd),
+	rbac.RoleFieldCredentialAdmin:  rbac.Codename(rbac.ContentTypeCredential, rbac.ActionAdd),
+	rbac.RoleFieldJobTemplateAdmin: rbac.Codename(rbac.ContentTypeJobTemplate, rbac.ActionAdd),
+	rbac.RoleFieldWorkflowAdmin:    rbac.Codename(rbac.ContentTypeWorkflowTemplate, rbac.ActionAdd),
 }
 
-// rbacMode selects how authorize() decides (Gitea #97, epic #93). The capability model is
-// the default/target; the legacy AWX-style hierarchy is on a deprecation track (#99).
-//
-//	capability (default) — capability model only.
-//	dual                 — allow if legacy OR capability grants; log every divergence.
-//	                       No access regression; use to soak before/after cutover.
-//	legacy               — legacy hierarchy only (emergency rollback).
-type rbacMode string
-
-const (
-	modeDual       rbacMode = "dual"
-	modeCapability rbacMode = "capability"
-	modeLegacy     rbacMode = "legacy"
-)
-
-func resolveRBACMode() rbacMode {
-	switch rbacMode(env.String("PRAETOR_RBAC_MODE", string(modeCapability))) {
-	case modeDual:
-		return modeDual
-	case modeLegacy:
-		return modeLegacy
-	default:
-		return modeCapability
-	}
-}
-
-// Authorizer is the shared object-level authorization helper. It is embedded by
-// every resource handler so the same enforcement primitives (authorize,
-// readableIDs, grantCreatorAdmin) are available everywhere, not just on
-// ContentHandler.
+// Authorizer is the shared object-level authorization helper, embedded by every resource
+// handler. Authorization runs entirely on the DAB capability model; Access is retained for
+// the roles/org grant handlers that still write assignments through it.
 type Authorizer struct {
 	Access *rbac.AccessChecker
 	caps   *store.CapabilityStore
-	mode   rbacMode
 }
 
 func NewAuthorizer(db *sqlx.DB) *Authorizer {
-	return &Authorizer{
-		Access: rbac.NewAccessChecker(db),
-		caps:   store.NewCapabilityStore(db),
-		mode:   resolveRBACMode(),
-	}
+	return &Authorizer{Access: rbac.NewAccessChecker(db), caps: store.NewCapabilityStore(db)}
 }
 
 // currentUser pulls the authenticated user set by the auth middleware.
@@ -96,14 +68,12 @@ func currentUser(r *http.Request) middleware.UserContext {
 	return r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 }
 
-// authorize verifies the current user may perform action on (contentType,
-// objectID). It writes the appropriate response and returns false when the
-// request must stop — 403 if denied, 500 on a checker error — so callers do:
+// authorize verifies the current user may perform action on (contentType, objectID) via
+// the capability model. It writes the response and returns false when the request must
+// stop — 403 if denied, 500 on error. Superuser (all actions) and system auditor (reads)
+// short-circuit.
 //
 //	if !h.authorize(w, r, ct, id, actAdmin) { return }
-//
-// Superuser (all actions) and system auditor (reads) short-circuit here, so both the
-// legacy and capability paths agree on them regardless of backfill state.
 func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentType rbac.ContentType, objectID int64, action permAction) bool {
 	uc := currentUser(r)
 	if uc.IsSuperuser {
@@ -112,8 +82,12 @@ func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentTy
 	if action == actRead && uc.IsSystemAuditor {
 		return true
 	}
-
-	allowed, err := a.decide(r.Context(), uc.UserID, contentType, objectID, action)
+	verb, ok := actionVerb[action]
+	if !ok {
+		render.ErrForbidden(nil).Render(w, r)
+		return false
+	}
+	allowed, err := a.caps.HasCapability(r.Context(), uc.UserID, contentType, objectID, rbac.Codename(contentType, verb))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return false
@@ -125,68 +99,8 @@ func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentTy
 	return true
 }
 
-// decide runs the legacy and/or capability check per the configured mode. In dual mode it
-// allows if either grants (no access regression) and logs any divergence so the legacy
-// path can be retired once the logs are quiet.
-func (a *Authorizer) decide(ctx context.Context, userID int64, contentType rbac.ContentType, objectID int64, action permAction) (bool, error) {
-	var legacyOK, capOK bool
-	var err error
-	if a.mode != modeCapability {
-		if legacyOK, err = a.legacyCheck(ctx, userID, contentType, objectID, action); err != nil {
-			return false, err
-		}
-	}
-	if a.mode != modeLegacy {
-		if capOK, err = a.capabilityCheck(ctx, userID, contentType, objectID, action); err != nil {
-			return false, err
-		}
-	}
-	switch a.mode {
-	case modeLegacy:
-		return legacyOK, nil
-	case modeCapability:
-		return capOK, nil
-	default: // dual
-		if legacyOK != capOK {
-			logger.Warn("rbac divergence (dual mode)",
-				"user_id", userID, "content_type", contentType, "object_id", objectID,
-				"action", action.String(), "legacy", legacyOK, "capability", capOK)
-		}
-		return legacyOK || capOK, nil
-	}
-}
-
-// legacyCheck is the AWX-style hierarchy check (the pre-#97 behaviour).
-func (a *Authorizer) legacyCheck(ctx context.Context, userID int64, contentType rbac.ContentType, objectID int64, action permAction) (bool, error) {
-	switch action {
-	case actRead:
-		return a.Access.CanRead(ctx, userID, contentType, objectID)
-	case actAdmin:
-		return a.Access.CanAdmin(ctx, userID, contentType, objectID)
-	case actUse:
-		return a.Access.CanUse(ctx, userID, contentType, objectID)
-	case actExecute:
-		return a.Access.CanExecute(ctx, userID, contentType, objectID)
-	case actUpdate:
-		return a.Access.HasObjectRole(ctx, userID, contentType, objectID, rbac.RoleFieldUpdate)
-	case actApprove:
-		return a.Access.HasObjectRole(ctx, userID, contentType, objectID, rbac.RoleFieldApproval)
-	}
-	return false, nil
-}
-
-// capabilityCheck is the DAB capability-model check (the target behaviour).
-func (a *Authorizer) capabilityCheck(ctx context.Context, userID int64, contentType rbac.ContentType, objectID int64, action permAction) (bool, error) {
-	verb, ok := actionVerb[action]
-	if !ok {
-		return false, nil
-	}
-	return a.caps.HasCapability(ctx, userID, contentType, objectID, rbac.Codename(contentType, verb))
-}
-
-// requireSuperuser stops the request with 403 unless the caller is a superuser.
-// For shared/system resources that have no per-org owner (e.g. execution packs,
-// which are runtime infrastructure selected by templates across every org).
+// requireSuperuser stops the request with 403 unless the caller is a superuser. For
+// shared/system resources that have no per-org owner (e.g. execution packs).
 func requireSuperuser(w http.ResponseWriter, r *http.Request) bool {
 	if currentUser(r).IsSuperuser {
 		return true
@@ -195,14 +109,20 @@ func requireSuperuser(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// authorizeOrgRole gates an org-scoped action on a delegated organization role
-// (e.g. project_admin_role for creating a project). Org admins, system admins,
-// and superusers pass automatically through the role hierarchy, so this is
-// strictly wider than the plain org-admin check it replaces on create paths.
-// It writes the response and returns false when the request must stop.
+// authorizeOrgRole gates an org-scoped create on the capability that permits creating the
+// child type, checked on the organization. Org admins (who hold the add_* capability) and
+// superusers pass. It writes the response and returns false when the request must stop.
 func (a *Authorizer) authorizeOrgRole(w http.ResponseWriter, r *http.Request, orgID int64, roleField rbac.RoleField) bool {
 	uc := currentUser(r)
-	allowed, err := a.Access.HasObjectRole(r.Context(), uc.UserID, rbac.ContentTypeOrganization, orgID, roleField)
+	if uc.IsSuperuser {
+		return true
+	}
+	codename, ok := orgCreateCapability[roleField]
+	if !ok {
+		// Not a capability-modelled child type (e.g. notifications): require org manage.
+		codename = rbac.Codename(rbac.ContentTypeOrganization, rbac.ActionManage)
+	}
+	allowed, err := a.caps.HasCapability(r.Context(), uc.UserID, rbac.ContentTypeOrganization, orgID, codename)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return false
@@ -214,29 +134,36 @@ func (a *Authorizer) authorizeOrgRole(w http.ResponseWriter, r *http.Request, or
 	return true
 }
 
-// readableIDs returns the object IDs of contentType the current user may read.
-// FilterAccessibleIDs already returns everything for superusers and system
-// auditors, so list handlers can use this uniformly.
+// readableIDs returns the object IDs of contentType the current user may read. Superusers
+// and system auditors see everything; everyone else gets the objects they hold the view
+// capability on.
 func (a *Authorizer) readableIDs(r *http.Request, contentType rbac.ContentType) ([]int64, error) {
 	uc := currentUser(r)
-	return a.Access.FilterAccessibleIDs(r.Context(), uc.UserID, contentType, rbac.RoleFieldRead)
+	if uc.IsSuperuser || uc.IsSystemAuditor {
+		return a.caps.AllIDsOfType(r.Context(), contentType)
+	}
+	return a.caps.AccessibleIDs(r.Context(), uc.UserID, contentType, rbac.Codename(contentType, rbac.ActionView))
 }
 
-// grantCreatorAdmin makes the creating user an admin of a freshly-created
-// object so a non-superuser can manage what they create (AWX assigns the
-// creator the object's admin_role). Superusers already have implicit access, so
-// they are skipped. Best-effort: a failure is logged, not surfaced, since the
-// object was already created.
+// grantCreatorAdmin assigns the creating user the object's admin RoleDefinition so a
+// non-superuser can manage what they create. Superusers already have implicit access, so
+// they are skipped. Best-effort: a failure is logged, not surfaced.
 func (a *Authorizer) grantCreatorAdmin(ctx context.Context, contentType rbac.ContentType, objectID int64, uc middleware.UserContext) {
 	if uc.IsSuperuser {
 		return
 	}
-	role, err := a.Access.GetObjectRole(ctx, contentType, objectID, rbac.RoleFieldAdmin)
-	if err != nil {
-		logger.Error("authz: admin_role not found to grant creator", "content_type", contentType, "object_id", objectID, "err", err)
+	name, ok := rbac.ManagedNameForLegacy(contentType, rbac.RoleFieldAdmin)
+	if !ok {
+		logger.Error("authz: no admin role definition for content type", "content_type", contentType)
 		return
 	}
-	if err := a.Access.AddUserToRole(ctx, role.ID, uc.UserID); err != nil {
+	def, err := a.caps.GetRoleDefinitionByName(ctx, name)
+	if err != nil {
+		logger.Error("authz: admin role definition not found", "name", name, "err", err)
+		return
+	}
+	ct := string(contentType)
+	if err := a.caps.GiveUserPermission(ctx, def.ID, &ct, &objectID, uc.UserID); err != nil {
 		logger.Error("authz: grant creator admin failed", "user_id", uc.UserID, "content_type", contentType, "object_id", objectID, "err", err)
 	}
 }

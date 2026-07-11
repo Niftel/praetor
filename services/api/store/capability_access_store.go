@@ -2,10 +2,35 @@ package store
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/rbac"
 )
+
+// contentTypeTable whitelists the physical table for each RBAC content type, so
+// AllIDsOfType can build a query without risking injection.
+var contentTypeTable = map[rbac.ContentType]string{
+	rbac.ContentTypeOrganization:     "organizations",
+	rbac.ContentTypeTeam:             "teams",
+	rbac.ContentTypeProject:          "projects",
+	rbac.ContentTypeInventory:        "inventories",
+	rbac.ContentTypeCredential:       "credentials",
+	rbac.ContentTypeJobTemplate:      "job_templates",
+	rbac.ContentTypeWorkflowTemplate: "workflow_templates",
+}
+
+// AllIDsOfType returns every object id of a content type — the global-tier answer for
+// superusers and system auditors, who can see everything.
+func (s *CapabilityStore) AllIDsOfType(ctx context.Context, ct rbac.ContentType) ([]int64, error) {
+	table, ok := contentTypeTable[ct]
+	if !ok {
+		return nil, wrap("CapabilityStore.AllIDsOfType", fmt.Errorf("unknown content type %q", ct))
+	}
+	ids := []int64{}
+	err := s.db.SelectContext(ctx, &ids, `SELECT id FROM `+table+` ORDER BY id`)
+	return ids, wrap("CapabilityStore.AllIDsOfType", err)
+}
 
 // This file holds the assignment + evaluation access path for the DAB capability model
 // (Gitea #96): giving users/teams roles on objects, and answering capability checks
