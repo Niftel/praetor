@@ -77,10 +77,7 @@ func currentUser(r *http.Request) middleware.UserContext {
 func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentType rbac.ContentType, objectID int64, action permAction) bool {
 	uc := currentUser(r)
 	if uc.IsSuperuser {
-		return true
-	}
-	if action == actRead && uc.IsSystemAuditor {
-		return true
+		return true // break-glass superuser (DAB-standard); also holds the global System Administrator role
 	}
 	verb, ok := actionVerb[action]
 	if !ok {
@@ -139,10 +136,17 @@ func (a *Authorizer) authorizeOrgRole(w http.ResponseWriter, r *http.Request, or
 // capability on.
 func (a *Authorizer) readableIDs(r *http.Request, contentType rbac.ContentType) ([]int64, error) {
 	uc := currentUser(r)
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	view := rbac.Codename(contentType, rbac.ActionView)
+	if uc.IsSuperuser {
 		return a.caps.AllIDsOfType(r.Context(), contentType)
 	}
-	return a.caps.AccessibleIDs(r.Context(), uc.UserID, contentType, rbac.Codename(contentType, rbac.ActionView))
+	// A system role (e.g. System Auditor) that grants view globally sees everything.
+	if global, err := a.caps.HasGlobalCapability(r.Context(), uc.UserID, view); err != nil {
+		return nil, err
+	} else if global {
+		return a.caps.AllIDsOfType(r.Context(), contentType)
+	}
+	return a.caps.AccessibleIDs(r.Context(), uc.UserID, contentType, view)
 }
 
 // grantCreatorAdmin assigns the creating user the object's admin RoleDefinition so a

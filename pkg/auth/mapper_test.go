@@ -59,6 +59,21 @@ func objRoleMemberCount(t *testing.T, db *sqlx.DB, ct string, objID, userID int6
 	return n
 }
 
+// globalRoleCount counts a user's assignment of a global (system) RoleDefinition.
+func globalRoleCount(t *testing.T, db *sqlx.DB, defName string, userID int64) int {
+	t.Helper()
+	var n int
+	err := db.Get(&n, `
+		SELECT count(*) FROM role_user_assignments ua
+		JOIN object_roles orl ON orl.id = ua.object_role_id
+		JOIN role_definitions d ON d.id = ua.role_definition_id
+		WHERE d.name=$1 AND orl.content_type IS NULL AND ua.user_id=$2`, defName, userID)
+	if err != nil {
+		t.Fatalf("global role count: %v", err)
+	}
+	return n
+}
+
 // TestMapperRoleDefinitionBinding proves #98: an organization_map `roles:` entry binds a
 // directory group to a DAB RoleDefinition by name, scoped to the org, with grant/revoke
 // semantics — and an unknown role name is a hard error.
@@ -195,6 +210,9 @@ func TestMapperIntegration(t *testing.T) {
 	if !u.IsSuperuser {
 		t.Error("expected is_superuser true after group match")
 	}
+	if globalRoleCount(t, db, "System Administrator", u.ID) != 1 {
+		t.Error("expected global System Administrator assignment after superuser grant")
+	}
 
 	var orgID, teamID int64
 	if err := db.Get(&orgID, `SELECT id FROM organizations WHERE name=$1`, orgName); err != nil {
@@ -218,6 +236,9 @@ func TestMapperIntegration(t *testing.T) {
 	}
 	if u2.IsSuperuser {
 		t.Error("expected is_superuser revoked to false (configured flag, no match)")
+	}
+	if globalRoleCount(t, db, "System Administrator", u.ID) != 0 {
+		t.Error("expected global System Administrator assignment revoked on login 2")
 	}
 	if objRoleMemberCount(t, db, "organization", orgID, u.ID, "admin_role") != 0 {
 		t.Error("expected org admin_role revoked (remove_admins)")
