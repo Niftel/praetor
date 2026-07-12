@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/credentials"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 	"github.com/praetordev/praetor/pkg/inventoryrender"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/objectstore"

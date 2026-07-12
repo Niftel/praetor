@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // Runner orchestrates the local job execution

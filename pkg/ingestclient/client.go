@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // Client talks to a single ingestion base URL. Token, when set, is sent as a

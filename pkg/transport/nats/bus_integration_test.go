@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 	natsbus "github.com/praetordev/praetor/pkg/transport/nats"
 )
 

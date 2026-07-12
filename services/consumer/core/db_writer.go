@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 type DBWriter struct {

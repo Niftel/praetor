@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/praetordev/crypto"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // resolveGalaxyServers returns an organization's configured Ansible Galaxy /

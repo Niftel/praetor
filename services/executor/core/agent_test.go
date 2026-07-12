@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 	"github.com/praetordev/praetor/services/executor/core"
 )
 

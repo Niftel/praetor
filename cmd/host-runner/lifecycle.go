@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // seqCounter is a durable, goroutine-safe monotonic sequence for a run's events.

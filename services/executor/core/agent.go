@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // logger is the executor package component logger; the composition root

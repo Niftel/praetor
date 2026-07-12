@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 	"github.com/praetordev/praetor/services/consumer/core"
 )
 

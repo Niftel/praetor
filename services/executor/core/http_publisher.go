@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 	"github.com/praetordev/praetor/pkg/ingestclient"
 )
 
