@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/db"
 	"github.com/praetordev/env"
 	"github.com/praetordev/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"

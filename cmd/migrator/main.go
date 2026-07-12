@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/db"
 	"github.com/praetordev/praetor/pkg/rbac"
 	"golang.org/x/crypto/bcrypt"
 )

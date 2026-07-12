@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/db"
+	"github.com/praetordev/db"
 	"github.com/praetordev/metrics"
 	"github.com/praetordev/packspec"
 )
