@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 )
 
 // ProjectStore is the data-access layer for the projects domain.

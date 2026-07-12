@@ -15,6 +15,7 @@ require (
 	github.com/nats-io/nats.go v1.52.0
 	github.com/praetordev/credentials v0.1.0
 	github.com/praetordev/db v0.1.0
+	github.com/praetordev/models v0.1.0
 	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/render v0.1.0

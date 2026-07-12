@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 )
 
 // orgUserCols is the deliberately reduced user projection returned by the

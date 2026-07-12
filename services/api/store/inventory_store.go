@@ -6,7 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/launch"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 )
 
 // InventoryStore is the data-access layer for the inventories domain.

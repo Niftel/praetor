@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 )
 
 // HostStore is the data-access layer for the hosts domain (plus the host_facts

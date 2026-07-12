@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/launch"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 )
 
 // Explicit column lists, matching the model structs' db tags (and deliberately

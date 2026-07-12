@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 )
 
 // Render returns the INI inventory for an inventory's enabled hosts and groups.

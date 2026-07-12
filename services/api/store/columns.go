@@ -1,6 +1,6 @@
 package store
 
-import "github.com/praetordev/praetor/pkg/models"
+import "github.com/praetordev/models"
 
 // Exported column lists for the API's resource tables, referenced by handlers in
 // place of `SELECT *`. Centralizing them here means a new DB column can't silently

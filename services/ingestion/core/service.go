@@ -15,7 +15,7 @@ import (
 	"github.com/praetordev/credentials"
 	"github.com/praetordev/events"
 	"github.com/praetordev/praetor/pkg/inventoryrender"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 	"github.com/praetordev/objectstore"
 )
 

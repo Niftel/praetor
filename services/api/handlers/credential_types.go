@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 	"github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 )

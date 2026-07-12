@@ -9,7 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/auth"
 	"github.com/praetordev/crypto"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 	"github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 	"golang.org/x/crypto/bcrypt"
