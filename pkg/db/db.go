@@ -7,7 +7,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 
-	"github.com/praetordev/praetor/pkg/env"
+	"github.com/praetordev/env"
 )
 
 // DefaultDSN is the local-dev fallback connection string, used by mains that

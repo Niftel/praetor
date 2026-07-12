@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/render"
 	"github.com/jmoiron/sqlx"
-	promMetrics "github.com/praetordev/praetor/pkg/metrics"
+	promMetrics "github.com/praetordev/metrics"
 	"github.com/praetordev/praetor/services/api/handlers"
 	modelAuth "github.com/praetordev/praetor/services/api/middleware"
 	praetorRender "github.com/praetordev/praetor/services/api/render"

@@ -9,7 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/crypto"
+	"github.com/praetordev/crypto"
 )
 
 // TestResolveGalaxyServers verifies the scheduler turns an org's attached Galaxy

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/praetordev/praetor/pkg/crypto"
+	"github.com/praetordev/crypto"
 	"github.com/praetordev/praetor/pkg/events"
 )
 

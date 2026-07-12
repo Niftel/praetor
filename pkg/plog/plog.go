@@ -14,7 +14,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/praetordev/praetor/pkg/env"
+	"github.com/praetordev/env"
 )
 
 // Configure installs the process-wide slog default handler from the environment

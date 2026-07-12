@@ -18,7 +18,7 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/hostconn"
 	"github.com/praetordev/praetor/pkg/ingestclient"
-	"github.com/praetordev/praetor/pkg/runtoken"
+	"github.com/praetordev/runtoken"
 	"golang.org/x/crypto/ssh"
 )
 

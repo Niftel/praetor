@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/praetordev/praetor/pkg/db"
-	"github.com/praetordev/praetor/pkg/metrics"
-	"github.com/praetordev/praetor/pkg/packspec"
+	"github.com/praetordev/metrics"
+	"github.com/praetordev/packspec"
 )
 
 func main() {

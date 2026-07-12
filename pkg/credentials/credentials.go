@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"regexp"
 
-	"github.com/praetordev/praetor/pkg/crypto"
+	"github.com/praetordev/crypto"
 )
 
 // CtxGetter is satisfied by both *sqlx.DB and *sqlx.Tx, so the resolver can run

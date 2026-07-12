@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-10T00:00:00Z",
+  "title": "Design System: Praetor",
+  "extensions": {
+    "colorMeta": {
+      "brand-accent": { "role": "primary", "displayName": "Cobalt Link", "canonical": "#4763e6", "tonalRamp": ["#232f6b", "#243284", "#2739a3", "#3049c9", "#4763e6", "#6f8bf5", "#9db2fb", "#dfe6ff"] },
+      "brand-action": { "role": "primary", "displayName": "Prussian Cobalt", "canonical": "#3049c9", "tonalRamp": ["#232f6b", "#243284", "#2739a3", "#3049c9", "#4763e6", "#6f8bf5", "#c3d0fe", "#eef2ff"] },
+      "surface-bg": { "role": "neutral", "displayName": "Control-Plane Surface", "canonical": "#f4f5f8", "tonalRamp": ["#1e2230", "#2b3040", "#3d4356", "#5a6072", "#8b90a0", "#c3c7d2", "#e5e7ee", "#f4f5f8"] },
+      "surface": { "role": "neutral", "displayName": "Panel White", "canonical": "#ffffff", "tonalRamp": ["#111827", "#374151", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb", "#f4f5f8", "#ffffff"] },
+      "ink": { "role": "neutral", "displayName": "Command Ink", "canonical": "#1e2230", "tonalRamp": ["#111827", "#1e2230", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#e5e7eb"] },
+      "sidebar-deep": { "role": "neutral", "displayName": "Deck Deep", "canonical": "#111524", "tonalRamp": ["#0a0d16", "#111524", "#181c2e", "#232a42", "#343c58", "#4b5472", "#6b7490", "#9aa0b8"] },
+      "success": { "role": "tertiary", "displayName": "Converged Green", "canonical": "#047857", "tonalRamp": ["#022c22", "#065f46", "#047857", "#059669", "#10b981", "#6ee7b7", "#a7f3d0", "#ecfdf5"] },
+      "warning": { "role": "tertiary", "displayName": "Degraded Amber", "canonical": "#b45309", "tonalRamp": ["#451a03", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fcd34d", "#fde68a", "#fffbeb"] },
+      "error": { "role": "tertiary", "displayName": "Failed Red", "canonical": "#dc2626", "tonalRamp": ["#450a0a", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#fca5a5", "#fecaca", "#fef2f2"] },
+      "dag-signal": { "role": "tertiary", "displayName": "Signal Teal", "canonical": "#0d9488", "tonalRamp": ["#134e4a", "#115e59", "#0f766e", "#0d9488", "#14b8a6", "#5eead4", "#99f6e4", "#f0fdfa"] },
+      "dag-dispatch": { "role": "tertiary", "displayName": "Dispatch Violet", "canonical": "#7c3aed", "tonalRamp": ["#4c1d95", "#5b21b6", "#6d28d9", "#7c3aed", "#8b5cf6", "#c4b5fd", "#ddd6fe", "#f5f3ff"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Page titles. One per screen." },
+      "title": { "displayName": "Title", "purpose": "Card, section, and modal headers — small and tight." },
+      "body": { "displayName": "Body", "purpose": "The workhorse 14px size for nearly all UI text and controls." },
+      "label": { "displayName": "Micro Label", "purpose": "Uppercase tracked sidebar dividers and micro-labels only." },
+      "data": { "displayName": "Data / Mono", "purpose": "Geist Mono with tabular figures for tables, IDs, timestamps, logs." }
+    },
+    "shadows": [
+      { "name": "xs", "value": "0 1px 2px 0 rgb(24 27 40 / 0.06)", "purpose": "Inputs and secondary buttons at rest." },
+      { "name": "sm", "value": "0 1px 2px 0 rgb(24 27 40 / 0.06), 0 1px 3px 0 rgb(24 27 40 / 0.08)", "purpose": "Default card and panel elevation." },
+      { "name": "md", "value": "0 4px 8px -2px rgb(24 27 40 / 0.08), 0 8px 16px -4px rgb(24 27 40 / 0.08)", "purpose": "Hover state for interactive cards; dropdowns." },
+      { "name": "xl", "value": "0 24px 48px -12px rgb(24 27 40 / 0.18)", "purpose": "Modals and dialogs above a backdrop-blur scrim." },
+      { "name": "brand", "value": "0 6px 16px -4px rgb(48 73 201 / 0.35)", "purpose": "The one cobalt-tinted glow — primary button on hover, used sparingly." }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(0, 0, 0.2, 1)", "purpose": "Default easing for control state transitions." },
+      { "name": "duration-control", "value": "150ms", "purpose": "Buttons, inputs, nav — quick, in-flow feedback." },
+      { "name": "duration-surface", "value": "200ms", "purpose": "Card lift and shadow transitions." }
+    ],
+    "breakpoints": [
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single high-emphasis action per view. Cobalt fill, tactile press, cobalt glow on hover.",
+      "html": "<button class=\"ds-btn-primary\">Launch job</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: #fff; background: #3049c9; border: none; border-radius: 8px; padding: 8px 16px; box-shadow: 0 1px 2px 0 rgb(24 27 40 / 0.06), 0 1px 3px 0 rgb(24 27 40 / 0.08); cursor: pointer; user-select: none; transition: background-color 150ms cubic-bezier(0,0,0.2,1), box-shadow 150ms, transform 150ms; } .ds-btn-primary:hover { background: #2739a3; box-shadow: 0 6px 16px -4px rgb(48 73 201 / 0.35); } .ds-btn-primary:active { background: #243284; transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgb(71 99 230 / 0.6); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral action alongside a primary. White fill, hairline border.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: #374151; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 16px; box-shadow: 0 1px 2px 0 rgb(24 27 40 / 0.06); cursor: pointer; transition: background-color 150ms cubic-bezier(0,0,0.2,1), border-color 150ms; } .ds-btn-secondary:hover { background: #f9fafb; border-color: #9ca3af; } .ds-btn-secondary:active { transform: translateY(1px); } .ds-btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgb(71 99 230 / 0.6); }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-info",
+      "description": "Ring-based state token for job/system status. Tinted surface, colored text, inset ring, optional live dot.",
+      "html": "<span class=\"ds-badge ds-badge-success\"><span class=\"ds-badge-dot\"></span>Converged</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; gap: 6px; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; padding: 2px 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgb(5 150 105 / 0.2); } .ds-badge-success { background: #ecfdf5; color: #047857; } .ds-badge-dot { width: 6px; height: 6px; border-radius: 9999px; background: #10b981; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard form field with bound label. Cobalt focus glow, not a hard outline.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Inventory name</span><input class=\"ds-input\" placeholder=\"prod-web-fleet\" /></label>",
+      "css": ".ds-field { display: block; } .ds-field-label { display: block; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 4px; } .ds-input { display: block; width: 100%; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; color: #111827; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 12px; box-shadow: 0 1px 2px 0 rgb(24 27 40 / 0.06); transition: border-color 150ms cubic-bezier(0,0,0.2,1), box-shadow 150ms; } .ds-input::placeholder { color: #9ca3af; } .ds-input:focus { outline: none; border-color: #4763e6; box-shadow: 0 0 0 2px rgb(71 99 230 / 0.3); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The default raised working surface. Panel white on the tinted body, resting shadow, hairline border.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><h3 class=\"ds-card-title\">Recent jobs</h3></div><div class=\"ds-card-body\">Job output and per-host results.</div></div>",
+      "css": ".ds-card { background: #fff; border: 1px solid rgb(229 231 235 / 0.8); border-radius: 12px; box-shadow: 0 1px 2px 0 rgb(24 27 40 / 0.06), 0 1px 3px 0 rgb(24 27 40 / 0.08); overflow: hidden; } .ds-card-head { padding: 16px 24px; border-bottom: 1px solid #f3f4f6; } .ds-card-title { margin: 0; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.9375rem; font-weight: 600; letter-spacing: -0.01em; color: #111827; } .ds-card-body { padding: 24px; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; line-height: 1.5; color: #1e2230; }"
+    },
+    {
+      "name": "Sidebar Nav Item",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "A navigation row from the dark command rail. Cobalt left marker and icon mark the active route.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item ds-nav-active\"><span class=\"ds-nav-mark\"></span><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"></rect><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"></rect><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"></rect><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"></rect></svg>Dashboard</a><a class=\"ds-nav-item\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z\"></path><path d=\"m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z\"></path></svg>Jobs</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; width: 256px; padding: 12px; background: linear-gradient(to bottom, #111827, #111524); border-radius: 12px; } .ds-nav-item { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 14px; font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: #9ca3af; border-radius: 8px; text-decoration: none; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-nav-item:hover { background: rgb(255 255 255 / 0.04); color: #f3f4f6; } .ds-nav-active { background: rgb(255 255 255 / 0.06); color: #fff; } .ds-nav-active svg { color: #9db2fb; } .ds-nav-mark { position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 9999px; background: #6f8bf5; }"
+    },
+    {
+      "name": "Workflow DAG",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "The signature surface: a dependency-free SVG layered directed graph shared by the workflow builder, detail, and live run views. In the run view, node fills are driven by real per-node status — the graph is the converged state. Shown here run-view colored: a converged node feeding a running node.",
+      "html": "<div class=\"ds-dag\"><svg width=\"444\" height=\"84\" viewBox=\"0 0 444 84\"><defs><marker id=\"ds-dag-arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L7,3 L0,6 Z\" fill=\"#16a34a\"></path></marker></defs><path d=\"M184,42 L260,42\" fill=\"none\" stroke=\"#16a34a\" stroke-width=\"2\" marker-end=\"url(#ds-dag-arrow)\"></path><g><rect x=\"16\" y=\"16\" width=\"168\" height=\"52\" rx=\"8\" fill=\"#dcfce7\" stroke=\"#16a34a\" stroke-width=\"1.5\"></rect><text x=\"26\" y=\"37\" font-family=\"'Geist Variable', ui-sans-serif, system-ui, sans-serif\" font-size=\"13\" font-weight=\"600\" fill=\"#166534\">Build image</text><text x=\"26\" y=\"55\" font-family=\"'Geist Variable', ui-sans-serif, system-ui, sans-serif\" font-size=\"11\" fill=\"#166534\" opacity=\"0.85\">▶ successful</text></g><g><rect x=\"260\" y=\"16\" width=\"168\" height=\"52\" rx=\"8\" fill=\"#dbeafe\" stroke=\"#2563eb\" stroke-width=\"1.5\"></rect><text x=\"270\" y=\"37\" font-family=\"'Geist Variable', ui-sans-serif, system-ui, sans-serif\" font-size=\"13\" font-weight=\"600\" fill=\"#1e40af\">Deploy fleet</text><text x=\"270\" y=\"55\" font-family=\"'Geist Variable', ui-sans-serif, system-ui, sans-serif\" font-size=\"11\" fill=\"#1e40af\" opacity=\"0.85\">▶ running</text></g></svg></div>",
+      "css": ".ds-dag { display: inline-block; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; } .ds-dag svg { display: block; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Control Plane",
+    "overview": "Praetor is the authoritative deck from which fleets are run. The interface reads like a command surface for serious infrastructure work: a deep cobalt identity, dense-but-composed layouts, and honest status everywhere. It is built for a team that spans the calm configuring hour and the tense incident minute in a single sitting. Every surface reinforces the platform's central promise: the state shown is the real, converged truth of what happened on the executors, never a hopeful projection. The system is deliberately quiet — character comes from restraint and craft, not decoration.",
+    "keyCharacteristics": [
+      "Single authoritative accent: one deep cobalt ('Prussian'), used for action, selection, and state — never decoration.",
+      "Cool-tinted, textured light surface (#f4f5f8 with a faint dot-grid) — never flat clinical white.",
+      "One type family (Geist) in weights, with Geist Mono for data and logs; tabular figures wherever numbers matter.",
+      "Dense but legible: compact controls, calm status vocabulary, structural depth that stays quiet at rest.",
+      "Honest state above all — status is never ambiguous, and color is never the only signal."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Praetor has exactly one brand hue. Cobalt marks action, current selection, focus, and info — nothing else. Its authority comes from scarcity.", "section": "colors" },
+      { "name": "The Honest Surface Rule", "body": "The body is #f4f5f8 with its dot-grid, always. Flat clinical white (#fff, #f8fafc) is forbidden as a full-page background.", "section": "colors" },
+      { "name": "The State-Never-By-Color-Alone Rule", "body": "Job status is always carried by a label and, where live, a status dot — never hue alone.", "section": "colors" },
+      { "name": "The Data-Viz Exception Rule", "body": "Signal Teal and Dispatch Violet exist for the workflow DAG and nothing else. They are forbidden in general chrome — buttons, nav, badges, links, backgrounds. One accent everywhere; a scoped categorical palette only inside the data visualization.", "section": "colors" },
+      { "name": "The Tabular Digit Rule", "body": "Everywhere numbers matter — tables, metrics, logs — digits use tabular-nums so columns align.", "section": "typography" },
+      { "name": "The Fixed-Scale Rule", "body": "Type sizes are a fixed rem scale, never fluid clamp(). Product density wants predictable sizes.", "section": "typography" },
+      { "name": "The Cool-Shadow Rule", "body": "Every shadow is tinted to rgb(24 27 40), never black. The cool tint keeps a dense UI from feeling clinical.", "section": "elevation" },
+      { "name": "The Lift-On-Intent Rule", "body": "Surfaces are calm at rest. A card lifts only when clickable; a button presses on click. Motion is a response to intent, never ambient.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep cobalt scarce — action, selection, focus, and info only. One accent, earning authority through rarity.",
+      "Do keep the body on #f4f5f8 with its dot-grid, and keep working surfaces Panel White above it.",
+      "Do use Geist Mono with tabular-nums for all data, IDs, timestamps, and logs.",
+      "Do carry job status with a label (and live dot) as well as color — status must survive without hue.",
+      "Do tint every shadow to rgb(24 27 40) and let surfaces stay calm at rest, lifting only on genuine intent.",
+      "Do ship every interactive component with default, hover, focus-visible, active, and disabled states.",
+      "Do honor prefers-reduced-motion and keep transitions state-driven and <=250ms."
+    ],
+    "donts": [
+      "Don't reproduce the cramped, dated AWX / Ansible Tower look.",
+      "Don't drift toward the generic AI-SaaS template: no purple gradients, hero-metric card walls, decorative glassmorphism, or identical icon-card grids.",
+      "Don't go consumer or playful — no mascots, candy colors, big illustrations, or marketing flourish.",
+      "Don't ship sterile enterprise gray — no flat clinical #fff/#f8fafc backgrounds, dead grays, or zero-warmth surfaces.",
+      "Don't use background-clip:text gradient headings or colored border-left/right accent stripes.",
+      "Don't nest a card inside a card, or reach for a modal before exhausting inline alternatives.",
+      "Don't use fluid clamp() type or a second display typeface — one Geist family, fixed rem scale.",
+      "Don't let muted text drop below 4.5:1 contrast."
+    ]
+  }
+}

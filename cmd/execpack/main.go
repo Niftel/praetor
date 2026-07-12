@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/praetordev/praetor/pkg/packspec"
+	"github.com/praetordev/packspec"
 )
 
 func envOr(key, def string) string {

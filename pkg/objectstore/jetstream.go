@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/praetordev/praetor/pkg/env"
+	"github.com/praetordev/env"
 )
 
 // DefaultBucket is the JetStream object-store bucket holding job output chunks.

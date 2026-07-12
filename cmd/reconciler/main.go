@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/crypto"
+	"github.com/praetordev/crypto"
 	"github.com/praetordev/praetor/pkg/db"
-	"github.com/praetordev/praetor/pkg/env"
-	"github.com/praetordev/praetor/pkg/metrics"
+	"github.com/praetordev/env"
+	"github.com/praetordev/metrics"
 	"github.com/praetordev/praetor/pkg/plog"
 	core "github.com/praetordev/praetor/services/reconciler/core"
 )

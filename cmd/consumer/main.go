@@ -3,10 +3,10 @@ package main
 import (
 	"log"
 
-	"github.com/praetordev/praetor/pkg/crypto"
+	"github.com/praetordev/crypto"
 	"github.com/praetordev/praetor/pkg/db"
-	"github.com/praetordev/praetor/pkg/env"
-	"github.com/praetordev/praetor/pkg/metrics"
+	"github.com/praetordev/env"
+	"github.com/praetordev/metrics"
 	"github.com/praetordev/praetor/pkg/plog"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/consumer/core"
