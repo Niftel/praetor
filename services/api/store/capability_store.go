@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 )
 
 // CapabilityStore is the data-access layer for the DAB-style capability RBAC tables

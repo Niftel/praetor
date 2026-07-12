@@ -10,7 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/db"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 	"golang.org/x/crypto/bcrypt"
 )
 

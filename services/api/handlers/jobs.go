@@ -20,7 +20,7 @@ import (
 	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/models"
 	"github.com/praetordev/plog"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/praetor/services/api/store"
 )
 

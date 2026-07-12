@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 )
 
 // Every column const must stay in lockstep with the db tags of the struct it is

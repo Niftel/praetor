@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 )
 
 // contentTypeTable whitelists the physical table for each RBAC content type, so

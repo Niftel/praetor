@@ -10,7 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 )

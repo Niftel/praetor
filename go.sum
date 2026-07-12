@@ -155,6 +155,8 @@ github.com/praetordev/packspec v0.1.0 h1:SFat0DiN1tbSw8yePMd9+G64zoxTqD/CAshf14x
 github.com/praetordev/packspec v0.1.0/go.mod h1:+nxnB4Cn1sex6VAzwXoZe4owcDmCwQBs+OdcnDzFX5g=
 github.com/praetordev/plog v0.1.0 h1:SDqOJK8hz86xnzCQ5Tq7TGujE1WeWEnxEq3xqMp+sEc=
 github.com/praetordev/plog v0.1.0/go.mod h1:XNK4wMTvkJIcJ+RtBuNkF538yr2cKowo84Cq1w+WF/8=
+github.com/praetordev/rbac v0.1.0 h1:/HP+U0lk4yTxWm4UGVP83KVSYDdSjyY+f/1p6ZxSlNY=
+github.com/praetordev/rbac v0.1.0/go.mod h1:qRLLSc41+sstKUig9OODVHufpguC5ca6i9uRnVjhY1s=
 github.com/praetordev/registry v0.1.0 h1:QXFEMLKtkqMmcKaKlKUc5KrOT/l+rm9qoSBju4bG3pQ=
 github.com/praetordev/registry v0.1.0/go.mod h1:8pC6g1iSZW6mU1OvSZ4eW1tsXZuvZSnO59hLtMAGUvo=
 github.com/praetordev/render v0.1.0 h1:C8STNpDFvqmEEjiK6ccYeJM6825qoUd3osvgACSKqpU=

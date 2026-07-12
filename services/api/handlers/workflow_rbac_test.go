@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
