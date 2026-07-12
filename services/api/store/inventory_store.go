@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
 )
 

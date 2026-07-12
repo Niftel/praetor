@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 )
 
 // JobTemplateWebhook is what an inbound job-template webhook needs to verify and

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 )
 
 // EventIntakeSource is the minimal source row the public intake path verifies against.

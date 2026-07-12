@@ -17,7 +17,7 @@ import (
 	"github.com/go-chi/render"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
 	"github.com/praetordev/plog"
 	"github.com/praetordev/rbac"

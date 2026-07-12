@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"

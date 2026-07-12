@@ -10,7 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/env"
 	"github.com/praetordev/events"
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
 	"github.com/praetordev/objectstore"
 	"github.com/praetordev/plog"
