@@ -25,7 +25,7 @@ import (
 
 	"github.com/praetordev/praetor/pkg/credentials"
 	"github.com/praetordev/praetor/pkg/events"
-	"github.com/praetordev/praetor/pkg/hostconn"
+	"github.com/praetordev/hostconn"
 	"github.com/praetordev/praetor/pkg/plog"
 	"golang.org/x/crypto/ssh"
 )

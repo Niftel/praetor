@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/praetordev/praetor/pkg/events"
-	"github.com/praetordev/praetor/pkg/hostconn"
+	"github.com/praetordev/hostconn"
 	"github.com/praetordev/praetor/pkg/ingestclient"
 	"github.com/praetordev/runtoken"
 	"golang.org/x/crypto/ssh"
