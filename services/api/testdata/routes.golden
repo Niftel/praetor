@@ -149,4 +149,5 @@ PUT     /api/v1/triggers/event/{id}
 PUT     /api/v1/users/{id}/
 PUT     /api/v1/workflow-templates/{id}
 PUT     /metrics
+QUERY   /metrics
 TRACE   /metrics

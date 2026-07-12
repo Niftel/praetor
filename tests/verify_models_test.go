@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 )
 
 func TestModelsInstantiate(t *testing.T) {

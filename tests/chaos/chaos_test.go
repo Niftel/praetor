@@ -16,7 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 	natsbus "github.com/praetordev/praetor/pkg/transport/nats"
 	consumercore "github.com/praetordev/praetor/services/consumer/core"
 )
