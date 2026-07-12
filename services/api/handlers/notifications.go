@@ -40,8 +40,8 @@ type NotificationsResource struct {
 	store NotificationStore
 }
 
-func NewNotificationsResource(db *sqlx.DB) *NotificationsResource {
-	return &NotificationsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewNotificationStore(db)}
+func NewNotificationsResource(db *sqlx.DB, authz *Authorizer) *NotificationsResource {
+	return &NotificationsResource{DB: db, Authorizer: authz, store: store.NewNotificationStore(db)}
 }
 
 // ListNotificationTemplates GET /api/v1/notification-templates?organization_id=N

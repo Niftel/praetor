@@ -37,19 +37,22 @@ type TeamsResource struct {
 	store TeamStore
 }
 
-func NewTeamsResource(db *sqlx.DB) *TeamsResource {
-	return &TeamsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTeamStore(db)}
+func NewTeamsResource(db *sqlx.DB, authz *Authorizer) *TeamsResource {
+	return &TeamsResource{DB: db, Authorizer: authz, store: store.NewTeamStore(db)}
 }
 
 // ListTeams GET /api/v1/teams
 func (h *TeamsResource) ListTeams(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
-	uc := currentUser(r)
-
 	var teams []models.Team
 	var total int64
 
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := h.canViewAll(r, rbac.ContentTypeTeam)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		var err error
 		if teams, err = h.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)

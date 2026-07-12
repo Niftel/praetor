@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/services/api/middleware"
+	"github.com/praetordev/rbac"
 	render "github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 )
@@ -25,12 +26,13 @@ type TokenStore interface {
 
 // TokensResource manages a user's personal access tokens (headless/CI API auth).
 type TokensResource struct {
+	*Authorizer
 	DB    *sqlx.DB
 	store TokenStore
 }
 
-func NewTokensResource(db *sqlx.DB) *TokensResource {
-	return &TokensResource{DB: db, store: store.NewTokenStore(db)}
+func NewTokensResource(db *sqlx.DB, authz *Authorizer) *TokensResource {
+	return &TokensResource{Authorizer: authz, DB: db, store: store.NewTokenStore(db)}
 }
 
 func (rs *TokensResource) Routes() chi.Router {
@@ -94,8 +96,15 @@ func (rs *TokensResource) Revoke(w http.ResponseWriter, r *http.Request) {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	// Administering any user's tokens is the global manage_user capability;
+	// without it a user may only revoke their own.
+	isAdmin, err := rs.holdsGlobal(r, rbac.CapManageUser)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
 	var restrict *int64
-	if !uc.IsSuperuser {
+	if !isAdmin {
 		restrict = &uc.UserID
 	}
 	n, err := rs.store.Revoke(r.Context(), id, restrict)

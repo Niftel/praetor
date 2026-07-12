@@ -19,7 +19,7 @@ require (
 	github.com/praetordev/models v0.1.0
 	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
-	github.com/praetordev/rbac v0.1.0
+	github.com/praetordev/rbac v1.0.0
 	github.com/praetordev/render v0.1.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2

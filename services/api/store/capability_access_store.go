@@ -20,6 +20,52 @@ var contentTypeTable = map[rbac.ContentType]string{
 	rbac.ContentTypeWorkflowTemplate: "workflow_templates",
 }
 
+// CapabilityStore is the Policy Decision Point behind rbac.Authorizer: handlers
+// depend on the interface, this concrete type answers via the two-tier
+// capability SQL. The adapter methods below (Can/CanCodename/CanGlobal/
+// VisibleIDs) are thin translations onto the HasCapability family; the legacy
+// is_superuser bypass is NOT here — it lives in rbac.WithLegacySystemFlags,
+// which wraps this store.
+var _ rbac.Authorizer = (*CapabilityStore)(nil)
+
+// Can implements rbac.Authorizer: sub may perform action on obj, checked as the
+// codename Codename(obj.Type, action). An action outside obj.Type's catalog is a
+// programming error, surfaced as an error (→ 500) rather than a silent deny.
+func (s *CapabilityStore) Can(ctx context.Context, sub rbac.Subject, action rbac.Action, obj rbac.Object) (bool, error) {
+	if !rbac.IsValidCapability(obj.Type, action) {
+		return false, wrap("CapabilityStore.Can", fmt.Errorf("capability %q is not defined for content type %q", action, obj.Type))
+	}
+	return s.CanCodename(ctx, sub, rbac.Codename(obj.Type, action), obj)
+}
+
+// CanCodename implements rbac.Authorizer: sub holds an arbitrary codename on obj.
+// The codename may name a different content type than obj (the cross-type
+// create-in-container check), so it is not validated against obj.Type here.
+func (s *CapabilityStore) CanCodename(ctx context.Context, sub rbac.Subject, codename string, obj rbac.Object) (bool, error) {
+	return s.HasCapability(ctx, sub.UserID, obj.Type, obj.ID, codename)
+}
+
+// CanGlobal implements rbac.Authorizer: sub holds codename with global scope.
+func (s *CapabilityStore) CanGlobal(ctx context.Context, sub rbac.Subject, codename string) (bool, error) {
+	return s.HasGlobalCapability(ctx, sub.UserID, codename)
+}
+
+// VisibleIDs implements rbac.Authorizer: the object ids of t on which sub holds
+// action, unifying the two tiers — a global grant of the codename sees every
+// object of the type; otherwise the scoped (materialised) rows. The break-glass
+// superuser case (no per-object rows) is handled by the legacy decorator.
+func (s *CapabilityStore) VisibleIDs(ctx context.Context, sub rbac.Subject, action rbac.Action, t rbac.ContentType) ([]int64, error) {
+	codename := rbac.Codename(t, action)
+	global, err := s.HasGlobalCapability(ctx, sub.UserID, codename)
+	if err != nil {
+		return nil, err
+	}
+	if global {
+		return s.AllIDsOfType(ctx, t)
+	}
+	return s.AccessibleIDs(ctx, sub.UserID, t, codename)
+}
+
 // AllIDsOfType returns every object id of a content type — the global-tier answer for
 // superusers and system auditors, who can see everything.
 func (s *CapabilityStore) AllIDsOfType(ctx context.Context, ct rbac.ContentType) ([]int64, error) {

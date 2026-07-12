@@ -28,8 +28,8 @@ type AuthResource struct {
 	LDAPConfigPath string
 }
 
-func NewAuthResource(db *sqlx.DB) *AuthResource {
-	return &AuthResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewUserStore(db)}
+func NewAuthResource(db *sqlx.DB, authz *Authorizer) *AuthResource {
+	return &AuthResource{DB: db, Authorizer: authz, store: store.NewUserStore(db)}
 }
 
 var jwtSecret = []byte(getJWTSecret())

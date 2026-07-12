@@ -35,8 +35,8 @@ type GroupsResource struct {
 }
 
 // NewGroupsResource creates a new groups resource handler
-func NewGroupsResource(db *sqlx.DB) *GroupsResource {
-	return &GroupsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewGroupStore(db)}
+func NewGroupsResource(db *sqlx.DB, authz *Authorizer) *GroupsResource {
+	return &GroupsResource{DB: db, Authorizer: authz, store: store.NewGroupStore(db)}
 }
 
 // authorizeGroup enforces access on a group via its parent inventory's roles

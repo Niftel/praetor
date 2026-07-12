@@ -107,7 +107,7 @@ func seedRBACPermissions(database *sqlx.DB) {
 	if !tableExists(database, "dab_permissions") {
 		return
 	}
-	catalog := rbac.PermissionCatalog()
+	catalog := append(rbac.PermissionCatalog(), rbac.SystemPermissionCatalog()...)
 	for _, p := range catalog {
 		if _, err := database.Exec(`
 			INSERT INTO dab_permissions (codename, content_type, action, name)

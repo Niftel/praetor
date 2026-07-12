@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/praetordev/models"
-	"github.com/praetordev/rbac"
 )
 
 // Every column const must stay in lockstep with the db tags of the struct it is
@@ -31,7 +30,6 @@ func TestColumnConstsMatchStructTags(t *testing.T) {
 		{"HostCols", HostCols, models.Host{}},
 		{"InventoryCols", InventoryCols, models.Inventory{}},
 		{"GroupCols", GroupCols, models.Group{}},
-		{"RoleCols", RoleCols, rbac.Role{}},
 		{"JobTemplateCols", JobTemplateCols, models.JobTemplate{}},
 		{"ProjectCols", ProjectCols, models.Project{}},
 		{"OrganizationCols", OrganizationCols, models.Organization{}},

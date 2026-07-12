@@ -59,10 +59,10 @@ type JobsResource struct {
 	log           *slog.Logger
 }
 
-func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string) *JobsResource {
+func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string, authz *Authorizer) *JobsResource {
 	return &JobsResource{
 		DB:            db,
-		Authorizer:    NewAuthorizer(db),
+		Authorizer:    authz,
 		IngestionURL:  ingestionURL,
 		internalToken: internalToken,
 		store:         store.NewJobStore(db),
@@ -83,8 +83,12 @@ func (rs *JobsResource) authorizeRunRead(w http.ResponseWriter, r *http.Request,
 	if ok {
 		return rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actRead)
 	}
-	uc := currentUser(r)
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	if verr != nil {
+		render.Render(w, r, ErrInternal(verr))
+		return false
+	}
+	if viewAll {
 		return true
 	}
 	render.Render(w, r, ErrForbidden)
@@ -106,9 +110,12 @@ func (rs *JobsResource) Routes() chi.Router {
 
 // ListUnifiedJobs returns a list of unified jobs
 func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) {
-	uc := currentUser(r)
-
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	if verr != nil {
+		render.Render(w, r, ErrInternal(verr))
+		return
+	}
+	if viewAll {
 		jobs, err := rs.store.ListRecent(r.Context(), 50)
 		if err != nil {
 			render.Render(w, r, ErrInternal(err))

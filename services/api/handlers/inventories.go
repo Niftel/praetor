@@ -46,19 +46,23 @@ type InventoriesResource struct {
 }
 
 // NewInventoriesResource creates a new inventories resource handler
-func NewInventoriesResource(db *sqlx.DB) *InventoriesResource {
-	return &InventoriesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewInventoryStore(db)}
+func NewInventoriesResource(db *sqlx.DB, authz *Authorizer) *InventoriesResource {
+	return &InventoriesResource{DB: db, Authorizer: authz, store: store.NewInventoryStore(db)}
 }
 
 // ListInventories GET /api/v1/inventories
 func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
-	uc := currentUser(r)
 
 	var inventories []models.Inventory
 	var total int64
 
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeInventory)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		var err error
 		if inventories, err = rs.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)

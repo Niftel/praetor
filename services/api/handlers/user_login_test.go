@@ -18,8 +18,8 @@ import (
 func TestUserCreateLogin(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	users := handlers.NewUsersResource(db)
-	auth := handlers.NewAuthResource(db)
+	users := handlers.NewUsersResource(db, handlers.NewAuthorizer(db))
+	auth := handlers.NewAuthResource(db, handlers.NewAuthorizer(db))
 
 	uname := fmt.Sprintf("logintest-%d", time.Now().UnixNano())
 	super := middleware.UserContext{UserID: 1, IsSuperuser: true}

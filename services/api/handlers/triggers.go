@@ -36,8 +36,8 @@ type TriggersResource struct {
 	store TriggerStore
 }
 
-func NewTriggersResource(db *sqlx.DB) *TriggersResource {
-	return &TriggersResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTriggerStore(db)}
+func NewTriggersResource(db *sqlx.DB, authz *Authorizer) *TriggersResource {
+	return &TriggersResource{DB: db, Authorizer: authz, store: store.NewTriggerStore(db)}
 }
 
 // eventTrigger aliases the store DTO so handler code reads unchanged.
@@ -56,8 +56,12 @@ func (rs *TriggersResource) Routes() chi.Router {
 var validEventTypes = map[string]bool{"job_succeeded": true, "job_failed": true, "job_finished": true}
 
 func (rs *TriggersResource) ListEvent(w http.ResponseWriter, r *http.Request) {
-	uc := currentUser(r)
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeOrganization)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		rows, err := rs.store.ListEventAll(r.Context())
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
@@ -170,8 +174,11 @@ type webhookTrigger struct {
 // enabled, with the URL to POST to — the secret is never returned.
 func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) {
 	out := []webhookTrigger{}
-	uc := currentUser(r)
-	all := uc.IsSuperuser || uc.IsSystemAuditor
+	all, verr := rs.canViewAll(r, rbac.ContentTypeOrganization)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
 	var orgIDs []int64
 	if !all {
 		var err error
@@ -195,9 +202,15 @@ func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) 
 		out = append(out, webhookTrigger{Kind: "job_template", ID: x.ID, Name: x.Name, Service: x.Service,
 			URL: fmt.Sprintf("/api/v1/webhooks/job-templates/%d/%s", x.ID, x.Service)})
 	}
-	// Execution packs are shared infrastructure managed by superusers, so only they
-	// see pack build triggers. Packs have no service; the URL takes it as a param.
-	if uc.IsSuperuser {
+	// Execution packs are shared infrastructure; only holders of the global
+	// manage_executionpack capability see pack build triggers. Packs have no
+	// service; the URL takes it as a param.
+	packAdmin, err := rs.holdsGlobal(r, rbac.CapManageExecutionPack)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if packAdmin {
 		ep, _ := rs.store.WebhookPacks(r.Context())
 		for _, x := range ep {
 			out = append(out, webhookTrigger{Kind: "execution_pack", ID: x.ID, Name: x.Name, Service: x.Service,

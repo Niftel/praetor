@@ -19,7 +19,7 @@ import (
 func TestWorkflowRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	wf := handlers.NewWorkflowsResource(db)
+	wf := handlers.NewWorkflowsResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()

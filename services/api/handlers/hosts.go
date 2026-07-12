@@ -37,8 +37,8 @@ type HostsResource struct {
 }
 
 // NewHostsResource creates a new hosts resource handler
-func NewHostsResource(db *sqlx.DB) *HostsResource {
-	return &HostsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewHostStore(db)}
+func NewHostsResource(db *sqlx.DB, authz *Authorizer) *HostsResource {
+	return &HostsResource{DB: db, Authorizer: authz, store: store.NewHostStore(db)}
 }
 
 // authorizeHost enforces access on a host via its parent inventory's roles

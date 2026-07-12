@@ -13,7 +13,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
 	"github.com/praetordev/rbac"
-	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 )
@@ -45,21 +44,26 @@ type OrgsResource struct {
 	store OrgStore
 }
 
-func NewOrgsResource(db *sqlx.DB) *OrgsResource {
-	return &OrgsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewOrgStore(db)}
+func NewOrgsResource(db *sqlx.DB, authz *Authorizer) *OrgsResource {
+	return &OrgsResource{DB: db, Authorizer: authz, store: store.NewOrgStore(db)}
 }
 
 // ListOrganizations GET /api/v1/organizations
 // Returns organizations the user has read access to
 func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request) {
-	userCtx := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	pg := render.ParsePagination(r)
 
 	var orgs []models.Organization
 	var total int64
 
-	// Superusers and system auditors see all
-	if userCtx.IsSuperuser {
+	// Superusers and system auditors (global view) see all; everyone else is
+	// filtered to the organizations they can read.
+	viewAll, verr := h.canViewAll(r, rbac.ContentTypeOrganization)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		var err error
 		if orgs, err = h.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)
@@ -96,9 +100,9 @@ func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request)
 // Only superusers can create organizations (AWX behavior)
 func (h *OrgsResource) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 
-	// Only superusers can create organizations
-	if !currentUser(r).IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	// Creating an organization is a global add_organization capability (held by
+	// System Administrator / break-glass superuser).
+	if !h.requireGlobal(w, r, rbac.Codename(rbac.ContentTypeOrganization, rbac.ActionAdd)) {
 		return
 	}
 
@@ -165,8 +169,8 @@ func (h *OrgsResource) UpdateOrganization(w http.ResponseWriter, r *http.Request
 func (h *OrgsResource) DeleteOrganization(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
 
-	if !currentUser(r).IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	// Deleting an organization is a global delete_organization capability.
+	if !h.requireGlobal(w, r, rbac.Codename(rbac.ContentTypeOrganization, rbac.ActionDelete)) {
 		return
 	}
 

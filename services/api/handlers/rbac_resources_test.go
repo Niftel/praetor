@@ -52,8 +52,8 @@ func capCheck(access *rbac.AccessChecker, user int64, ct rbac.ContentType, id in
 func TestInventoryHostRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	invRes := handlers.NewInventoriesResource(db)
-	hostRes := handlers.NewHostsResource(db)
+	invRes := handlers.NewInventoriesResource(db, handlers.NewAuthorizer(db))
+	hostRes := handlers.NewHostsResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()
@@ -118,8 +118,8 @@ func TestInventoryHostRBAC(t *testing.T) {
 func TestTemplateExecuteRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	tmplRes := handlers.NewTemplatesResource(db)
-	jobsRes := handlers.NewJobsResource(db, "", "")
+	tmplRes := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
+	jobsRes := handlers.NewJobsResource(db, "", "", handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()

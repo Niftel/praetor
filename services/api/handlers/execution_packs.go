@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/packspec"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 )
@@ -44,12 +45,13 @@ type ExecutionPackStore interface {
 }
 
 type ExecutionPacksResource struct {
+	*Authorizer
 	DB    *sqlx.DB
 	store ExecutionPackStore
 }
 
-func NewExecutionPacksResource(db *sqlx.DB) *ExecutionPacksResource {
-	return &ExecutionPacksResource{DB: db, store: store.NewExecutionPackStore(db)}
+func NewExecutionPacksResource(db *sqlx.DB, authz *Authorizer) *ExecutionPacksResource {
+	return &ExecutionPacksResource{Authorizer: authz, DB: db, store: store.NewExecutionPackStore(db)}
 }
 
 // executionPack aliases the store DTO so existing handler code reads unchanged.
@@ -75,7 +77,7 @@ func (rs *ExecutionPacksResource) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageExecutionPack) {
 		return
 	}
 	var in executionPack
@@ -107,7 +109,7 @@ func (rs *ExecutionPacksResource) Create(w http.ResponseWriter, r *http.Request)
 // (it's never returned, so a client can't round-trip it). A pack with a spec or a
 // git source is re-queued so the change rebuilds.
 func (rs *ExecutionPacksResource) Update(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageExecutionPack) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -140,7 +142,7 @@ func (rs *ExecutionPacksResource) Update(w http.ResponseWriter, r *http.Request)
 // Rebuild POST /execution-packs/{id}/rebuild — manually re-queue a pack for the
 // packbuilder (pulls from git if git-backed, else rebuilds the stored spec).
 func (rs *ExecutionPacksResource) Rebuild(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageExecutionPack) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -164,7 +166,7 @@ func (rs *ExecutionPacksResource) Rebuild(w http.ResponseWriter, r *http.Request
 }
 
 func (rs *ExecutionPacksResource) Delete(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageExecutionPack) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

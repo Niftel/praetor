@@ -32,8 +32,8 @@ type CredentialsResource struct {
 	store CredentialStore
 }
 
-func NewCredentialsResource(db *sqlx.DB) *CredentialsResource {
-	return &CredentialsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewCredentialStore(db)}
+func NewCredentialsResource(db *sqlx.DB, authz *Authorizer) *CredentialsResource {
+	return &CredentialsResource{DB: db, Authorizer: authz, store: store.NewCredentialStore(db)}
 }
 
 func (rs *CredentialsResource) Routes() chi.Router {
@@ -47,10 +47,13 @@ func (rs *CredentialsResource) Routes() chi.Router {
 }
 
 func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Request) {
-	uc := currentUser(r)
-
 	var creds []models.Credential
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeCredential)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		var err error
 		if creds, err = rs.store.ListAll(r.Context()); err != nil {
 			render.ErrInternal(err).Render(w, r)

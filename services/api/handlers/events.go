@@ -18,6 +18,7 @@ import (
 	"github.com/hyperjumptech/grule-rule-engine/pkg"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/launch"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 )
@@ -46,12 +47,13 @@ type EventStore interface {
 // adapted to a push model: point Alertmanager/monitoring at /events/{source} and a
 // matching rule heals the affected host.
 type EventsResource struct {
+	*Authorizer
 	DB    *sqlx.DB
 	store EventStore
 }
 
-func NewEventsResource(db *sqlx.DB) *EventsResource {
-	return &EventsResource{DB: db, store: store.NewEventStore(db)}
+func NewEventsResource(db *sqlx.DB, authz *Authorizer) *EventsResource {
+	return &EventsResource{Authorizer: authz, DB: db, store: store.NewEventStore(db)}
 }
 
 // eventSource / eventRule alias the store DTOs so handler code reads unchanged.
@@ -285,7 +287,7 @@ func (rs *EventsResource) ListSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) CreateSource(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
 		return
 	}
 	var in eventSource
@@ -305,7 +307,7 @@ func (rs *EventsResource) CreateSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) DeleteSource(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -332,7 +334,7 @@ func (rs *EventsResource) ListRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) CreateRule(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
 		return
 	}
 	var in eventRule
@@ -363,7 +365,7 @@ func (rs *EventsResource) CreateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

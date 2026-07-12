@@ -34,7 +34,7 @@ func TestProjectRBAC(t *testing.T) {
 	}
 	defer db.Close()
 
-	h := handlers.NewProjectsResource(db)
+	h := handlers.NewProjectsResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()
