@@ -10,7 +10,7 @@ import (
 	"github.com/praetordev/praetor/pkg/auth"
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/render"
+	"github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/api/store"
 	"golang.org/x/crypto/bcrypt"
 )

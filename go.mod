@@ -3,7 +3,7 @@ module github.com/praetordev/praetor
 go 1.25.5
 
 require (
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/cors v1.2.2
 	github.com/go-chi/render v1.0.3
 	github.com/go-ldap/ldap/v3 v3.4.12
@@ -17,6 +17,7 @@ require (
 	github.com/praetordev/db v0.1.0
 	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
+	github.com/praetordev/render v0.1.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/crypto v0.54.0

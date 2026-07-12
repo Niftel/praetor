@@ -12,7 +12,7 @@ import (
 	promMetrics "github.com/praetordev/metrics"
 	"github.com/praetordev/praetor/services/api/handlers"
 	modelAuth "github.com/praetordev/praetor/services/api/middleware"
-	praetorRender "github.com/praetordev/praetor/pkg/render"
+	praetorRender "github.com/praetordev/render"
 )
 
 // Config holds the API's externally-supplied configuration, resolved from env in

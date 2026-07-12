@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/pkg/render"
+	"github.com/praetordev/render"
 	"gopkg.in/yaml.v3"
 )
 
