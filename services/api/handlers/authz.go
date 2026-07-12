@@ -9,7 +9,6 @@ import (
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
 )
 
 // logger is the api handlers component logger (handler installed by pkg/plog).
@@ -61,12 +60,26 @@ var orgCreateCapability = map[rbac.RoleField]string{
 // assignments through it; caps is retained for the creator-grant write path.
 type Authorizer struct {
 	Access *rbac.AccessChecker
-	caps   *store.CapabilityStore
+	caps   *rbac.CapabilityStore
 	authz  rbac.Authorizer
 }
 
+// capabilityTables maps each RBAC content type to the physical table the
+// capability store enumerates ids from (AllIDsOfType — the "see all" tier). It is
+// injected into rbac.NewCapabilityStore so the rbac library stays free of
+// praetor's schema names.
+var capabilityTables = map[rbac.ContentType]string{
+	rbac.ContentTypeOrganization:     "organizations",
+	rbac.ContentTypeTeam:             "teams",
+	rbac.ContentTypeProject:          "projects",
+	rbac.ContentTypeInventory:        "inventories",
+	rbac.ContentTypeCredential:       "credentials",
+	rbac.ContentTypeJobTemplate:      "job_templates",
+	rbac.ContentTypeWorkflowTemplate: "workflow_templates",
+}
+
 func NewAuthorizer(db *sqlx.DB) *Authorizer {
-	caps := store.NewCapabilityStore(db)
+	caps := rbac.NewCapabilityStore(db, capabilityTables)
 	return &Authorizer{
 		Access: rbac.NewAccessChecker(db),
 		caps:   caps,
