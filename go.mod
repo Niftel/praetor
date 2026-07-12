@@ -15,6 +15,7 @@ require (
 	github.com/nats-io/nats.go v1.52.0
 	github.com/praetordev/credentials v0.1.0
 	github.com/praetordev/db v0.1.0
+	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
@@ -58,7 +59,7 @@ require (
 	github.com/praetordev/metrics v0.1.0
 	github.com/praetordev/objectstore v0.1.1
 	github.com/praetordev/packspec v0.1.0
-	github.com/praetordev/registry v0.1.0
+	github.com/praetordev/registry v0.1.0 // indirect
 	github.com/praetordev/runtoken v0.1.0
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect

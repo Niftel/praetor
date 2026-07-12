@@ -143,6 +143,8 @@ github.com/praetordev/hostconn v0.1.0 h1:rcpsufJkZwIGvAc82RuGKCgi5ztJIB5P+LkYUHx
 github.com/praetordev/hostconn v0.1.0/go.mod h1:rQZtLSBbfzJrg4WG+1embYn9PUDFXE154db2fJRbVqU=
 github.com/praetordev/metrics v0.1.0 h1:P6uRYZOVIsIw6XKjr+cg/mZ7tV9GuOOfcAeL/zJYtlw=
 github.com/praetordev/metrics v0.1.0/go.mod h1:LWAc9ODqqUtnFJpTwmXFkmP47OlyyhYM6WA3ff9dKws=
+github.com/praetordev/notify v0.1.0 h1:YpTErKoNHrO3+XNrQic9lUVwTRjfnOf4iCHpAI5MlQs=
+github.com/praetordev/notify v0.1.0/go.mod h1:v87tYub+HhWUXgUUiKDUZyE5Nc98YwMSDcBJoeT2bCs=
 github.com/praetordev/objectstore v0.1.1 h1:hq6Z0Tr9bkyP5jDfRXsTYnPYRjUHZaXyj5se8ZUkHHA=
 github.com/praetordev/objectstore v0.1.1/go.mod h1:Pitx1nfXmHdwtW0u9bLo5MCeRdL6HXRHFshxIarJGnw=
 github.com/praetordev/packspec v0.1.0 h1:SFat0DiN1tbSw8yePMd9+G64zoxTqD/CAshf14xgoOg=
