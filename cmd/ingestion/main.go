@@ -10,7 +10,7 @@ import (
 	"github.com/praetordev/db"
 	"github.com/praetordev/env"
 	"github.com/praetordev/metrics"
-	"github.com/praetordev/praetor/pkg/objectstore"
+	"github.com/praetordev/objectstore"
 	"github.com/praetordev/plog"
 	"github.com/praetordev/runtoken"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"

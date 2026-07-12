@@ -12,7 +12,7 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/launch"
 	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/objectstore"
+	"github.com/praetordev/objectstore"
 	"github.com/praetordev/plog"
 	"github.com/teambition/rrule-go"
 )

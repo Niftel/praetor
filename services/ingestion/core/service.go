@@ -16,7 +16,7 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/inventoryrender"
 	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/objectstore"
+	"github.com/praetordev/objectstore"
 )
 
 // logger is the ingestion package component logger (handler installed by pkg/plog).

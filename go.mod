@@ -12,7 +12,7 @@ require (
 	github.com/hyperjumptech/grule-rule-engine v1.20.4
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.12.3
-	github.com/nats-io/nats.go v1.47.0
+	github.com/nats-io/nats.go v1.52.0
 	github.com/praetordev/db v0.1.0
 	github.com/praetordev/plog v0.1.0
 	github.com/prometheus/client_golang v1.23.2
@@ -43,11 +43,11 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
+	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nats-io/nkeys v0.4.11 // indirect
+	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -55,6 +55,7 @@ require (
 	github.com/praetordev/env v0.1.0
 	github.com/praetordev/hostconn v0.1.0
 	github.com/praetordev/metrics v0.1.0
+	github.com/praetordev/objectstore v0.1.1
 	github.com/praetordev/packspec v0.1.0
 	github.com/praetordev/registry v0.1.0
 	github.com/praetordev/runtoken v0.1.0
