@@ -6,7 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/auth"
-	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/pkg/render"
 )
 
 // LDAPHandler serves the read-only LDAP config + connection-test endpoints. There

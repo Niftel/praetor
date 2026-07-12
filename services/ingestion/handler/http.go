@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/render"
 	"github.com/google/uuid"
 	"github.com/praetordev/praetor/pkg/models"
-	praetorRender "github.com/praetordev/praetor/services/api/render"
+	praetorRender "github.com/praetordev/praetor/pkg/render"
 	"github.com/praetordev/praetor/services/ingestion/core"
 )
 

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/pkg/render"
 )
 
 // ListActivityStream GET /api/v1/activity-stream?limit=&resource_type=&action=

@@ -11,7 +11,7 @@ import (
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/praetor/pkg/models"
 	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/pkg/render"
 	"github.com/praetordev/praetor/services/api/store"
 )
 

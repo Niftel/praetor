@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/praetor/pkg/render"
 )
 
 // ListOrgGalaxyCredentials GET /api/v1/organizations/{id}/galaxy-credentials
