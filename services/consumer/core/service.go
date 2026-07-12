@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 
 	"github.com/praetordev/praetor/pkg/events"
 )

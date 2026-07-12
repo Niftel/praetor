@@ -2,7 +2,7 @@ package core
 
 import (
 	"fmt"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	"sync"
 	"time"
 

@@ -11,7 +11,7 @@ import (
 	"github.com/praetordev/praetor/pkg/events"
 	"github.com/praetordev/praetor/pkg/ingestclient"
 	"github.com/praetordev/metrics"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/executor/core"
 )

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	"io"
 	"time"
 

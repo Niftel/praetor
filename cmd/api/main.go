@@ -8,7 +8,7 @@ import (
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/env"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	"github.com/praetordev/praetor/services/api"
 )
 

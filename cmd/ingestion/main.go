@@ -11,7 +11,7 @@ import (
 	"github.com/praetordev/env"
 	"github.com/praetordev/metrics"
 	"github.com/praetordev/praetor/pkg/objectstore"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	"github.com/praetordev/runtoken"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/ingestion/core"

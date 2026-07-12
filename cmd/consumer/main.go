@@ -7,7 +7,7 @@ import (
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/env"
 	"github.com/praetordev/metrics"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/consumer/core"
 )

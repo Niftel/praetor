@@ -140,6 +140,8 @@ github.com/praetordev/metrics v0.1.0 h1:P6uRYZOVIsIw6XKjr+cg/mZ7tV9GuOOfcAeL/zJY
 github.com/praetordev/metrics v0.1.0/go.mod h1:LWAc9ODqqUtnFJpTwmXFkmP47OlyyhYM6WA3ff9dKws=
 github.com/praetordev/packspec v0.1.0 h1:SFat0DiN1tbSw8yePMd9+G64zoxTqD/CAshf14xgoOg=
 github.com/praetordev/packspec v0.1.0/go.mod h1:+nxnB4Cn1sex6VAzwXoZe4owcDmCwQBs+OdcnDzFX5g=
+github.com/praetordev/plog v0.1.0 h1:SDqOJK8hz86xnzCQ5Tq7TGujE1WeWEnxEq3xqMp+sEc=
+github.com/praetordev/plog v0.1.0/go.mod h1:XNK4wMTvkJIcJ+RtBuNkF538yr2cKowo84Cq1w+WF/8=
 github.com/praetordev/registry v0.1.0 h1:QXFEMLKtkqMmcKaKlKUc5KrOT/l+rm9qoSBju4bG3pQ=
 github.com/praetordev/registry v0.1.0/go.mod h1:8pC6g1iSZW6mU1OvSZ4eW1tsXZuvZSnO59hLtMAGUvo=
 github.com/praetordev/runtoken v0.1.0 h1:t79TNmGDXT7JvBHPc9AxTKrwFzpRCa+aS5LhgxMNdpI=

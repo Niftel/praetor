@@ -16,7 +16,7 @@ import (
 	"github.com/praetordev/praetor/pkg/db"
 	"github.com/praetordev/env"
 	"github.com/praetordev/metrics"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	core "github.com/praetordev/praetor/services/reconciler/core"
 )
 
