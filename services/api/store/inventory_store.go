@@ -66,18 +66,6 @@ func (s *InventoryStore) Create(ctx context.Context, input models.Inventory) (mo
 	return created, wrap("InventoryStore.Create", err)
 }
 
-// UpdateContent updates name/description/content (the /{id} edit path).
-func (s *InventoryStore) UpdateContent(ctx context.Context, id int64, input models.Inventory) (models.Inventory, error) {
-	query := `
-		UPDATE inventories
-		SET name = $2, description = $3, content = $4, modified_at = now()
-		WHERE id = $1
-		RETURNING ` + InventoryCols
-	var updated models.Inventory
-	err := s.db.QueryRowxContext(ctx, query, id, input.Name, input.Description, input.Content).StructScan(&updated)
-	return updated, wrap("InventoryStore.UpdateContent", err)
-}
-
 // UpdateKind updates name/description/kind (the /{inventoryId} edit path).
 func (s *InventoryStore) UpdateKind(ctx context.Context, id int64, input models.Inventory) (models.Inventory, error) {
 	query := `

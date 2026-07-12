@@ -45,3 +45,4 @@ web_config_backup/
 
 # OS / editor cruft
 .DS_Store
+.backups/

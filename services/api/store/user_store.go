@@ -100,29 +100,38 @@ func (s *UserStore) Delete(ctx context.Context, id int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// Organizations returns the organizations a user is a member of.
+// Organizations returns the organizations a user has any role on — capability model:
+// an object_role scoped to the org that the user holds directly (role_user_assignments)
+// or through a team (role_team_assignments + team_members).
 func (s *UserStore) Organizations(ctx context.Context, userID int64) ([]models.Organization, error) {
 	orgs := []models.Organization{}
 	err := s.db.SelectContext(ctx, &orgs, `
 		SELECT DISTINCT o.id, o.name, o.description, o.created_at, o.modified_at
 		FROM organizations o
-		JOIN roles r ON r.content_type = 'organization' AND r.object_id = o.id
-		JOIN role_members rm ON rm.role_id = r.id
-		WHERE rm.user_id = $1
+		JOIN object_roles orl ON orl.content_type = 'organization' AND orl.object_id = o.id
+		WHERE EXISTS (SELECT 1 FROM role_user_assignments ua
+		              WHERE ua.object_role_id = orl.id AND ua.user_id = $1)
+		   OR EXISTS (SELECT 1 FROM role_team_assignments ta
+		              JOIN team_members tm ON tm.team_id = ta.team_id
+		              WHERE ta.object_role_id = orl.id AND tm.user_id = $1)
 		ORDER BY o.id`, userID)
 	return orgs, wrap("UserStore.Organizations", err)
 }
 
-// Teams returns the teams a user belongs to (via role membership or direct
-// team membership).
+// Teams returns the teams a user belongs to: direct membership (team_members) or a
+// role held on the team via the capability model (object_role on the team, assigned
+// to the user directly or through a team).
 func (s *UserStore) Teams(ctx context.Context, userID int64) ([]models.Team, error) {
 	teams := []models.Team{}
 	err := s.db.SelectContext(ctx, &teams, `
 		SELECT DISTINCT t.id, t.organization_id, t.name, t.description, t.created_at, t.modified_at
 		FROM teams t
-		JOIN roles r ON r.content_type = 'team' AND r.object_id = t.id
-		JOIN role_members rm ON rm.role_id = r.id
-		WHERE rm.user_id = $1
+		JOIN object_roles orl ON orl.content_type = 'team' AND orl.object_id = t.id
+		WHERE EXISTS (SELECT 1 FROM role_user_assignments ua
+		              WHERE ua.object_role_id = orl.id AND ua.user_id = $1)
+		   OR EXISTS (SELECT 1 FROM role_team_assignments ta
+		              JOIN team_members tm ON tm.team_id = ta.team_id
+		              WHERE ta.object_role_id = orl.id AND tm.user_id = $1)
 		UNION
 		SELECT DISTINCT t.id, t.organization_id, t.name, t.description, t.created_at, t.modified_at
 		FROM teams t

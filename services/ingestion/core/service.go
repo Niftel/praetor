@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"github.com/praetordev/praetor/pkg/plog"
+	"io"
 	"time"
 
 	"github.com/google/uuid"

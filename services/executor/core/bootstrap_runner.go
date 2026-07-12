@@ -528,9 +528,11 @@ func runShellScript(client *ssh.Client, sudo, script string) (string, error) {
 
 // These delegate to pkg/hostconn so the executor and reconciler share one
 // implementation (host-key policy, inventory parsing, quoting).
-func sshQuote(s string) string                                 { return hostconn.Quote(s) }
-func firstNonEmpty(vals ...string) string                      { return hostconn.FirstNonEmpty(vals...) }
-func parseHostVars(inventory, host string) map[string]string   { return hostconn.ParseHostVars(inventory, host) }
+func sshQuote(s string) string            { return hostconn.Quote(s) }
+func firstNonEmpty(vals ...string) string { return hostconn.FirstNonEmpty(vals...) }
+func parseHostVars(inventory, host string) map[string]string {
+	return hostconn.ParseHostVars(inventory, host)
+}
 
 const resumeUnitScript = `if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   cat > /etc/systemd/system/praetor-resume.service <<'UNIT'

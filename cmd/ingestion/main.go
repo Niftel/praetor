@@ -130,11 +130,11 @@ func main() {
 
 	// In-cluster only (executor / API): full internal token.
 	r.With(internal).Get("/internal/v1/runs/{run_id}/credentials", h.ResolveCredentials)
-	r.With(internal).Get("/api/v1/runs/{run_id}/runnable", h.Runnable)                 // executor pre-flight
-	r.With(internal).Get("/api/v1/runs/{run_id}/logs", h.StreamLog)                    // API log-read proxy
-	r.With(internal).Post("/api/v1/inventories/{id}/sync-data", h.IngestInventorySync) // executor upsert
+	r.With(internal).Get("/api/v1/runs/{run_id}/runnable", h.Runnable)                  // executor pre-flight
+	r.With(internal).Get("/api/v1/runs/{run_id}/logs", h.StreamLog)                     // API log-read proxy
+	r.With(internal).Post("/api/v1/inventories/{id}/sync-data", h.IngestInventorySync)  // executor upsert
 	r.With(internal).Get("/internal/v1/inventories/{id}/rendered", h.InventoryRendered) // executor fetches INI (#13)
-	r.With(internal).Get("/internal/v1/inventories/{id}/facts", h.InventoryFacts)        // executor fetches fact cache (#48)
+	r.With(internal).Get("/internal/v1/inventories/{id}/facts", h.InventoryFacts)       // executor fetches fact cache (#48)
 
 	// Host-runner-facing writes: full internal token OR the run's per-run token.
 	r.With(runScoped).Post("/api/v1/runs/{run_id}/events", h.Ingest)

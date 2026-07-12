@@ -379,8 +379,3 @@ func (h *OrgsResource) ListOrganizationInventories(w http.ResponseWriter, r *htt
 func getOrgIDFromPath(r *http.Request) int64 {
 	return render.GetIDParam(r) // Uses the {id} param
 }
-
-// Helper to get context (for consistency)
-func getContext(r *http.Request) context.Context {
-	return r.Context()
-}

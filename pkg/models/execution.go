@@ -21,15 +21,15 @@ type UnifiedJob struct {
 }
 
 type ExecutionRun struct {
-	ID                 uuid.UUID  `json:"id" db:"id"`
-	UnifiedJobID       int64      `json:"unified_job_id" db:"unified_job_id"`
-	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
-	StartedAt          *time.Time `json:"started_at,omitempty" db:"started_at"`
-	FinishedAt         *time.Time `json:"finished_at,omitempty" db:"finished_at"`
-	State              string     `json:"state" db:"state"`
-	LastHeartbeatAt    *time.Time `json:"last_heartbeat_at,omitempty" db:"last_heartbeat_at"`
-	LastEventSeq       int64      `json:"last_event_seq" db:"last_event_seq"`
-	PersistedEventSeq  int64      `json:"persisted_event_seq" db:"persisted_event_seq"`
+	ID                uuid.UUID  `json:"id" db:"id"`
+	UnifiedJobID      int64      `json:"unified_job_id" db:"unified_job_id"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	StartedAt         *time.Time `json:"started_at,omitempty" db:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty" db:"finished_at"`
+	State             string     `json:"state" db:"state"`
+	LastHeartbeatAt   *time.Time `json:"last_heartbeat_at,omitempty" db:"last_heartbeat_at"`
+	LastEventSeq      int64      `json:"last_event_seq" db:"last_event_seq"`
+	PersistedEventSeq int64      `json:"persisted_event_seq" db:"persisted_event_seq"`
 }
 
 type JobEvent struct {

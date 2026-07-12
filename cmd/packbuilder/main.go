@@ -197,18 +197,18 @@ func buildPack(name, specYAML string) (string, error) {
 		// the tarball lands on disk directly — no docker create/cp/rm needed.
 		args := append(append([]string{}, tlsPrefix...), "build",
 			"--frontend", "dockerfile.v0",
-			"--local", "context=" + ctx,
+			"--local", "context="+ctx,
 			"--local", "dockerfile=/build/ansible-runtime",
 			"--opt", "filename=Dockerfile",
 			"--opt", "target=export",
-			"--opt", "platform=linux/" + arch,
-			"--opt", "build-arg:TARGETARCH=" + arch,
-			"--opt", "build-arg:PY_VERSION=" + spec.Python,
-			"--opt", "build-arg:PACK_NAME=" + name,
-			"--opt", "build-arg:GITEA_URL=" + buildGiteaURL,
-			"--opt", "build-arg:GITEA_OWNER=" + giteaOwner,
-			"--opt", "build-arg:HOST_RUNNER_VERSION=" + hostRunnerVersion,
-			"--output", "type=local,dest=" + outDir,
+			"--opt", "platform=linux/"+arch,
+			"--opt", "build-arg:TARGETARCH="+arch,
+			"--opt", "build-arg:PY_VERSION="+spec.Python,
+			"--opt", "build-arg:PACK_NAME="+name,
+			"--opt", "build-arg:GITEA_URL="+buildGiteaURL,
+			"--opt", "build-arg:GITEA_OWNER="+giteaOwner,
+			"--opt", "build-arg:HOST_RUNNER_VERSION="+hostRunnerVersion,
+			"--output", "type=local,dest="+outDir,
 		)
 		if addHostsOpt != "" {
 			args = append(args, "--opt", "add-hosts="+addHostsOpt)

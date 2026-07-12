@@ -15,10 +15,10 @@ func TestExecutionRequestSerialization(t *testing.T) {
 		ExecutionRunID: uid,
 		UnifiedJobID:   123,
 		JobManifest: events.JobManifest{
-			Inventory:       "hosts",
-			ProjectURL:      "https://github.com/example/repo.git",
-			Playbook:        "playbook.yml",
-			ExtraVars:       map[string]interface{}{"foo": "bar"},
+			Inventory:  "hosts",
+			ProjectURL: "https://github.com/example/repo.git",
+			Playbook:   "playbook.yml",
+			ExtraVars:  map[string]interface{}{"foo": "bar"},
 		},
 		CreatedAt: time.Now(),
 	}

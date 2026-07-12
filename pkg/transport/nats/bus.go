@@ -222,8 +222,8 @@ func (b *NatsBus) SubscribeToExecutionRequests() (<-chan events.ExecutionRequest
 					_ = msg.Term()
 					continue
 				}
-				_ = msg.Ack()  // ack on receipt; recovery is the reconciler's job
-				ch <- req      // blocks until a worker takes it — natural backpressure
+				_ = msg.Ack() // ack on receipt; recovery is the reconciler's job
+				ch <- req     // blocks until a worker takes it — natural backpressure
 			}
 		}
 	}()

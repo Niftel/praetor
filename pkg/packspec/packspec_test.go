@@ -19,16 +19,16 @@ func TestValidateAcceptsCleanSpecs(t *testing.T) {
 
 func TestValidateRejectsBadSpecs(t *testing.T) {
 	cases := map[string]string{
-		"neither ansible nor core":  "name: x\npython: \"3.11.9\"\n",
-		"both ansible and core":     "ansible: \"12.3.0\"\nansible_core: \"2.19.11\"\n",
-		"old package-name value":    "ansible: ansible-core\n",          // the thing we're removing
+		"neither ansible nor core":   "name: x\npython: \"3.11.9\"\n",
+		"both ansible and core":      "ansible: \"12.3.0\"\nansible_core: \"2.19.11\"\n",
+		"old package-name value":     "ansible: ansible-core\n", // the thing we're removing
 		"ansible_core not a version": "ansible_core: latest\n",
-		"pip shell injection":       "ansible_core: \"2.19.11\"\npip: [\"docker; rm -rf /\"]\n",
-		"pip flag injection":        "ansible_core: \"2.19.11\"\npip: [\"--extra-index-url=http://evil\"]\n",
-		"pip with space/args":       "ansible_core: \"2.19.11\"\npip: [\"docker --no-deps\"]\n",
-		"bad arch":                  "ansible_core: \"2.19.11\"\narches: [alpine]\n",
-		"missing host_runner":       "ansible_core: \"2.19.11\"\narches: [arm64]\n",
-		"host_runner not a version": "ansible_core: \"2.19.11\"\narches: [arm64]\nhost_runner: latest\n",
+		"pip shell injection":        "ansible_core: \"2.19.11\"\npip: [\"docker; rm -rf /\"]\n",
+		"pip flag injection":         "ansible_core: \"2.19.11\"\npip: [\"--extra-index-url=http://evil\"]\n",
+		"pip with space/args":        "ansible_core: \"2.19.11\"\npip: [\"docker --no-deps\"]\n",
+		"bad arch":                   "ansible_core: \"2.19.11\"\narches: [alpine]\n",
+		"missing host_runner":        "ansible_core: \"2.19.11\"\narches: [arm64]\n",
+		"host_runner not a version":  "ansible_core: \"2.19.11\"\narches: [arm64]\nhost_runner: latest\n",
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {

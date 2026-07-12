@@ -1,19 +1,11 @@
 package core
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"time"
 
-	"github.com/go-git/go-billy/v5"
-	"github.com/go-git/go-billy/v5/util"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/env"
@@ -400,10 +392,10 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	// All four windows are env-tunable (durations, e.g. "90s", "2m") so the recovery
 	// cadence can be lowered in a lab or tightened in prod without a rebuild. Defaults
 	// match the original hard-coded values.
-	lostHeartbeatGrace := durationEnv("RECONCILE_HEARTBEAT_GRACE", 2*time.Minute)  // ~4 missed heartbeats
-	startGrace := durationEnv("RECONCILE_START_GRACE", 5*time.Minute)              // running but never heartbeated
-	queuedTimeout := durationEnv("RECONCILE_QUEUED_TIMEOUT", 10*time.Minute)       // never picked up / never reported (parks remote runs to reconciling)
-	localRecoveryGrace := durationEnv("RECONCILE_LOCAL_GRACE", 10*time.Minute)     // window for the executor to resume a local run before true-loss (#45)
+	lostHeartbeatGrace := durationEnv("RECONCILE_HEARTBEAT_GRACE", 2*time.Minute) // ~4 missed heartbeats
+	startGrace := durationEnv("RECONCILE_START_GRACE", 5*time.Minute)             // running but never heartbeated
+	queuedTimeout := durationEnv("RECONCILE_QUEUED_TIMEOUT", 10*time.Minute)      // never picked up / never reported (parks remote runs to reconciling)
+	localRecoveryGrace := durationEnv("RECONCILE_LOCAL_GRACE", 10*time.Minute)    // window for the executor to resume a local run before true-loss (#45)
 
 	// 1a. Reconcilable runs: a REMOTE run (has a snapshotted runner host) whose
 	// heartbeat went stale is NOT declared failed — the host may have finished the
@@ -550,116 +542,4 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func findFile(fs billy.Filesystem, path string) (billy.File, error) {
-	// Try direct
-	f, err := fs.Open(path)
-	if err == nil {
-		return f, nil
-	}
-
-	// Try with leading slash
-	if len(path) > 0 && path[0] != '/' {
-		f, err = fs.Open("/" + path)
-		if err == nil {
-			return f, nil
-		}
-	}
-
-	// Walk to find match
-	var foundPath string
-	_ = util.Walk(fs, "/", func(p string, info os.FileInfo, err error) error {
-		if foundPath != "" {
-			return nil
-		}
-
-		// Debug log
-		// log.Printf(" - Visiting: %s", p)
-
-		// Match strict but ignoring leading slash for comparison
-		cleanP := p
-		if len(cleanP) > 0 && cleanP[0] == '/' {
-			cleanP = cleanP[1:]
-		}
-		cleanTarget := path
-		if len(cleanTarget) > 0 && cleanTarget[0] == '/' {
-			cleanTarget = cleanTarget[1:]
-		}
-
-		if cleanP == cleanTarget {
-			foundPath = p
-		}
-		return nil
-	})
-
-	if foundPath != "" {
-		return fs.Open(foundPath)
-	}
-
-	return nil, fmt.Errorf("file not found: %s", path)
-}
-
-// packProjectToTar creates a base64-encoded tar.gz of the entire in-memory filesystem
-func packProjectToTar(fs billy.Filesystem) (string, error) {
-	var buf bytes.Buffer
-	gzw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gzw)
-
-	err := util.Walk(fs, "/", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip root
-		if path == "/" {
-			return nil
-		}
-
-		// Create tar header
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-
-		// Use relative path (strip leading /)
-		if len(path) > 0 && path[0] == '/' {
-			header.Name = path[1:]
-		} else {
-			header.Name = path
-		}
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-
-		// Write file content if not a directory
-		if !info.IsDir() {
-			file, err := fs.Open(path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			_, err = io.Copy(tw, file)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	if err := tw.Close(); err != nil {
-		return "", err
-	}
-	if err := gzw.Close(); err != nil {
-		return "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }

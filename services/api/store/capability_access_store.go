@@ -194,11 +194,3 @@ func (s *CapabilityStore) RevokeTeamPermission(ctx context.Context, defID int64,
 		teamID, defID, contentType, objectID)
 	return wrap("CapabilityStore.RevokeTeamPermission", err)
 }
-
-// RebuildAllForDefinition refreshes the evaluation cache for every object_role of a
-// definition — used after a custom role's permission set changes.
-func (s *CapabilityStore) RebuildAllForDefinition(ctx context.Context, defID int64) error {
-	_, err := s.db.ExecContext(ctx,
-		`SELECT rebuild_object_role_evaluations(id) FROM object_roles WHERE role_definition_id = $1`, defID)
-	return wrap("CapabilityStore.RebuildAllForDefinition", err)
-}
