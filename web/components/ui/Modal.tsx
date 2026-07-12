@@ -16,20 +16,27 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
   const titleId = useId();
   // Remember what was focused before opening so we can restore it on close.
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Keep the latest onClose without making it an effect dependency: callers pass an
+  // inline arrow (new identity every render), so depending on it would re-run the
+  // focus effect on every keystroke and yank focus off the field being typed in.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
     previouslyFocused.current = document.activeElement as HTMLElement | null;
 
-    // Move focus into the dialog (first focusable, else the panel itself).
+    // Move focus into the dialog: prefer the first form field over chrome like the
+    // close button, else the first focusable, else the panel itself.
     const panel = panelRef.current;
-    const first = panel?.querySelector<HTMLElement>(FOCUSABLE);
+    const field = panel?.querySelector<HTMLElement>('input,textarea,select');
+    const first = field ?? panel?.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? panel)?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key === 'Tab' && panel) {
@@ -59,7 +66,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
       // Restore focus to the trigger when the dialog closes.
       previouslyFocused.current?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -74,7 +81,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -86,16 +93,16 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative z-10 w-full ${sizes[size]} max-h-[90vh] overflow-y-auto bg-white rounded-lg shadow-xl focus:outline-none`}
+        className={`relative z-10 w-full ${sizes[size]} max-h-[90vh] overflow-y-auto bg-panel rounded-xl shadow-2xl ring-1 ring-line2 border border-line focus:outline-none scroll-tint`}
       >
-        <div className="px-4 pt-5 pb-4 sm:p-6">
+        <div className="px-5 pt-5 pb-5 sm:p-6">
           <div className="flex justify-between items-center mb-4">
-            <h3 id={titleId} className="text-lg leading-6 font-medium text-gray-900">{title}</h3>
+            <h3 id={titleId} className="text-base font-semibold tracking-tight text-ink">{title}</h3>
             <button
               type="button"
               onClick={onClose}
               aria-label="Close dialog"
-              className="text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 rounded"
+              className="-mr-1.5 p-1.5 text-mut hover:text-ink hover:bg-white/5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc"
             >
               <X size={20} />
             </button>

@@ -1,16 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Inventory, Host, Group } from '../types';
-import Card from '../components/ui/Card';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import ResourceAccess from '../components/ResourceAccess';
 import { splitConnection, mergeConnection, emptyConnection, HostConnection } from '../lib/hostConnection';
-import { Server, Users, Plus, Trash, Loader, Play, Activity, Clock, Plug, Save, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react';
+import {
+  Plus, Trash2, Loader, Search, ChevronDown, ChevronRight, ArrowLeft,
+  Server, RefreshCw, Radio, Check, MoreHorizontal, Upload, Shield,
+} from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
+
+// Coerce an edited string back toward its JSON-native type (number / bool /
+// object) so round-tripping a var through the editor doesn't stringify it.
+const coerce = (v: string): any => {
+  const t = v.trim();
+  if (t === '') return '';
+  if (t === 'true') return true;
+  if (t === 'false') return false;
+  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+  if ((t[0] === '{' && t.endsWith('}')) || (t[0] === '[' && t.endsWith(']'))) {
+    try { return JSON.parse(t); } catch { /* fall through */ }
+  }
+  return v;
+};
+const showVal = (v: any): string => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v));
 
 const InventoriesPage = () => {
   const { orgId: orgIdStr } = useParams();
@@ -18,724 +35,572 @@ const InventoriesPage = () => {
   const [orgName, setOrgName] = useState('');
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [selectedInventoryId, setSelectedInventoryId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'hosts' | 'groups' | 'sources' | 'access'>('hosts');
-  const [sources, setSources] = useState<any[]>([]);
-  const [showSourceModal, setShowSourceModal] = useState(false);
-  const [newSource, setNewSource] = useState<{ name: string; source_kind: string; source: string; credential_id: number | '' }>({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
-  const [credentials, setCredentials] = useState<any[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [groupHosts, setGroupHosts] = useState<Record<number, number[]>>({});
+  const [sources, setSources] = useState<any[]>([]);
+  const [credentials, setCredentials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedHostId, setSelectedHostId] = useState<number | null>(null);
-  const [showHostDetail, setShowHostDetail] = useState(false);
-  const [hostGroups, setHostGroups] = useState<number[]>([]); // Group IDs the selected host belongs to
-  const [settingRunner, setSettingRunner] = useState(false);
-  // Editable SSH connection for the selected host + any non-connection vars we
-  // preserve verbatim, and a save state.
-  const [connForm, setConnForm] = useState<HostConnection>(emptyConnection());
-  const [extraVars, setExtraVars] = useState<Record<string, any>>({});
-  const [showExtraVars, setShowExtraVars] = useState(false);
-  const [savingHost, setSavingHost] = useState(false);
-  // Connection fields for the New Host modal.
-  const [newHostConn, setNewHostConn] = useState<HostConnection>(emptyConnection());
 
-  // Modal states
+  const [selectedHostId, setSelectedHostId] = useState<number | null>(null);
+  const [hostGroups, setHostGroups] = useState<number[]>([]);
+  const [settingRunner, setSettingRunner] = useState(false);
+  const [savingHost, setSavingHost] = useState(false);
+  const [connForm, setConnForm] = useState<HostConnection>(emptyConnection());
+  const [extraVars, setExtraVars] = useState<Record<string, string>>({});
+  const originalRef = useRef<string>('');
+
+  const [treeFilter, setTreeFilter] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<number | 'ungrouped'>>(new Set());
+  const [invMenu, setInvMenu] = useState(false);
+  const [addMenu, setAddMenu] = useState(false);
+
+  // Modals
   const [showInventoryModal, setShowInventoryModal] = useState(false);
   const [showHostModal, setShowHostModal] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showSourceModal, setShowSourceModal] = useState(false);
+  const [showVarsModal, setShowVarsModal] = useState(false);
+  const [varsDraft, setVarsDraft] = useState('');
   const [newInventoryName, setNewInventoryName] = useState('');
   const [newHostName, setNewHostName] = useState('');
+  const [newHostConn, setNewHostConn] = useState<HostConnection>(emptyConnection());
   const [newGroupName, setNewGroupName] = useState('');
   const [importContent, setImportContent] = useState('');
   const [importFormat, setImportFormat] = useState<'ini' | 'yaml'>('ini');
+  const [newSource, setNewSource] = useState<{ name: string; source_kind: string; source: string; credential_id: number | '' }>({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
 
-
-  // Load inventories
-  const fetchInventories = async () => {
+  const fetchInventories = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.getInventories();
-      const items = unwrap<Inventory>(response).filter(i => (i as any).organization_id === orgId);
+      const items = unwrap<Inventory>(await api.getInventories()).filter(i => (i as any).organization_id === orgId);
       setInventories(items);
-      if (items.length > 0 && !selectedInventoryId) {
-        setSelectedInventoryId(items[0].id);
-      }
-    } catch (err) {
-      setError('Failed to load inventories');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setSelectedInventoryId(prev => prev ?? (items[0]?.id ?? null));
+    } catch (err) { setError('Failed to load inventories'); console.error(err); }
+    finally { setLoading(false); }
+  }, [orgId]);
 
   useEffect(() => {
     fetchInventories();
-    api.getCredentials().then(res => setCredentials(unwrap(res))).catch(() => { });
-    api.getOrganizations().then(o => {
-      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
-    }).catch(() => setOrgName(`Org ${orgId}`));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId]);
+    api.getCredentials().then(r => setCredentials(unwrap(r))).catch(() => { });
+    api.getOrganizations().then(o => setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`)).catch(() => setOrgName(`Org ${orgId}`));
+  }, [orgId, fetchInventories]);
 
-  // Load hosts and groups when selected inventory changes
+  const loadStructure = useCallback(async (invId: number) => {
+    try {
+      const [hostsData, groupsData, sourcesData] = await Promise.all([
+        api.getHosts(invId), api.getGroups(invId), api.getInventorySources(invId).catch(() => []),
+      ]);
+      const gs: Group[] = groupsData || [];
+      setHosts(hostsData || []);
+      setGroups(gs);
+      setSources(sourcesData || []);
+      const entries = await Promise.all(gs.map(async g => {
+        try { return [g.id, ((await api.getGroupHosts(g.id)) || []).map((h: Host) => h.id)] as const; }
+        catch { return [g.id, []] as const; }
+      }));
+      setGroupHosts(Object.fromEntries(entries));
+    } catch (err) { console.error('Failed to load hosts/groups', err); }
+  }, []);
+
+  useEffect(() => { if (selectedInventoryId) loadStructure(selectedInventoryId); }, [selectedInventoryId, loadStructure]);
+
   useEffect(() => {
-    if (!selectedInventoryId) return;
-
-    const fetchHostsAndGroups = async () => {
-      try {
-        const [hostsData, groupsData, sourcesData] = await Promise.all([
-          api.getHosts(selectedInventoryId),
-          api.getGroups(selectedInventoryId),
-          api.getInventorySources(selectedInventoryId).catch(() => [])
-        ]);
-        setHosts(hostsData || []);
-        setGroups(groupsData || []);
-        setSources(sourcesData || []);
-      } catch (err) {
-        console.error('Failed to load hosts/groups', err);
-      }
-    };
-    fetchHostsAndGroups();
-  }, [selectedInventoryId]);
-
-  const refreshSources = () => {
-    if (selectedInventoryId) api.getInventorySources(selectedInventoryId).then(d => setSources(d || [])).catch(() => {});
-  };
-  const refreshHosts = () => {
-    if (selectedInventoryId) {
-      api.getHosts(selectedInventoryId).then(d => setHosts(d || [])).catch(() => {});
-      api.getGroups(selectedInventoryId).then(d => setGroups(d || [])).catch(() => {});
-    }
-  };
-  const handleCreateSource = async () => {
-    if (!selectedInventoryId || !newSource.name.trim()) return;
-    const payload = {
-      name: newSource.name,
-      source_kind: newSource.source_kind,
-      source: newSource.source,
-      credential_id: newSource.credential_id === '' ? null : newSource.credential_id,
-    };
-    await api.createInventorySource(selectedInventoryId, payload);
-    setShowSourceModal(false);
-    setNewSource({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
-    refreshSources();
-  };
-  const handleSyncSource = async (sid: number) => {
-    if (!selectedInventoryId) return;
-    await api.syncInventorySource(selectedInventoryId, sid);
-    // Sync runs async; poll the host list a few times so the UI reflects it.
-    setTimeout(() => { refreshHosts(); refreshSources(); }, 4000);
-    setTimeout(() => { refreshHosts(); refreshSources(); }, 9000);
-  };
-  const handleDeleteSource = async (sid: number) => {
-    if (!selectedInventoryId) return;
-    await api.deleteInventorySource(selectedInventoryId, sid);
-    refreshSources();
-  };
-
-  // Load host groups when selected host changes
-  useEffect(() => {
-    if (!selectedHostId) {
-      setHostGroups([]);
-      return;
-    }
-    api.getHostGroups(selectedHostId)
-      .then(data => setHostGroups((data || []).map((g: Group) => g.id)))
-      .catch(err => console.error('Failed to load host groups', err));
+    if (!selectedHostId) { setHostGroups([]); return; }
+    api.getHostGroups(selectedHostId).then(d => setHostGroups((d || []).map((g: Group) => g.id))).catch(() => { });
   }, [selectedHostId]);
 
-  // Populate the connection form from the selected host's variables.
+  // Populate the connection form + extra vars from the selected host.
   useEffect(() => {
     const host = hosts.find(h => h.id === selectedHostId);
     if (!host) return;
     const { conn, extra } = splitConnection(host.variables);
     setConnForm(conn);
-    setExtraVars(extra);
-    setShowExtraVars(false);
+    const strExtra: Record<string, string> = {};
+    for (const [k, v] of Object.entries(extra)) strExtra[k] = showVal(v);
+    setExtraVars(strExtra);
+    originalRef.current = JSON.stringify(host.variables ?? {});
   }, [selectedHostId, hosts]);
 
-  // Save the connection form back into the host's variables (extras preserved).
-  const handleSaveConnection = async () => {
+  const coercedExtra = useMemo(() => {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(extraVars)) out[k] = coerce(v);
+    return out;
+  }, [extraVars]);
+
+  const dirty = useMemo(() => {
     const host = hosts.find(h => h.id === selectedHostId);
-    if (!host) return;
+    if (!host) return false;
+    return JSON.stringify(mergeConnection(connForm, coercedExtra)) !== originalRef.current;
+  }, [connForm, coercedExtra, selectedHostId, hosts]);
+
+  const refreshHosts = () => { if (selectedInventoryId) loadStructure(selectedInventoryId); };
+
+  const saveHost = async () => {
+    const host = hosts.find(h => h.id === selectedHostId);
+    if (!host || !dirty) return;
     setSavingHost(true);
     try {
-      const variables = mergeConnection(connForm, extraVars);
-      const updated = await api.updateHost(host.id, { variables });
+      const updated = await api.updateHost(host.id, { variables: mergeConnection(connForm, coercedExtra) });
       setHosts(prev => prev.map(h => (h.id === host.id ? updated : h)));
-    } catch (err) {
-      console.error('Failed to save host connection', err);
-      toast.error('Failed to save connection. You need admin on this inventory.');
-    } finally {
-      setSavingHost(false);
-    }
+      originalRef.current = JSON.stringify(updated.variables ?? {});
+      toast.success('Host saved');
+    } catch { toast.error('Failed to save. You need admin on this inventory.'); }
+    finally { setSavingHost(false); }
   };
 
-  // Create Inventory
-  const handleCreateInventory = async () => {
+  const setRunner = async (hostId: number) => {
+    setSettingRunner(true);
+    try { await api.setRunnerHost(hostId); refreshHosts(); setSelectedHostId(hostId); }
+    catch { toast.error('Failed to set runner host'); }
+    finally { setSettingRunner(false); }
+  };
+
+  const deleteHost = async (hostId: number) => {
+    if (!(await confirmDialog('Delete this host?', { destructive: true, confirmText: 'Delete' }))) return;
+    try { await api.deleteHost(hostId); if (selectedHostId === hostId) setSelectedHostId(null); refreshHosts(); }
+    catch { toast.error('Failed to delete host'); }
+  };
+
+  const toggleMembership = async (groupId: number, isIn: boolean) => {
+    if (!selectedHostId) return;
+    try {
+      if (isIn) { await api.removeHostFromGroup(groupId, selectedHostId); setHostGroups(p => p.filter(id => id !== groupId)); }
+      else { await api.addHostToGroup(groupId, selectedHostId); setHostGroups(p => [...p, groupId]); }
+      setGroupHosts(prev => {
+        const cur = new Set(prev[groupId] || []);
+        if (isIn) cur.delete(selectedHostId); else cur.add(selectedHostId);
+        return { ...prev, [groupId]: [...cur] };
+      });
+    } catch { toast.error('Failed to update membership'); }
+  };
+
+  const createInventory = async () => {
     if (!newInventoryName.trim()) return;
-    try {
-      await api.createInventory({
-        name: newInventoryName,
-        organization_id: orgId,
-        kind: 'standard'
-      });
-      setNewInventoryName('');
-      setShowInventoryModal(false);
-      fetchInventories();
-    } catch (err) {
-      console.error('Failed to create inventory', err);
-      toast.error('Failed to create inventory');
-    }
+    try { await api.createInventory({ name: newInventoryName, organization_id: orgId, kind: 'standard' }); setNewInventoryName(''); setShowInventoryModal(false); fetchInventories(); }
+    catch { toast.error('Failed to create inventory'); }
   };
-
-  // Delete Inventory
-  const handleDeleteInventory = async (id: number) => {
-    if (!(await confirmDialog('Are you sure you want to delete this inventory?'))) return;
-    try {
-      await api.deleteInventory(id);
-      if (selectedInventoryId === id) {
-        setSelectedInventoryId(null);
-      }
-      fetchInventories();
-    } catch (err) {
-      console.error('Failed to delete inventory', err);
-    }
+  const deleteInventory = async (idToDel: number) => {
+    if (!(await confirmDialog('Delete this inventory?', { destructive: true, confirmText: 'Delete' }))) return;
+    try { await api.deleteInventory(idToDel); if (selectedInventoryId === idToDel) setSelectedInventoryId(null); fetchInventories(); }
+    catch { toast.error('Failed to delete inventory'); }
   };
-
-  // Create Host
-  const handleCreateHost = async () => {
+  const createHost = async () => {
     if (!newHostName.trim() || !selectedInventoryId) return;
-    try {
-      await api.createHost(selectedInventoryId, {
-        name: newHostName,
-        enabled: true,
-        variables: mergeConnection(newHostConn, {}),
-      });
-      setNewHostName('');
-      setNewHostConn(emptyConnection());
-      setShowHostModal(false);
-      // Refresh hosts
-      const hostsData = await api.getHosts(selectedInventoryId);
-      setHosts(hostsData || []);
-    } catch (err) {
-      console.error('Failed to create host', err);
-      toast.error('Failed to create host');
-    }
+    try { await api.createHost(selectedInventoryId, { name: newHostName, enabled: true, variables: mergeConnection(newHostConn, {}) }); setNewHostName(''); setNewHostConn(emptyConnection()); setShowHostModal(false); refreshHosts(); }
+    catch { toast.error('Failed to create host'); }
   };
-
-  // Handle Import
-  const handleImport = async () => {
+  const createGroup = async () => {
+    if (!newGroupName.trim() || !selectedInventoryId) return;
+    try { await api.createGroup(selectedInventoryId, { name: newGroupName }); setNewGroupName(''); setShowGroupModal(false); refreshHosts(); }
+    catch { toast.error('Failed to create group'); }
+  };
+  const doImport = async () => {
     if (!selectedInventoryId || !importContent.trim()) return;
     try {
-      const result = await api.importInventory(selectedInventoryId, importContent, importFormat);
-      toast.success(`Import complete! Created ${result.hosts_created} hosts, ${result.groups_created} groups.${result.errors?.length > 0 ? `\nErrors: ${result.errors.join(', ')}` : ''}`);
-      setShowImportModal(false);
-      setImportContent('');
-      // Refresh hosts and groups
-      const [hostsData, groupsData] = await Promise.all([
-        api.getHosts(selectedInventoryId),
-        api.getGroups(selectedInventoryId)
-      ]);
-      setHosts(hostsData || []);
-      setGroups(groupsData || []);
-    } catch (err) {
-      console.error('Failed to import inventory', err);
-      toast.error('Failed to import inventory');
-    }
+      const r = await api.importInventory(selectedInventoryId, importContent, importFormat);
+      toast.success(`Imported ${r.hosts_created} hosts, ${r.groups_created} groups.`);
+      setShowImportModal(false); setImportContent(''); refreshHosts();
+    } catch { toast.error('Failed to import inventory'); }
   };
-
-  // Delete Host
-  const handleDeleteHost = async (hostId: number) => {
-    if (!(await confirmDialog('Are you sure you want to delete this host?'))) return;
+  const createSource = async () => {
+    if (!selectedInventoryId || !newSource.name.trim()) return;
     try {
-      await api.deleteHost(hostId);
-      if (selectedHostId === hostId) {
-        setSelectedHostId(null);
-      }
-      if (selectedInventoryId) {
-        const hostsData = await api.getHosts(selectedInventoryId);
-        setHosts(hostsData || []);
-      }
-    } catch (err) {
-      console.error('Failed to delete host', err);
-    }
+      await api.createInventorySource(selectedInventoryId, { ...newSource, credential_id: newSource.credential_id === '' ? null : newSource.credential_id });
+      setShowSourceModal(false); setNewSource({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
+      api.getInventorySources(selectedInventoryId).then(d => setSources(d || [])).catch(() => { });
+    } catch { toast.error('Failed to create source'); }
   };
-
-  // Create Group
-  const handleCreateGroup = async () => {
-    if (!newGroupName.trim() || !selectedInventoryId) return;
-    try {
-      await api.createGroup(selectedInventoryId, { name: newGroupName });
-      setNewGroupName('');
-      setShowGroupModal(false);
-      const groupsData = await api.getGroups(selectedInventoryId);
-      setGroups(groupsData || []);
-    } catch (err) {
-      console.error('Failed to create group', err);
-      toast.error('Failed to create group');
-    }
-  };
-
-  // Set Runner Host
-  const handleSetRunner = async (hostId: number) => {
+  const syncSource = async (sid: number) => {
     if (!selectedInventoryId) return;
-    setSettingRunner(true);
-    try {
-      await api.setRunnerHost(hostId);
-      // Refresh hosts list to update runner badges
-      const hostsData = await api.getHosts(selectedInventoryId);
-      setHosts(hostsData || []);
-      // Keep the same host selected to show the badge update
-      setSelectedHostId(hostId);
-    } catch (err) {
-      console.error('Failed to set runner host', err);
-      toast.error('Failed to set runner host');
-    } finally {
-      setSettingRunner(false);
-    }
+    await api.syncInventorySource(selectedInventoryId, sid);
+    toast.info('Sync started');
+    setTimeout(refreshHosts, 4000); setTimeout(refreshHosts, 9000);
+  };
+  const deleteSource = async (sid: number) => {
+    if (!selectedInventoryId) return;
+    await api.deleteInventorySource(selectedInventoryId, sid);
+    api.getInventorySources(selectedInventoryId).then(d => setSources(d || [])).catch(() => { });
   };
 
-  const selectedHost = hosts.find(h => h.id === selectedHostId);
   const selectedInv = inventories.find(i => i.id === selectedInventoryId);
-  const openHost = (id: number) => { setSelectedHostId(id); setShowHostDetail(true); };
-  const addLabel = activeTab === 'hosts' ? 'Host' : activeTab === 'groups' ? 'Group' : 'Source';
-  const onAdd = () => activeTab === 'hosts' ? setShowHostModal(true) : activeTab === 'groups' ? setShowGroupModal(true) : setShowSourceModal(true);
+  const selectedHost = hosts.find(h => h.id === selectedHostId);
 
-  if (loading) {
-    return (
-      <PageSpinner />
-    );
-  }
+  // Build the tree: groups (filtered) each with member hosts, then ungrouped.
+  const tree = useMemo(() => {
+    const q = treeFilter.trim().toLowerCase();
+    const byId = new Map(hosts.map(h => [h.id, h]));
+    const grouped = new Set<number>();
+    Object.values(groupHosts).forEach(ids => ids.forEach(id => grouped.add(id)));
+    const match = (h: Host) => !q || h.name.toLowerCase().includes(q);
+    const groupNodes = groups.map(g => ({
+      group: g,
+      members: (groupHosts[g.id] || []).map(id => byId.get(id)).filter((h): h is Host => !!h && match(h)),
+    })).filter(n => !q || n.members.length > 0 || g_match(n.group, q));
+    const ungrouped = hosts.filter(h => !grouped.has(h.id) && match(h));
+    return { groupNodes, ungrouped };
+  }, [groups, groupHosts, hosts, treeFilter]);
 
-  if (error) {
-    return <div className="text-red-600 p-4">{error}</div>;
-  }
+  const toggleCollapse = (key: number | 'ungrouped') =>
+    setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+
+  const openVarsModal = () => { setVarsDraft(JSON.stringify(coercedExtra, null, 2)); setShowVarsModal(true); };
+  const applyVarsDraft = () => {
+    try {
+      const parsed = JSON.parse(varsDraft || '{}');
+      const strExtra: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) strExtra[k] = showVal(v);
+      setExtraVars(strExtra); setShowVarsModal(false);
+    } catch { toast.error('Invalid JSON'); }
+  };
+
+  if (loading) return <PageSpinner />;
+  if (error) return <div className="text-err p-6">{error}</div>;
+
+  const memberGroupNames = selectedHost ? groups.filter(g => hostGroups.includes(g.id)).map(g => g.name) : [];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between">
-        <div>
-          <Link to="/inventories" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
-            <ArrowLeft size={14} /> Organizations
-          </Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">{orgName} · Inventories</h1>
+    <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
+      {/* Inventory context bar */}
+      <div className="flex items-center gap-4 h-[54px] px-6 border-b border-line shrink-0">
+        <Link to="/inventories" className="w-7 h-7 grid place-items-center rounded-md border border-line2 text-mut hover:text-ink hover:border-white/20 transition-colors shrink-0" title="All organizations">
+          <ArrowLeft size={15} />
+        </Link>
+        <div className="relative">
+          <button onClick={() => setInvMenu(v => !v)} onBlur={() => setTimeout(() => setInvMenu(false), 150)} className="flex items-center gap-2 group">
+            <span className="text-[15px] font-semibold tracking-tight">{selectedInv?.name || 'No inventory'}</span>
+            <ChevronDown size={14} className="text-mut group-hover:text-ink" />
+          </button>
+          {invMenu && (
+            <div className="absolute z-30 top-9 left-0 w-64 bg-panel border border-line2 rounded-lg shadow-2xl py-1.5 max-h-80 overflow-auto scroll-tint">
+              <div className="px-3 py-1 font-mono text-[9px] tracking-[0.14em] uppercase text-dim">{orgName}</div>
+              {inventories.map(inv => (
+                <button key={inv.id} onMouseDown={() => { setSelectedInventoryId(inv.id); setSelectedHostId(null); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-white/5 ${inv.id === selectedInventoryId ? 'text-acc' : 'text-ink2'}`}>
+                  <Server size={14} className="shrink-0 opacity-70" /> <span className="truncate flex-1">{inv.name}</span>
+                  {inv.id === selectedInventoryId && <Check size={13} />}
+                </button>
+              ))}
+              <div className="border-t border-line mt-1 pt-1">
+                <button onMouseDown={() => setShowInventoryModal(true)} className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-mut hover:text-ink hover:bg-white/5"><Plus size={14} /> New inventory</button>
+              </div>
+            </div>
+          )}
         </div>
-        <Button icon={<Plus size={16} />} onClick={() => setShowInventoryModal(true)}>New Inventory</Button>
-      </div>
-
-      <div className="flex gap-6 items-start">
-        {/* Left: inventory list */}
-        <Card className="w-72 shrink-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700">All inventories</h3>
-            <span className="text-xs text-gray-400">{inventories.length}</span>
+        {selectedInv && (
+          <div className="flex gap-4 font-mono text-[11px] text-dim">
+            <span><b className="text-mut font-medium">{hosts.length}</b> hosts</span>
+            <span><b className="text-mut font-medium">{groups.length}</b> groups</span>
+            <span><b className="text-mut font-medium">{sources.length}</b> sources</span>
           </div>
-          <div className="p-2 space-y-0.5 max-h-[72vh] overflow-y-auto">
-            {inventories.map(inv => (
-              <div
-                key={inv.id}
-                onClick={() => { setSelectedInventoryId(inv.id); setSelectedHostId(null); }}
-                className={`group flex items-center justify-between gap-2 px-3 py-2 rounded-md cursor-pointer ${selectedInventoryId === inv.id ? 'bg-brand-50' : 'hover:bg-gray-50'}`}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <Server size={15} className={`shrink-0 ${selectedInventoryId === inv.id ? 'text-brand-600' : 'text-gray-400'}`} />
-                  <span className={`text-sm truncate ${selectedInventoryId === inv.id ? 'text-brand-700 font-medium' : 'text-gray-700'}`} title={inv.name}>{inv.name}</span>
-                </div>
-                <button onClick={(e) => { e.stopPropagation(); handleDeleteInventory(inv.id); }} className="shrink-0 text-gray-300 group-hover:text-gray-400 hover:!text-red-600" title="Delete inventory">
-                  <Trash size={14} />
-                </button>
-              </div>
-            ))}
-            {inventories.length === 0 && <p className="px-3 py-6 text-sm text-gray-400 text-center">No inventories yet.</p>}
-          </div>
-        </Card>
-
-        {/* Right: selected inventory detail */}
-        {selectedInv ? (
-          <div className="flex-1 min-w-0 space-y-4">
-            {/* Header + summary */}
-            <Card>
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-gray-900 truncate" title={selectedInv.name}>{selectedInv.name}</h2>
-                  <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-sm text-gray-500">
-                    <span><b className="text-gray-900">{hosts.length}</b> hosts</span>
-                    <span><b className="text-gray-900">{groups.length}</b> groups</span>
-                    <span><b className="text-gray-900">{sources.length}</b> sources</span>
-                  </div>
-                </div>
-                <Button variant="secondary" icon={<Server size={16} />} onClick={() => setShowImportModal(true)}>Import</Button>
-              </div>
-            </Card>
-
-            {/* Tabs + content */}
-            <Card className="overflow-hidden">
-              <div className="flex items-center justify-between border-b border-gray-200 px-2">
-                <div className="flex">
-                  {(['hosts', 'groups', 'sources', 'access'] as const).map(t => (
-                    <button key={t} onClick={() => setActiveTab(t)}
-                      className={`px-4 py-3 text-sm font-medium border-b-2 capitalize ${activeTab === t ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                      {t}{t !== 'access' && <span className="text-gray-400"> ({t === 'hosts' ? hosts.length : t === 'groups' ? groups.length : sources.length})</span>}
-                    </button>
-                  ))}
-                </div>
-                {activeTab !== 'access' && <Button size="sm" icon={<Plus size={14} />} onClick={onAdd}>Add {addLabel}</Button>}
-              </div>
-
-              {/* Access */}
-              {activeTab === 'access' && (
-                <div className="p-4">
-                  <ResourceAccess contentType="inventory" objectId={selectedInv.id} />
-                </div>
-              )}
-
-              {/* Hosts */}
-              {activeTab === 'hosts' && (
-                <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-100">
-                  <tbody className="divide-y divide-gray-50">
-                    {hosts.map(host => (
-                      <tr key={host.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openHost(host.id)}>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded-full shrink-0 ${host.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
-                            <span className="text-sm font-medium text-gray-900 truncate" title={host.name}>{host.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 w-56">
-                          {host.is_runner_host ? (
-                            <span className="inline-flex items-center gap-2">
-                              <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">Runner</span>
-                              {host.runner_healthy ? (
-                                <span title="Runner agent is healthy (recent heartbeat)" className="inline-flex items-center gap-1 text-xs text-green-600"><Activity size={12} /> healthy</span>
-                              ) : host.runner_last_seen ? (
-                                <span title="Runner agent is stale (no recent heartbeat)" className="inline-flex items-center gap-1 text-xs text-yellow-600"><Clock size={12} /> stale</span>
-                              ) : (
-                                <span title="Runner agent not installed yet" className="text-xs text-gray-400">no agent</span>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-400">{host.enabled ? 'enabled' : 'disabled'}</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 w-44 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                          {!host.is_runner_host && (
-                            <Button variant="ghost" size="sm" icon={<Play size={13} />} disabled={settingRunner} onClick={() => handleSetRunner(host.id)}>Runner</Button>
-                          )}
-                          <Button variant="ghost" size="sm" icon={<Trash size={14} />} onClick={() => handleDeleteHost(host.id)} />
-                        </td>
-                      </tr>
-                    ))}
-                    {hosts.length === 0 && <tr><td className="px-4 py-8 text-center text-sm text-gray-400">No hosts. Add one, import, or sync a source.</td></tr>}
-                  </tbody>
-                </table>
-                </div>
-              )}
-
-              {/* Groups */}
-              {activeTab === 'groups' && (
-                <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-100">
-                  <tbody className="divide-y divide-gray-50">
-                    {groups.map(group => (
-                      <tr key={group.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <Users size={15} className="text-gray-400" />
-                            <span className="text-sm font-medium text-gray-900">{group.name}</span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {groups.length === 0 && <tr><td className="px-4 py-8 text-center text-sm text-gray-400">No groups yet.</td></tr>}
-                  </tbody>
-                </table>
-                </div>
-              )}
-
-              {/* Sources */}
-              {activeTab === 'sources' && (
-                <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-100">
-                  <thead className="bg-gray-50"><tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Kind</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last synced</th>
-                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {sources.map(s => (
-                      <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 text-sm font-medium text-gray-900">
-                          {s.name}{s.credential_id ? <span className="ml-2 text-xs text-gray-400">🔑</span> : null}
-                        </td>
-                        <td className="px-4 py-2.5 text-sm text-gray-500">{s.source_kind}</td>
-                        <td className="px-4 py-2.5 text-sm text-gray-500">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never'}</td>
-                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                          <Button variant="ghost" size="sm" icon={<Play size={13} />} onClick={() => handleSyncSource(s.id)}>Sync</Button>
-                          <Button variant="ghost" size="sm" icon={<Trash size={14} />} onClick={() => handleDeleteSource(s.id)} />
-                        </td>
-                      </tr>
-                    ))}
-                    {sources.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-400">No sources. Add one to populate this inventory dynamically (e.g. AWS).</td></tr>}
-                  </tbody>
-                </table>
-                </div>
-              )}
-            </Card>
-          </div>
-        ) : (
-          <Card className="flex-1">
-            <div className="flex flex-col items-center justify-center text-gray-400 py-20">
-              <Server size={40} className="mb-3 opacity-20" />
-              <p className="text-sm">Select an inventory to view its hosts, groups and sources.</p>
-            </div>
-          </Card>
         )}
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => setShowImportModal(true)} className="h-8 px-3 rounded-md text-xs font-medium flex items-center gap-1.5 text-mut hover:text-ink hover:bg-white/5 transition-colors"><Upload size={14} /> Import</button>
+          {selectedInv && (
+            <button onClick={() => deleteInventory(selectedInv.id)} className="w-8 h-8 grid place-items-center rounded-md text-dim hover:text-err hover:bg-white/5 transition-colors" title="Delete inventory"><Trash2 size={15} /></button>
+          )}
+        </div>
       </div>
 
-      {/* Host detail modal */}
-      <Modal isOpen={showHostDetail && !!selectedHost} onClose={() => setShowHostDetail(false)} title={selectedHost ? selectedHost.name : ''} size="lg">
-        {selectedHost && (
-          <div className="space-y-5">
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${selectedHost.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
-              <span className="text-sm text-gray-600">{selectedHost.enabled ? 'Enabled' : 'Disabled'}</span>
-              {selectedHost.is_runner_host && <span className="px-2 py-0.5 text-xs font-semibold bg-purple-100 text-purple-700 rounded-full">Runner</span>}
-              <div className="ml-auto flex gap-2">
-                {!selectedHost.is_runner_host && (
-                  <Button size="sm" variant="secondary" icon={settingRunner ? <Loader size={14} className="animate-spin" /> : <Play size={14} />} disabled={settingRunner} onClick={() => handleSetRunner(selectedHost.id)}>Set as runner</Button>
+      {!selectedInv ? (
+        <div className="flex-1 grid place-items-center text-dim">
+          <div className="text-center">
+            <Server size={40} className="mx-auto mb-3 opacity-20" />
+            <p className="text-sm mb-4">No inventories in {orgName} yet.</p>
+            <Button icon={<Plus size={15} />} onClick={() => setShowInventoryModal(true)}>New inventory</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-[268px_1fr] flex-1 min-h-0 max-[820px]:grid-cols-1">
+          {/* STRUCTURE */}
+          <div className="flex flex-col min-h-0 border-r border-line bg-tree max-[820px]:hidden">
+            <div className="flex items-center gap-2.5 h-[46px] px-4 border-b border-line shrink-0">
+              <Search size={14} className="text-dim shrink-0" />
+              <input value={treeFilter} onChange={e => setTreeFilter(e.target.value)} placeholder="Filter hosts" className="flex-1 bg-transparent border-none outline-none text-[12.5px] text-ink placeholder:text-dim" />
+            </div>
+            <div className="flex items-center h-[34px] px-4 mt-1.5 shrink-0">
+              <span className="font-mono text-[9px] tracking-[0.16em] uppercase text-dim">Structure</span>
+              <div className="ml-auto relative">
+                <button onClick={() => setAddMenu(v => !v)} onBlur={() => setTimeout(() => setAddMenu(false), 150)} className="text-dim hover:text-ink" title="Add"><Plus size={15} /></button>
+                {addMenu && (
+                  <div className="absolute z-30 top-6 right-0 w-40 bg-panel border border-line2 rounded-lg shadow-2xl py-1.5">
+                    <button onMouseDown={() => setShowHostModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add host</button>
+                    <button onMouseDown={() => setShowGroupModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add group</button>
+                    <button onMouseDown={() => setShowSourceModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add source</button>
+                  </div>
                 )}
-                <Button size="sm" variant="danger" icon={<Trash size={14} />} onClick={() => { handleDeleteHost(selectedHost.id); setShowHostDetail(false); }}>Delete</Button>
               </div>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2"><Users size={14} className="inline mr-1" /> Group membership</label>
-              {groups.length === 0 ? (
-                <p className="text-xs text-gray-400">No groups in this inventory.</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-1 bg-gray-50 rounded-md p-3 border border-gray-200">
-                  {groups.map(group => {
-                    const isInGroup = hostGroups.includes(group.id);
-                    return (
-                      <label key={group.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 rounded">
-                        <input type="checkbox" checked={isInGroup} className="rounded text-brand-600 focus:ring-brand-500"
-                          onChange={async () => {
-                            try {
-                              if (isInGroup) { await api.removeHostFromGroup(group.id, selectedHost.id); setHostGroups(prev => prev.filter(id => id !== group.id)); }
-                              else { await api.addHostToGroup(group.id, selectedHost.id); setHostGroups(prev => [...prev, group.id]); }
-                            } catch (err) { console.error('Failed to update group membership', err); }
-                          }} />
-                        <span className="text-sm text-gray-700 truncate">{group.name}</span>
-                      </label>
-                    );
-                  })}
+            <div className="flex-1 overflow-auto scroll-tint px-2.5 pb-6">
+              {tree.groupNodes.map(({ group, members }) => {
+                const isCollapsed = collapsed.has(group.id);
+                return (
+                  <div key={group.id}>
+                    <button onClick={() => toggleCollapse(group.id)} className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-lg hover:bg-white/[0.028]">
+                      {isCollapsed ? <ChevronRight size={11} className="text-dim shrink-0" /> : <ChevronDown size={11} className="text-dim shrink-0" />}
+                      <span className="text-[12.5px] font-semibold text-ink2 tracking-[0.01em]">{group.name}</span>
+                      <span className="ml-auto font-mono text-[10.5px] text-faint">{members.length}</span>
+                    </button>
+                    {!isCollapsed && (
+                      <div className="relative mb-1 before:content-[''] before:absolute before:left-4 before:top-0.5 before:bottom-3.5 before:w-px before:bg-line">
+                        {members.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => setSelectedHostId(h.id)} />)}
+                        {members.length === 0 && <div className="pl-7 py-1 font-mono text-[11px] text-faint">empty</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {tree.ungrouped.length > 0 && (
+                <div className="mt-3 pt-2.5 border-t border-line">
+                  <button onClick={() => toggleCollapse('ungrouped')} className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-lg hover:bg-white/[0.028]">
+                    {collapsed.has('ungrouped') ? <ChevronRight size={11} className="text-dim shrink-0" /> : <ChevronDown size={11} className="text-dim shrink-0" />}
+                    <span className="text-[12.5px] font-semibold text-dim">ungrouped</span>
+                    <span className="ml-auto font-mono text-[10.5px] text-faint">{tree.ungrouped.length}</span>
+                  </button>
+                  {!collapsed.has('ungrouped') && (
+                    <div className="relative mb-1 before:content-[''] before:absolute before:left-4 before:top-0.5 before:bottom-3.5 before:w-px before:bg-line">
+                      {tree.ungrouped.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => setSelectedHostId(h.id)} />)}
+                    </div>
+                  )}
                 </div>
               )}
+              {hosts.length === 0 && <p className="px-3 py-6 text-[12px] text-dim text-center">No hosts. Add one, import, or sync a source.</p>}
             </div>
+          </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2"><Plug size={14} className="inline mr-1" /> Connection</label>
-              <div className="bg-gray-50 border border-gray-200 rounded-md p-3 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2 sm:col-span-1">
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Address <span className="text-gray-400">(ansible_host)</span></label>
-                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder={selectedHost.name}
-                      value={connForm.ansible_host} onChange={e => setConnForm({ ...connForm, ansible_host: e.target.value })} />
-                    <p className="text-[11px] text-gray-400 mt-0.5">IP or DNS name. Defaults to the hostname.</p>
+          {/* EDITOR / OVERVIEW */}
+          <div className="flex flex-col min-h-0 bg-bg">
+            {selectedHost ? (
+              <>
+                <div className="flex items-start gap-4 px-10 pt-6 pb-5 border-b border-line shrink-0 max-[820px]:px-5">
+                  <div className="min-w-0">
+                    <div className="font-mono text-[11px] text-dim mb-2">
+                      <span className="text-mut">{selectedInv.name}</span>
+                      {memberGroupNames[0] && <><span className="mx-1.5 text-faint">/</span><span className="text-mut">{memberGroupNames[0]}</span></>}
+                      <span className="mx-1.5 text-faint">/</span>{selectedHost.name}
+                    </div>
+                    <h1 className="font-mono text-[23px] font-semibold tracking-tight leading-none truncate">{selectedHost.name}</h1>
+                    <div className="mt-2.5 text-[12px] text-dim flex items-center gap-2 flex-wrap">
+                      <span>host{memberGroupNames.length ? <> · member of {memberGroupNames.map((n, i) => <React.Fragment key={n}>{i > 0 && ', '}<b className="text-mut font-medium">{n}</b></React.Fragment>)}</> : ' · no groups'}</span>
+                      {selectedHost.is_runner_host && <span className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-violet/15 text-violet">runner</span>}
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Port <span className="text-gray-400">(ansible_port)</span></label>
-                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="22" inputMode="numeric"
-                      value={connForm.ansible_port} onChange={e => setConnForm({ ...connForm, ansible_port: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">User <span className="text-gray-400">(ansible_user)</span></label>
-                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="root"
-                      value={connForm.ansible_user} onChange={e => setConnForm({ ...connForm, ansible_user: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Connection <span className="text-gray-400">(ansible_connection)</span></label>
-                    <select className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm"
-                      value={connForm.ansible_connection} onChange={e => setConnForm({ ...connForm, ansible_connection: e.target.value })}>
-                      <option value="">ssh (default)</option>
-                      <option value="ssh">ssh</option>
-                      <option value="local">local</option>
-                      <option value="paramiko">paramiko</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Python <span className="text-gray-400">(interpreter)</span></label>
-                    <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="/usr/bin/python3"
-                      value={connForm.ansible_python_interpreter} onChange={e => setConnForm({ ...connForm, ansible_python_interpreter: e.target.value })} />
+                  <div className="ml-auto flex items-center gap-3 pt-1 shrink-0">
+                    <span className="font-mono text-[10.5px] text-dim flex items-center gap-1.5">
+                      {dirty ? <><span className="w-1.5 h-1.5 rounded-full bg-changed" /> unsaved</> : <><Check size={12} className="text-faint" /> saved</>}
+                    </span>
+                    <Button size="sm" disabled={!dirty || savingHost} onClick={saveHost} icon={savingHost ? <Loader size={13} className="animate-spin" /> : undefined}>Save</Button>
+                    <HostActions host={selectedHost} settingRunner={settingRunner} onRunner={() => setRunner(selectedHost.id)} onDelete={() => deleteHost(selectedHost.id)} />
                   </div>
                 </div>
-                <div className="flex justify-end">
-                  <Button size="sm" icon={savingHost ? <Loader size={14} className="animate-spin" /> : <Save size={14} />} disabled={savingHost} onClick={handleSaveConnection}>Save connection</Button>
-                </div>
-              </div>
-            </div>
 
-            {Object.keys(extraVars).length > 0 && (
-              <div>
-                <button onClick={() => setShowExtraVars(v => !v)} className="flex items-center gap-1 text-sm font-medium text-gray-700">
-                  {showExtraVars ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Other variables ({Object.keys(extraVars).length})
-                </button>
-                {showExtraVars && (
-                  <pre className="mt-2 w-full max-h-56 overflow-auto font-mono text-xs bg-slate-50 border border-gray-200 rounded-md p-3 text-gray-700">
-                    {JSON.stringify(extraVars, null, 2)}
-                  </pre>
-                )}
+                <div className="flex-1 overflow-auto scroll-tint px-10 pb-16 max-[820px]:px-5">
+                  <div className="max-w-[640px]">
+                    {/* Connection */}
+                    <Section title="Connection">
+                      <ConnRow label="Address" varName="ansible_host" value={connForm.ansible_host} placeholder={selectedHost.name} onChange={v => setConnForm({ ...connForm, ansible_host: v })} />
+                      <ConnRow label="Port" varName="ansible_port" value={connForm.ansible_port} placeholder="22" sm onChange={v => setConnForm({ ...connForm, ansible_port: v })} />
+                      <ConnRow label="User" varName="ansible_user" value={connForm.ansible_user} placeholder="root" onChange={v => setConnForm({ ...connForm, ansible_user: v })} />
+                      <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5">
+                        <div className="text-[12.5px] text-mut">Transport<span className="block font-mono text-[9.5px] text-faint mt-0.5">ansible_connection</span></div>
+                        <select value={connForm.ansible_connection} onChange={e => setConnForm({ ...connForm, ansible_connection: e.target.value })}
+                          className="max-w-[120px] bg-transparent border-b border-line focus:border-acc text-ink font-mono text-[13px] py-1.5 outline-none hover:border-line2">
+                          <option value="" className="bg-panel">ssh</option>
+                          <option value="ssh" className="bg-panel">ssh</option>
+                          <option value="local" className="bg-panel">local</option>
+                          <option value="paramiko" className="bg-panel">paramiko</option>
+                        </select>
+                      </div>
+                      <ConnRow label="Python" varName="ansible_python_interpreter" value={connForm.ansible_python_interpreter} placeholder="/usr/bin/python3" onChange={v => setConnForm({ ...connForm, ansible_python_interpreter: v })} />
+                    </Section>
+
+                    {/* Defined vars */}
+                    <Section title="Defined on this host" hint={`host_vars · ${Object.keys(extraVars).length}`} action={<button onClick={openVarsModal} className="font-mono text-[11px] text-dim hover:text-acc">edit as JSON</button>}>
+                      {Object.keys(extraVars).length === 0 && <p className="font-mono text-[12px] text-faint py-1">No host-specific variables.</p>}
+                      {Object.entries(extraVars).map(([k, v]) => (
+                        <div key={k} className="flex items-center gap-3.5 py-2 group">
+                          <span className="w-1.5 h-1.5 rounded-full bg-acc shrink-0" />
+                          <span className="font-mono text-[13px] text-ink min-w-[158px]">{k}</span>
+                          <span className="text-faint font-mono">=</span>
+                          <input value={v} onChange={e => setExtraVars(p => ({ ...p, [k]: e.target.value }))}
+                            className="flex-1 bg-transparent border-b border-transparent group-hover:border-line focus:border-acc text-ink2 font-mono text-[13px] pb-0.5 outline-none" />
+                          <button onClick={() => setExtraVars(p => { const n = { ...p }; delete n[k]; return n; })} className="text-faint hover:text-err opacity-0 group-hover:opacity-100" title="Remove"><Trash2 size={13} /></button>
+                        </div>
+                      ))}
+                      <button onClick={() => { let i = 1; let key = 'new_var'; while (key in extraVars) key = `new_var_${i++}`; setExtraVars(p => ({ ...p, [key]: '' })); }}
+                        className="flex items-center gap-2 pt-3 ml-5 font-mono text-[12px] text-dim hover:text-acc">
+                        <Plus size={13} /> add variable
+                      </button>
+                    </Section>
+
+                    {/* Membership */}
+                    <Section title="Group membership">
+                      {groups.length === 0 ? <p className="font-mono text-[12px] text-faint py-1">No groups in this inventory.</p> : (
+                        <div className="flex flex-wrap gap-2">
+                          {groups.map(g => {
+                            const isIn = hostGroups.includes(g.id);
+                            return (
+                              <button key={g.id} onClick={() => toggleMembership(g.id, isIn)}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-mono text-[12px] border transition-colors ${isIn ? 'bg-grp/10 text-grp border-grp/30' : 'text-mut border-line hover:border-line2'}`}>
+                                {isIn && <Check size={12} />} {g.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </Section>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Inventory overview */
+              <div className="flex-1 overflow-auto scroll-tint px-10 pt-7 pb-16 max-[820px]:px-5">
+                <div className="max-w-[720px]">
+                  <h1 className="text-[21px] font-semibold tracking-tight">{selectedInv.name}</h1>
+                  <p className="text-sm text-mut mt-1">Select a host in the structure to edit its connection and variables.</p>
+
+                  <Section title="Sources" hint={`${sources.length}`} action={<button onClick={() => setShowSourceModal(true)} className="font-mono text-[11px] text-dim hover:text-acc">add source</button>}>
+                    {sources.length === 0 ? <p className="font-mono text-[12px] text-faint py-1">No dynamic sources. Add one to populate hosts (e.g. AWS).</p> : (
+                      <div className="space-y-0">
+                        {sources.map(s => (
+                          <div key={s.id} className="flex items-center gap-3 py-2.5 border-b border-line last:border-0">
+                            <span className="text-[13px] text-ink font-medium">{s.name}</span>
+                            <span className="font-mono text-[11px] text-dim">{s.source_kind}</span>
+                            <span className="ml-auto font-mono text-[11px] text-dim">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
+                            <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>
+                            <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
+
+                  <Section title="Access" icon={<Shield size={13} className="text-dim" />}>
+                    <ResourceAccess contentType="inventory" objectId={selectedInv.id} />
+                  </Section>
+                </div>
               </div>
             )}
           </div>
-        )}
-      </Modal>
+        </div>
+      )}
 
-      {/* New Inventory Modal */}
-      <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title={`New Inventory in ${orgName}`}>
+      {/* ── Modals ─────────────────────────────────────────────────────── */}
+      <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title={`New inventory in ${orgName}`}>
         <div className="space-y-4">
-          <Input
-            label="Name"
-            type="text"
-            value={newInventoryName}
-            onChange={(e) => setNewInventoryName(e.target.value)}
-            placeholder="My Inventory"
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowInventoryModal(false)}>Cancel</Button>
-            <Button onClick={handleCreateInventory}>Create</Button>
-          </div>
+          <Input label="Name" value={newInventoryName} onChange={e => setNewInventoryName(e.target.value)} placeholder="My inventory" />
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowInventoryModal(false)}>Cancel</Button><Button onClick={createInventory}>Create</Button></div>
         </div>
       </Modal>
 
-      {/* New Host Modal */}
-      <Modal isOpen={showHostModal} onClose={() => setShowHostModal(false)} title="New Host">
+      <Modal isOpen={showHostModal} onClose={() => setShowHostModal(false)} title="New host">
         <div className="space-y-4">
-          <Input
-            label="Hostname"
-            type="text"
-            value={newHostName}
-            onChange={(e) => setNewHostName(e.target.value)}
-            placeholder="web-server-01"
-          />
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2"><Plug size={14} className="inline mr-1" /> Connection <span className="text-gray-400 font-normal">(optional)</span></label>
-            <div className="grid grid-cols-2 gap-3 bg-gray-50 border border-gray-200 rounded-md p-3">
-              <div className="col-span-2 sm:col-span-1">
-                <label className="block text-xs font-medium text-gray-500 mb-1">Address</label>
-                <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder={newHostName || 'ansible_host'}
-                  value={newHostConn.ansible_host} onChange={e => setNewHostConn({ ...newHostConn, ansible_host: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Port</label>
-                <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="22" inputMode="numeric"
-                  value={newHostConn.ansible_port} onChange={e => setNewHostConn({ ...newHostConn, ansible_port: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">User</label>
-                <input className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm font-mono" placeholder="root"
-                  value={newHostConn.ansible_user} onChange={e => setNewHostConn({ ...newHostConn, ansible_user: e.target.value })} />
-              </div>
-            </div>
-            <p className="text-[11px] text-gray-400 mt-1">Leave address blank to connect by hostname. You can edit these later on the host.</p>
+          <Input label="Hostname" value={newHostName} onChange={e => setNewHostName(e.target.value)} placeholder="web-01" />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Address" wrapperClassName="col-span-2" value={newHostConn.ansible_host} onChange={e => setNewHostConn({ ...newHostConn, ansible_host: e.target.value })} placeholder={newHostName || 'ansible_host'} className="font-mono" />
+            <Input label="Port" value={newHostConn.ansible_port} onChange={e => setNewHostConn({ ...newHostConn, ansible_port: e.target.value })} placeholder="22" inputMode="numeric" className="font-mono" />
+            <Input label="User" value={newHostConn.ansible_user} onChange={e => setNewHostConn({ ...newHostConn, ansible_user: e.target.value })} placeholder="root" className="font-mono" />
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => { setShowHostModal(false); setNewHostConn(emptyConnection()); }}>Cancel</Button>
-            <Button onClick={handleCreateHost}>Create</Button>
-          </div>
+          <p className="text-[11px] text-dim">Leave address blank to connect by hostname. Editable later on the host.</p>
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => { setShowHostModal(false); setNewHostConn(emptyConnection()); }}>Cancel</Button><Button onClick={createHost}>Create</Button></div>
         </div>
       </Modal>
 
-      {/* New Group Modal */}
-      <Modal isOpen={showGroupModal} onClose={() => setShowGroupModal(false)} title="New Group">
+      <Modal isOpen={showGroupModal} onClose={() => setShowGroupModal(false)} title="New group">
         <div className="space-y-4">
-          <Input
-            label="Group Name"
-            type="text"
-            value={newGroupName}
-            onChange={(e) => setNewGroupName(e.target.value)}
-            placeholder="webservers"
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowGroupModal(false)}>Cancel</Button>
-            <Button onClick={handleCreateGroup}>Create</Button>
-          </div>
+          <Input label="Group name" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="webservers" />
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowGroupModal(false)}>Cancel</Button><Button onClick={createGroup}>Create</Button></div>
         </div>
       </Modal>
 
-      {/* Import Inventory Modal */}
-      <Modal isOpen={showImportModal} onClose={() => setShowImportModal(false)} title="Import Inventory">
+      <Modal isOpen={showImportModal} onClose={() => setShowImportModal(false)} title="Import inventory" size="lg">
         <div className="space-y-4">
-          <Select
-            label="Format"
-            value={importFormat}
-            onChange={(e) => setImportFormat(e.target.value as 'ini' | 'yaml')}
-          >
+          <Select label="Format" value={importFormat} onChange={e => setImportFormat(e.target.value as 'ini' | 'yaml')}>
             <option value="ini">INI (Ansible format)</option>
             <option value="yaml">YAML</option>
           </Select>
-          <div>
-            <Textarea
-              label="Inventory Content"
-              className="h-64 font-mono text-sm"
-              placeholder={importFormat === 'ini' ? `# INI format example
-[webservers]
-web1.example.com
-web2.example.com
-
-[databases]
-db1.example.com` : `# YAML format example
-all:
-  children:
-    webservers:
-      hosts:
-        web1.example.com:
-        web2.example.com:`}
-              value={importContent}
-              onChange={(e) => setImportContent(e.target.value)}
-            />
-          </div>
-          <p className="text-xs text-gray-500">
-            Paste your Ansible inventory file content. Hosts and groups will be created automatically.
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowImportModal(false)}>Cancel</Button>
-            <Button onClick={handleImport} disabled={!importContent.trim()}>Import</Button>
-          </div>
+          <Textarea label="Inventory content" className="h-64 font-mono text-xs" value={importContent} onChange={e => setImportContent(e.target.value)}
+            placeholder={importFormat === 'ini' ? '[webservers]\nweb1.example.com\n\n[databases]\ndb1.example.com' : 'all:\n  children:\n    webservers:\n      hosts:\n        web1.example.com:'} />
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowImportModal(false)}>Cancel</Button><Button onClick={doImport} disabled={!importContent.trim()}>Import</Button></div>
         </div>
       </Modal>
 
-      <Modal isOpen={showSourceModal} onClose={() => setShowSourceModal(false)} title="New Inventory Source">
+      <Modal isOpen={showSourceModal} onClose={() => setShowSourceModal(false)} title="New inventory source" size="lg">
         <div className="space-y-4">
-          <Input label="Name" type="text"
-            value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
-          <Select label="Kind"
-            value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
+          <Input label="Name" value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
+          <Select label="Kind" value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
             <option value="inventory">Inventory / plugin (YAML)</option>
             <option value="script">Script (executable)</option>
           </Select>
-          <Select label="Credential (optional)"
-            hint="A cloud credential (e.g. AWS) whose injectors set the env vars / files the inventory plugin needs to authenticate."
-            value={newSource.credential_id} onChange={e => setNewSource({ ...newSource, credential_id: e.target.value === '' ? '' : Number(e.target.value) })}>
+          <Select label="Credential (optional)" hint="A cloud credential whose injectors authenticate the plugin." value={newSource.credential_id} onChange={e => setNewSource({ ...newSource, credential_id: e.target.value === '' ? '' : Number(e.target.value) })}>
             <option value="">None</option>
             {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
-          <Textarea label="Source" rows={8} className="font-mono text-xs"
-            hint="A YAML inventory/plugin config, or a script that outputs Ansible inventory JSON. `ansible-inventory --list` is run against it on sync."
-            value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} />
-          <div className="flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => setShowSourceModal(false)}>Cancel</Button>
-            <Button onClick={handleCreateSource}>Create</Button>
-          </div>
+          <Textarea label="Source" rows={8} className="font-mono text-xs" value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} hint="YAML plugin config, or a script emitting Ansible inventory JSON." />
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowSourceModal(false)}>Cancel</Button><Button onClick={createSource}>Create</Button></div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showVarsModal} onClose={() => setShowVarsModal(false)} title="Edit host variables (JSON)" size="lg">
+        <div className="space-y-4">
+          <Textarea rows={14} className="font-mono text-xs" value={varsDraft} onChange={e => setVarsDraft(e.target.value)} />
+          <p className="text-[11px] text-dim">Connection fields (ansible_host, ansible_port…) are edited above; this covers everything else.</p>
+          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowVarsModal(false)}>Cancel</Button><Button onClick={applyVarsDraft}>Apply</Button></div>
         </div>
       </Modal>
     </div>
   );
 };
+
+// Whether a group's own name matches the tree filter (so an empty matching group still shows).
+function g_match(g: Group, q: string) { return g.name.toLowerCase().includes(q); }
+
+const HostRow: React.FC<{ host: Host; sel: boolean; onClick: () => void }> = ({ host, sel, onClick }) => (
+  <button onClick={onClick} className={`w-full flex items-center gap-2.5 h-7 pl-7 pr-2.5 rounded-lg ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>
+    <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${sel ? 'bg-acc' : host.is_runner_host ? 'bg-violet' : host.enabled ? 'bg-faint' : 'bg-faint/50'}`} />
+    <span className={`font-mono text-[12px] truncate ${sel ? 'text-ink font-medium' : 'text-mut'}`}>{host.name}</span>
+  </button>
+);
+
+const HostActions: React.FC<{ host: Host; settingRunner: boolean; onRunner: () => void; onDelete: () => void }> = ({ host, settingRunner, onRunner, onDelete }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(v => !v)} onBlur={() => setTimeout(() => setOpen(false), 150)} className="w-8 h-8 grid place-items-center rounded-md text-dim hover:text-ink hover:bg-white/5" title="Host actions"><MoreHorizontal size={16} /></button>
+      {open && (
+        <div className="absolute z-30 top-9 right-0 w-48 bg-panel border border-line2 rounded-lg shadow-2xl py-1.5">
+          {!host.is_runner_host && (
+            <button onMouseDown={onRunner} disabled={settingRunner} className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink2 hover:bg-white/5 disabled:opacity-50">
+              {settingRunner ? <Loader size={13} className="animate-spin" /> : <Radio size={14} />} Set as runner host
+            </button>
+          )}
+          <button onMouseDown={onDelete} className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-err/90 hover:bg-err/10"><Trash2 size={14} /> Delete host</button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Section: React.FC<{ title: string; hint?: string; icon?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }> = ({ title, hint, icon, action, children }) => (
+  <div className="py-6 border-t border-line first:border-t-0">
+    <div className="flex items-baseline gap-3 mb-4">
+      {icon}
+      <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-mut">{title}</span>
+      {hint && <span className="font-mono text-[9.5px] text-faint">{hint}</span>}
+      {action && <span className="ml-auto">{action}</span>}
+    </div>
+    {children}
+  </div>
+);
+
+const ConnRow: React.FC<{ label: string; varName: string; value: string; placeholder?: string; sm?: boolean; onChange: (v: string) => void }> = ({ label, varName, value, placeholder, sm, onChange }) => (
+  <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5">
+    <div className="text-[12.5px] text-mut">{label}<span className="block font-mono text-[9.5px] text-faint mt-0.5">{varName}</span></div>
+    <input value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
+      className={`${sm ? 'max-w-[120px]' : 'max-w-[300px]'} w-full bg-transparent border-b border-line focus:border-acc text-ink font-mono text-[13px] py-1.5 outline-none hover:border-line2 placeholder:text-faint`} />
+  </div>
+);
 
 export default InventoriesPage;

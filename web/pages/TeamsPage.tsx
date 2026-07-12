@@ -82,9 +82,9 @@ const TeamsPage = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-8 max-w-[1160px] mx-auto">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Teams</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Teams</h1>
         <Button icon={<Plus size={16} />} onClick={openModal}>Create Team</Button>
       </div>
 
@@ -93,34 +93,34 @@ const TeamsPage = () => {
           <Card key={team.id} className="relative">
             <button
               onClick={() => handleDelete(team.id)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-red-600"
+              className="absolute top-4 right-4 text-dim hover:text-err"
             >
               <Trash2 size={16} />
             </button>
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
+              <div className="p-3 bg-grp/10 text-grp rounded-lg">
                 <Users size={24} />
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">{team.name}</h3>
-                <p className="text-sm text-gray-500">{team.members?.length || 0} members</p>
+                <h3 className="font-semibold text-ink">{team.name}</h3>
+                <p className="text-sm text-mut">{team.members?.length || 0} members</p>
               </div>
             </div>
             {team.description && (
-              <p className="text-sm text-gray-600 mb-4">{team.description}</p>
+              <p className="text-sm text-ink2 mb-4">{team.description}</p>
             )}
             <div className="flex -space-x-2 overflow-hidden">
               {team.members?.slice(0, 5).map(member => (
                 <div
                   key={member.id}
-                  className="inline-block h-8 w-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center text-xs font-medium ring-2 ring-white"
+                  className="inline-block h-8 w-8 rounded-full bg-acc/15 text-acc flex items-center justify-center text-xs font-medium ring-2 ring-bg"
                   title={member.username}
                 >
                   {member.username.charAt(0).toUpperCase()}
                 </div>
               ))}
               {(team.members?.length || 0) > 5 && (
-                <div className="inline-block h-8 w-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-xs font-medium ring-2 ring-white">
+                <div className="inline-block h-8 w-8 rounded-full bg-white/5 text-ink2 flex items-center justify-center text-xs font-medium ring-2 ring-bg">
                   +{team.members!.length - 5}
                 </div>
               )}
@@ -128,7 +128,7 @@ const TeamsPage = () => {
           </Card>
         ))}
         {teams.length === 0 && (
-          <Card className="col-span-full text-center py-12 text-gray-500">
+          <Card className="col-span-full text-center py-12 text-mut">
             No teams found. Click "Create Team" to add one.
           </Card>
         )}

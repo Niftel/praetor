@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
-import Card from './ui/Card';
 import { PageSpinner } from './ui/PageSpinner';
 import { Building2, ChevronRight } from 'lucide-react';
 
@@ -54,36 +53,35 @@ const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath
     const plural = (n: number) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-                <p className="text-gray-600 mt-1">Choose an organization to view and manage its {title.toLowerCase()}.</p>
+        <div className="p-8 max-w-[1160px] mx-auto bg-bg text-ink">
+            <div className="mb-6">
+                <h1 className="text-[21px] font-semibold tracking-tight">{title}</h1>
+                <p className="text-[13px] text-mut mt-1">Choose an organization to view and manage its {title.toLowerCase()}.</p>
             </div>
 
             {orgs.length === 0 ? (
-                <Card>
-                    <p className="text-gray-500 text-center py-8">
-                        You're not a member of any organization yet. Ask an administrator to add you to one.
-                    </p>
-                </Card>
+                <div className="rounded-xl border border-line bg-panel p-8 text-center text-mut text-sm">
+                    You're not a member of any organization yet. Ask an administrator to add you to one.
+                </div>
             ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3.5 md:grid-cols-2 lg:grid-cols-3">
                     {orgs.map((o) => (
                         <Link
                             key={o.id}
                             to={`${basePath}/org/${o.id}`}
-                            className="group flex items-start gap-4 bg-white rounded-lg shadow-sm border border-gray-200 p-5 hover:border-brand-400 hover:shadow-md transition-all"
+                            className="group flex items-start gap-4 bg-panel rounded-xl border border-line p-5
+                                transition-[border-color,transform] duration-200 hover:-translate-y-0.5 hover:border-line2"
                         >
-                            <div className="shrink-0 w-11 h-11 rounded-md bg-brand-50 text-brand-600 flex items-center justify-center">
-                                <Building2 size={22} />
+                            <div className="shrink-0 w-11 h-11 rounded-lg bg-acc/10 text-acc2 grid place-items-center ring-1 ring-acc/15">
+                                <Building2 size={21} />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-base font-semibold text-gray-900 truncate">{o.name}</h2>
-                                    <ChevronRight size={18} className="text-gray-300 group-hover:text-brand-500 transition-colors shrink-0" />
+                                <div className="flex items-center justify-between gap-2">
+                                    <h2 className="text-[15px] font-semibold tracking-tight text-ink truncate">{o.name}</h2>
+                                    <ChevronRight size={18} className="text-faint group-hover:text-acc2 group-hover:translate-x-0.5 transition-all shrink-0" />
                                 </div>
-                                {o.description && <p className="text-sm text-gray-500 mt-0.5 truncate">{o.description}</p>}
-                                <p className="text-xs font-medium text-brand-600 mt-2">{plural(counts[o.id] || 0)}</p>
+                                {o.description && <p className="text-[13px] text-mut mt-0.5 truncate">{o.description}</p>}
+                                <p className="font-mono text-[11px] text-acc2 mt-2 tabular-nums">{plural(counts[o.id] || 0)}</p>
                             </div>
                         </Link>
                     ))}
