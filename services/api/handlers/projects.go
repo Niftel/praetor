@@ -14,7 +14,7 @@ import (
 	"github.com/praetordev/models"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // ProjectStore is the projects-domain data access the handler depends on.

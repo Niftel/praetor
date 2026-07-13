@@ -15,7 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/launch"
 	"github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // WebhookStore is the inbound-webhook data access the handler depends on.

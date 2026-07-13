@@ -12,7 +12,7 @@ import (
 	"github.com/praetordev/notify"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // NotificationStore is the notifications data access shared by the notifications

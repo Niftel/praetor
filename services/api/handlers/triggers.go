@@ -11,7 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // TriggerStore is the triggers-domain data access the handler depends on.

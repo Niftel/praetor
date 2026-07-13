@@ -14,7 +14,7 @@ import (
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/rbac"
 	render "github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // TokenStore is the tokens-domain data access the handler depends on.

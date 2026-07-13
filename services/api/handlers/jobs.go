@@ -21,7 +21,7 @@ import (
 	"github.com/praetordev/models"
 	"github.com/praetordev/plog"
 	"github.com/praetordev/rbac"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // JobStore is the jobs-domain data access the handler depends on (implemented by

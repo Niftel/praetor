@@ -13,7 +13,7 @@ import (
 	"github.com/praetordev/packspec"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // validatePackSpec rejects a malformed or unsafe inline pack spec before it's

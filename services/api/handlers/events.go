@@ -20,7 +20,7 @@ import (
 	"github.com/praetordev/launch"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/store"
 )
 
 // EventStore is the EDA-domain data access the handler depends on.

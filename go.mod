@@ -21,6 +21,7 @@ require (
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/rbac v1.1.0
 	github.com/praetordev/render v0.1.0
+	github.com/praetordev/store v0.1.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/crypto v0.54.0
