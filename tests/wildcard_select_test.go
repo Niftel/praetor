@@ -20,8 +20,7 @@ import (
 // The original #39 gate lived in services/api/handlers and only scanned that one
 // package, which is exactly how two `SELECT *`s survived on the dispatch path
 // until #91. This gate walks the whole tree so a new one can't hide in any
-// package. New queries must use an explicit column list (store.XxxCols /
-// models.XxxCols).
+// package. New queries must use an explicit column list (store.XxxCols).
 //
 // It parses each file and inspects only string literals, so the patterns stay
 // legal in comments (and in this test).
@@ -58,7 +57,7 @@ func TestNoWildcardSelectsRepoWide(t *testing.T) {
 			for _, b := range banned {
 				if strings.Contains(val, b) {
 					pos := fset.Position(lit.Pos())
-					t.Errorf("%s:%d: banned %q in SQL literal — use an explicit column list (store.XxxCols / models.XxxCols)",
+					t.Errorf("%s:%d: banned %q in SQL literal — use an explicit column list (store.XxxCols)",
 						rel(root, path), pos.Line, b)
 				}
 			}

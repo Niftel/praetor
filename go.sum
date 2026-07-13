@@ -167,6 +167,8 @@ github.com/praetordev/runtoken v0.1.0 h1:t79TNmGDXT7JvBHPc9AxTKrwFzpRCa+aS5LhgxM
 github.com/praetordev/runtoken v0.1.0/go.mod h1:r1uUm+e1+cLhDFgD3X1z6FvtYlE//HpMUJJtmgF1AuI=
 github.com/praetordev/store v0.1.0 h1:7woBkP9Hhk32uTIn2Asl/WaOEqLwtGpBAeZliSc//b8=
 github.com/praetordev/store v0.1.0/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
+github.com/praetordev/store v0.1.1 h1:1djyoBSxYzUQWYuG5r6STcgOYkgwv2uC92w2FTE0I4E=
+github.com/praetordev/store v0.1.1/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
 github.com/prometheus/client_golang v1.23.2 h1:Je96obch5RDVy3FDMndoUsjAhG5Edi49h0RJWRi/o0o=
 github.com/prometheus/client_golang v1.23.2/go.mod h1:Tb1a6LWHB3/SPIzCoaDXI4I8UHKeFTEQ1YCr+0Gyqmg=
 github.com/prometheus/client_model v0.6.2 h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=

@@ -14,6 +14,7 @@ import (
 	"github.com/praetordev/models"
 	"github.com/praetordev/objectstore"
 	"github.com/praetordev/plog"
+	"github.com/praetordev/store"
 	"github.com/teambition/rrule-go"
 )
 
@@ -301,7 +302,7 @@ func (s *Scheduler) processSchedules(ctx context.Context) error {
 	// this is the dispatch path, so a new schedules column with a SELECT * would fail
 	// the scan ("missing destination name X") and stop every scheduled launch (#91).
 	query := `
-		SELECT ` + models.ScheduleCols + `
+		SELECT ` + store.ScheduleCols + `
 		FROM schedules
 		WHERE enabled = true AND next_run <= NOW()
 		FOR UPDATE SKIP LOCKED
