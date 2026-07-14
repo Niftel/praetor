@@ -17,14 +17,14 @@ require (
 	github.com/praetordev/db v0.1.0
 	github.com/praetordev/eventbus v0.1.0
 	github.com/praetordev/ingestion v0.1.1
-	github.com/praetordev/launch v0.1.0
+	github.com/praetordev/launch v0.1.1
 	github.com/praetordev/models v0.2.0
 	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
-	github.com/praetordev/scheduler v0.1.0
-	github.com/praetordev/store v0.1.1
+	github.com/praetordev/scheduler v0.1.1
+	github.com/praetordev/store v0.1.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/crypto v0.54.0

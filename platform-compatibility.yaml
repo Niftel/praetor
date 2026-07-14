@@ -31,7 +31,7 @@ components:
     repository: Niftel/scheduler
     module: github.com/praetordev/scheduler
     image: praetor-scheduler
-    version: 0.1.0
+    version: 0.1.1
   reconciler:
     repository: Niftel/reconciler
     module: github.com/praetordev/reconciler
@@ -58,12 +58,12 @@ components:
 contracts:
   github.com/praetordev/eventbus: v0.1.0
   github.com/praetordev/events: v0.1.0
-  github.com/praetordev/launch: v0.1.0
+  github.com/praetordev/launch: v0.1.1
   github.com/praetordev/models: v0.2.0
   github.com/praetordev/packspec: v0.1.0
   github.com/praetordev/rbac/v4: v4.0.0
-  github.com/praetordev/store: v0.1.1
+  github.com/praetordev/store: v0.1.2
 
 database:
   minimumMigration: 1
-  maximumMigration: 59
+  maximumMigration: 60

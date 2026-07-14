@@ -11,6 +11,7 @@ NAMESPACE="${PRAETOR_NAMESPACE:-praetor}"
 TAG="${PRAETOR_IMAGE_TAG:-dev}"
 CHART="$ROOT/deployments/helm/praetor-v2"
 VALUES="$CHART/ci/values-k3d-local.yaml"
+SCHEDULER_ROOT="${PRAETOR_SCHEDULER_ROOT:-$ROOT/../scheduler}"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -35,12 +36,20 @@ docker build -f "$ROOT/build/package/Dockerfile.migrator" \
   -t "praetor-migrator:$TAG" "$ROOT"
 docker build -f "$ROOT/web/Dockerfile" \
   -t "praetor-ui:$TAG" "$ROOT/web"
+if [[ ! -f "$SCHEDULER_ROOT/Dockerfile" ]]; then
+  echo "error: scheduler checkout not found at '$SCHEDULER_ROOT'" >&2
+  echo "set PRAETOR_SCHEDULER_ROOT to its location" >&2
+  exit 1
+fi
+docker build -f "$SCHEDULER_ROOT/Dockerfile" \
+  -t "praetor-scheduler:$TAG" "$SCHEDULER_ROOT"
 
 echo "==> Importing images into k3d cluster '$CLUSTER'"
 k3d image import -c "$CLUSTER" \
   "praetor-api:$TAG" \
   "praetor-migrator:$TAG" \
-  "praetor-ui:$TAG"
+  "praetor-ui:$TAG" \
+  "praetor-scheduler:$TAG"
 
 echo "==> Upgrading Helm release '$RELEASE' in namespace '$NAMESPACE'"
 helm upgrade --install "$RELEASE" "$CHART" \
@@ -52,14 +61,16 @@ helm upgrade --install "$RELEASE" "$CHART" \
 
 # The local deployment deliberately reuses the mutable :dev tag. Restart the
 # long-running workloads after import so containerd resolves the new image.
-echo "==> Restarting API and UI"
+echo "==> Restarting API, UI, and scheduler"
 kubectl rollout restart \
   "deployment/$RELEASE-api" \
   "deployment/$RELEASE-ui" \
+  "deployment/$RELEASE-scheduler" \
   -n "$NAMESPACE"
 
 kubectl rollout status "deployment/$RELEASE-api" -n "$NAMESPACE" --timeout=5m
 kubectl rollout status "deployment/$RELEASE-ui" -n "$NAMESPACE" --timeout=5m
+kubectl rollout status "deployment/$RELEASE-scheduler" -n "$NAMESPACE" --timeout=5m
 
 MIGRATION_JOB="$(
   kubectl get jobs -n "$NAMESPACE" \

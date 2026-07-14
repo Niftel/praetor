@@ -108,6 +108,7 @@ const WorkflowBuilderPage = () => {
       const ns: WorkflowNode[] = (full.nodes || []).map((n: any) => ({
         node_key: n.node_key, node_type: n.node_type, name: n.name || '',
         job_template_id: n.job_template_id ?? null, webhook_url: n.webhook_url || '', webhook_body: n.webhook_body || '',
+        approval_timeout_seconds: n.approval_timeout_seconds || 0, approval_timeout_action: n.approval_timeout_action || 'rejected',
       }));
       setNodes(ns);
       setEdges(full.edges || []);
@@ -175,6 +176,8 @@ const WorkflowBuilderPage = () => {
         job_template_id: n.node_type === 'job' ? n.job_template_id : null,
         webhook_url: n.node_type === 'webhook_out' ? (n.webhook_url || '').trim() : '',
         webhook_body: n.node_type === 'webhook_out' ? (n.webhook_body || '') : '',
+        approval_timeout_seconds: n.node_type === 'approval' ? Math.max(0, n.approval_timeout_seconds || 0) : 0,
+        approval_timeout_action: n.node_type === 'approval' ? (n.approval_timeout_action || 'rejected') : 'rejected',
       })),
       edges,
     };
@@ -308,6 +311,24 @@ const WorkflowBuilderPage = () => {
                           <input value={n.webhook_url || ''} onChange={e => updateNode(n.node_key, { webhook_url: e.target.value })} placeholder="https://…/hook" className={`${psel} ${urlBad ? '!border-err' : ''}`} />
                         )}
                         {n.node_type === 'webhook_in' && <p className="font-mono text-[10px] text-violet">Pauses until an external system POSTs its callback URL (shown on the run page).</p>}
+                        {n.node_type === 'approval' && (
+                          <div className="grid grid-cols-[1fr_1.25fr] gap-2 rounded-md border border-line bg-panel2 p-2.5">
+                            <label className="block">
+                              <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.1em] text-dim">Timeout seconds</span>
+                              <input type="number" min={0} step={1} value={n.approval_timeout_seconds || 0}
+                                onChange={e => updateNode(n.node_key, { approval_timeout_seconds: Math.max(0, Number(e.target.value) || 0) })}
+                                className={psel} />
+                            </label>
+                            <label className="block">
+                              <span className="mb-1 block font-mono text-[9px] uppercase tracking-[0.1em] text-dim">On timeout</span>
+                              <select value={n.approval_timeout_action || 'rejected'} onChange={e => updateNode(n.node_key, { approval_timeout_action: e.target.value as 'approved' | 'rejected' })} className={psel}>
+                                <option value="rejected">Deny · failure edge</option>
+                                <option value="approved">Approve · success edge</option>
+                              </select>
+                            </label>
+                            <p className="col-span-2 font-mono text-[9.5px] leading-relaxed text-dim">Set to 0 to wait indefinitely. The policy is frozen when a workflow run starts.</p>
+                          </div>
+                        )}
                         <button onClick={() => removeNode(n.node_key)} className="flex items-center gap-1.5 text-[11.5px] text-err/90 hover:text-err"><Trash2 size={13} /> Remove node</button>
                       </div>
                     )}
