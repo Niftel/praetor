@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	scheduler "github.com/praetordev/praetor/services/scheduler/core"
+	scheduler "github.com/praetordev/scheduler/core"
 )
 
 func TestSchedulerInstantiate(t *testing.T) {

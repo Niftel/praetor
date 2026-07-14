@@ -238,9 +238,12 @@ services:
 
   scheduler:
     logging: *default-logging
+    # The scheduler service lives in its own repo (github.com/praetordev/scheduler),
+    # checked out alongside this one. Image name stays praetor-scheduler so kind-load
+    # and the Helm chart are unaffected by the split.
     build:
-      context: .
-      dockerfile: build/package/Dockerfile.scheduler
+      context: ../scheduler
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
