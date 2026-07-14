@@ -13,6 +13,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.52.0
+	github.com/praetordev/consumer v0.1.0
 	github.com/praetordev/credentials v0.1.0
 	github.com/praetordev/db v0.1.0
 	github.com/praetordev/eventbus v0.1.0

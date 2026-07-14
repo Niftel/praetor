@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	consumercore "github.com/praetordev/consumer/core"
 	"github.com/praetordev/eventbus"
 	"github.com/praetordev/events"
 	"github.com/praetordev/objectstore"
-	consumercore "github.com/praetordev/praetor/services/consumer/core"
 	"github.com/praetordev/praetor/services/ingestion/core"
 )
 

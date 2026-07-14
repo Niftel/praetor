@@ -16,9 +16,9 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
+	consumercore "github.com/praetordev/consumer/core"
 	"github.com/praetordev/eventbus"
 	"github.com/praetordev/events"
-	consumercore "github.com/praetordev/praetor/services/consumer/core"
 )
 
 func dockerCmd(t *testing.T, args ...string) {

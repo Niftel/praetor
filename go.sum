@@ -131,6 +131,8 @@ github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINE
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/praetordev/consumer v0.1.0 h1:FRLuvtAuYfMBE/foT8DUrUueBVnw3+zwSM5IEo2vf0E=
+github.com/praetordev/consumer v0.1.0/go.mod h1:dKEO0/o7dqAfHI3nsDvbWqyifCQBoqLkeOR36r7C8TY=
 github.com/praetordev/credentials v0.1.0 h1:TysS1rxN0ChiwaIqNI8MLD7EZGk7+OHFcH5N5OLsTog=
 github.com/praetordev/credentials v0.1.0/go.mod h1:2RySwG3UxsPA1CNi3TndSgaWJISu993lEQLhPE5y4JQ=
 github.com/praetordev/crypto v0.1.0 h1:7BMcnoSCPGILknroqhSFrQFjvJb6OnpoaEdFwL2VNvE=
