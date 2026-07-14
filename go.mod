@@ -22,6 +22,7 @@ require (
 	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/rbac v1.1.0
+	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
 	github.com/praetordev/scheduler v0.1.0
 	github.com/praetordev/store v0.1.1
@@ -34,7 +35,6 @@ require (
 require (
 	github.com/go-git/go-billy/v5 v5.6.2 // indirect
 	github.com/praetordev/credentials v0.1.0 // indirect
-	github.com/praetordev/runtoken v0.1.0 // indirect
 )
 
 require (
@@ -69,7 +69,7 @@ require (
 	github.com/praetordev/env v0.1.0
 	github.com/praetordev/events v0.1.0
 	github.com/praetordev/metrics v0.1.0
-	github.com/praetordev/objectstore v0.1.1 // indirect
+	github.com/praetordev/objectstore v0.1.1
 	github.com/praetordev/packspec v0.1.0
 	github.com/praetordev/registry v0.1.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect

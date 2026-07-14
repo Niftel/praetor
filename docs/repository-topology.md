@@ -105,10 +105,10 @@ overrides and do not alter that declaration.
 
 ## Known transition items
 
-- The local `rbac` checkout declares module path `github.com/praetordev/rbac/v4`,
-  while this repository currently imports `github.com/praetordev/rbac` v1.1.0.
-  Migrating consumers to v4 is a coordinated change; adding the v4 checkout to
-  `go.work` does not override the v1 module.
+- Authorization decisions use `github.com/praetordev/rbac/v4`. The v1 module
+  remains temporarily for Praetor-specific capability vocabulary, assignment
+  writes, and the compatibility interface consumed by handlers. Those pieces
+  should move behind Praetor-owned contracts before the v1 dependency is removed.
 - Several tests under `tests` still describe extracted services. They need to be
   classified as platform contract tests or moved to the owning service.
 - The UI client is handwritten. The external API contract should eventually
