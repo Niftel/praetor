@@ -31,7 +31,7 @@ stat-cache warnings did not change vet, build, or test results.
 
 Every extracted service currently has:
 
-- Go 1.25.5 declared in `go.mod`
+- Go 1.26.5 declared in `go.mod`
 - A clean standalone module boundary
 - A root Dockerfile
 - A repository README
