@@ -376,9 +376,12 @@ services:
 
   consumer:
     logging: *default-logging
+    # The consumer service lives in its own repo (github.com/praetordev/consumer),
+    # checked out alongside this one. Image name stays praetor-consumer so kind-load
+    # and the Helm chart are unaffected by the split.
     build:
-      context: .
-      dockerfile: build/package/Dockerfile.consumer
+      context: ../consumer
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
