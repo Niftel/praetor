@@ -6,11 +6,13 @@
 #   3. Resume WITH restored vars     -> task 3 succeeds (value restored).
 #
 # Run inside a host that has ansible-core. Expects play.yml + the callback
-# plugin to be present at the paths below.
+# plugin to be present at the paths below. The checkpoint callback plugin now
+# lives in the executor repo (its shipper); this assumes the executor checkout is
+# a sibling of this repo. Override PRAETOR_PLUGIN_DIR to point elsewhere.
 set -uo pipefail
 cd "$(dirname "$0")"
 
-export ANSIBLE_CALLBACK_PLUGINS="$(pwd)/../plugins/callback"
+export ANSIBLE_CALLBACK_PLUGINS="${PRAETOR_PLUGIN_DIR:-$(pwd)/../../../../executor/deploy/plugins/callback}"
 export ANSIBLE_CALLBACKS_ENABLED=praetor_checkpoint
 export PRAETOR_CHECKPOINT="$(pwd)/checkpoint.json"
 OUT="$(pwd)/outfile.txt"
