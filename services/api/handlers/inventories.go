@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -87,7 +88,7 @@ func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Re
 	}
 
 	render.JSON(w, r, &render.PaginatedResponse{
-		Items:  inventories,
+		Items:  dto.FromInventories(inventories),
 		Total:  total,
 		Limit:  pg.Limit,
 		Offset: pg.Offset,
@@ -96,11 +97,12 @@ func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Re
 
 // CreateInventory POST /api/v1/inventories
 func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Request) {
-	var input models.Inventory
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Inventory
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	// Validation
 	if input.Name == "" {
@@ -132,7 +134,7 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 	}
 
 	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeInventory, created.ID, currentUser(r))
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromInventory(created))
 }
 
 // GetInventoryByParam GET /api/v1/inventories/{inventoryId} - uses inventoryId param
@@ -154,7 +156,7 @@ func (rs *InventoriesResource) GetInventoryByParam(w http.ResponseWriter, r *htt
 		return
 	}
 
-	render.JSON(w, r, inventory)
+	render.JSON(w, r, dto.FromInventory(inventory))
 }
 
 // UpdateInventoryByParam PUT /api/v1/inventories/{inventoryId} - uses inventoryId param
@@ -170,19 +172,19 @@ func (rs *InventoriesResource) UpdateInventoryByParam(w http.ResponseWriter, r *
 		return
 	}
 
-	var input models.Inventory
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Inventory
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 
-	updated, err := rs.store.UpdateKind(r.Context(), id, input)
+	updated, err := rs.store.UpdateKind(r.Context(), id, body.ToModel())
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromInventory(updated))
 }
 
 // DeleteInventoryByParam DELETE /api/v1/inventories/{inventoryId} - uses inventoryId param

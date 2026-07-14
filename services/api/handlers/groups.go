@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -89,7 +90,7 @@ func (rs *GroupsResource) ListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.JSON(w, r, groups)
+	render.JSON(w, r, dto.FromGroups(groups))
 }
 
 // CreateGroup POST /api/v1/inventories/{inventoryId}/groups
@@ -105,11 +106,12 @@ func (rs *GroupsResource) CreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var input models.Group
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Group
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	if input.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
@@ -128,7 +130,7 @@ func (rs *GroupsResource) CreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromGroup(created))
 }
 
 // GetGroup GET /api/v1/groups/{groupId}
@@ -150,7 +152,7 @@ func (rs *GroupsResource) GetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.JSON(w, r, group)
+	render.JSON(w, r, dto.FromGroup(group))
 }
 
 // UpdateGroup PUT /api/v1/groups/{groupId}
@@ -166,19 +168,19 @@ func (rs *GroupsResource) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var input models.Group
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Group
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 
-	updated, err := rs.store.Update(r.Context(), groupId, input)
+	updated, err := rs.store.Update(r.Context(), groupId, body.ToModel())
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromGroup(updated))
 }
 
 // DeleteGroup DELETE /api/v1/groups/{groupId}
@@ -278,5 +280,5 @@ func (rs *GroupsResource) ListGroupHosts(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	render.JSON(w, r, hosts)
+	render.JSON(w, r, dto.FromHosts(hosts))
 }

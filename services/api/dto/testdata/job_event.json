@@ -1,0 +1,15 @@
+{
+  "id": 12,
+  "unified_job_id": 11,
+  "execution_run_id": "11111111-2222-3333-4444-555555555555",
+  "seq": 3,
+  "event_type": "runner_on_ok",
+  "host_id": 5,
+  "task_name": "a description",
+  "play_name": "a description",
+  "event_data": {
+    "k": "v"
+  },
+  "stdout_snippet": "a description",
+  "created_at": "2026-07-14T12:00:00Z"
+}

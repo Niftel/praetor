@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -71,12 +72,8 @@ func (h *ProjectsResource) ListProjects(w http.ResponseWriter, r *http.Request) 
 		total = int64(len(ids))
 	}
 
-	if projects == nil {
-		projects = []models.Project{}
-	}
-
 	render.JSON(w, r, &render.PaginatedResponse{
-		Items:  projects,
+		Items:  dto.FromProjects(projects),
 		Total:  total,
 		Limit:  pg.Limit,
 		Offset: pg.Offset,
@@ -85,11 +82,12 @@ func (h *ProjectsResource) ListProjects(w http.ResponseWriter, r *http.Request) 
 
 // CreateProject POST /api/v1/projects
 func (h *ProjectsResource) CreateProject(w http.ResponseWriter, r *http.Request) {
-	var input models.Project
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Project
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	// Basic validation
 	if input.Name == "" || input.SCMURL == "" || input.OrganizationID == 0 {
@@ -115,7 +113,7 @@ func (h *ProjectsResource) CreateProject(w http.ResponseWriter, r *http.Request)
 	}
 	// The creator becomes admin of the project they just made.
 	h.grantCreatorAdmin(r.Context(), rbac.ContentTypeProject, created.ID, currentUser(r))
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromProject(created))
 }
 
 // SyncProject POST /api/v1/projects/{id}/sync

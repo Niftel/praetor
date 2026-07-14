@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -121,7 +122,7 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 	}
 
 	render.JSON(w, r, &render.PaginatedResponse{
-		Items:  templates,
+		Items:  dto.FromJobTemplates(templates),
 		Total:  total,
 		Limit:  pg.Limit,
 		Offset: pg.Offset,
@@ -130,11 +131,12 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 
 // CreateTemplate POST /api/v1/job-templates
 func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Request) {
-	var input models.JobTemplate
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.JobTemplate
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	// Validation
 	if input.Name == "" {
@@ -192,7 +194,7 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 	}
 
 	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeJobTemplate, created.ID, currentUser(r))
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromJobTemplate(created))
 }
 
 // GetTemplate GET /api/v1/job-templates/{id}
@@ -214,7 +216,7 @@ func (rs *TemplatesResource) GetTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	render.JSON(w, r, template)
+	render.JSON(w, r, dto.FromJobTemplate(template))
 }
 
 // UpdateTemplate PUT /api/v1/job-templates/{id}
@@ -230,11 +232,12 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var input models.JobTemplate
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.JobTemplate
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	// Playbooks must come from source control — inline content is disabled.
 	if err := requireSCMPlaybook(&input); err != nil {
@@ -279,7 +282,7 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromJobTemplate(updated))
 }
 
 // DeleteTemplate DELETE /api/v1/job-templates/{id}

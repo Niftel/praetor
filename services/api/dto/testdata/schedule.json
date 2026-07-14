@@ -1,0 +1,15 @@
+{
+  "id": 10,
+  "name": "sch",
+  "description": "a description",
+  "unified_job_template_id": 9,
+  "workflow_template_id": 2,
+  "rrule": "FREQ=DAILY",
+  "next_run": "2026-07-14T12:00:00Z",
+  "enabled": true,
+  "extra_vars": {
+    "k": "v"
+  },
+  "created_at": "2026-07-14T12:00:00Z",
+  "modified_at": "2026-07-14T12:00:00Z"
+}

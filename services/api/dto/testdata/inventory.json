@@ -1,0 +1,10 @@
+{
+  "id": 4,
+  "organization_id": 1,
+  "name": "inv",
+  "description": "a description",
+  "kind": "static",
+  "content": "a description",
+  "created_at": "2026-07-14T12:00:00Z",
+  "modified_at": "2026-07-14T12:00:00Z"
+}
