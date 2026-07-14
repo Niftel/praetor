@@ -38,8 +38,18 @@ const ApprovalsPage = () => {
 
   useEffect(() => {
     load();
-    const timer = setInterval(() => load(true), 5000);
-    return () => clearInterval(timer);
+    const refresh = () => load(true);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    const timer = setInterval(refresh, 3000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, [load]);
 
   const decide = async (item: WorkflowApproval, approve: boolean) => {

@@ -89,9 +89,19 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     const loadApprovals = () => api.getWorkflowApprovals()
       .then(rows => { if (active) setApprovalCount((rows || []).length); })
       .catch(() => {});
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') loadApprovals();
+    };
     loadApprovals();
-    const timer = setInterval(loadApprovals, 10000);
-    return () => { active = false; clearInterval(timer); };
+    const timer = setInterval(loadApprovals, 3000);
+    window.addEventListener('focus', loadApprovals);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener('focus', loadApprovals);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, [location.pathname]);
 
   // Rotating example actions in the closed omnibar — teaches what's possible and

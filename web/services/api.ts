@@ -141,7 +141,7 @@ export const api = {
     launchWorkflow: (id: number, options: { extra_vars?: Record<string, unknown>; limit?: string } = {}) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: JSON.stringify(options) }).then(r => r.json()),
     getWorkflowJobs: () => fetchWithAuth('/workflow-jobs').then(r => r.json()),
     getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
-    getWorkflowApprovals: () => fetchWithAuth('/workflow-approvals').then(r => r.json()),
+    getWorkflowApprovals: () => fetchWithAuth('/workflow-approvals', { cache: 'no-store' }).then(r => r.json()),
     approveWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/approve`, { method: 'POST' }),
     denyWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/deny`, { method: 'POST' }),
     // Triggers: event triggers (job outcome -> launch) + inbound webhook surface.
