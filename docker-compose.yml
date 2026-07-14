@@ -263,9 +263,12 @@ services:
 
   executor:
     logging: *default-logging
+    # The executor service lives in its own repo (github.com/praetordev/executor),
+    # checked out alongside this one. Image name stays praetor-executor so kind-load
+    # and the Helm chart are unaffected by the split.
     build:
-      context: .
-      dockerfile: build/package/Dockerfile.executor
+      context: ../executor
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       NATS_URL: nats://nats:4222
@@ -299,10 +302,10 @@ services:
       # served from here — it ships inside the pack (single source, checksum-
       # verified at pack build). A directory mount reflects rebuilds immediately.
       - ./build:/tmp/build:ro
-      # Canonical checkpoint/resume callback plugin, from its source of truth in
-      # deployments/, so jobs bootstrap with task-level resume out of the box
-      # (no manual staging into build/). The bootstrap copies it from here.
-      - ./deployments/host-runner/plugins:/tmp/plugins:ro
+      # Canonical checkpoint/resume callback plugin, from its source of truth in the
+      # executor repo (executor ships it to targets at bootstrap), so jobs get
+      # task-level resume out of the box. The bootstrap copies it from here.
+      - ../executor/deploy/plugins:/tmp/plugins:ro
       # Persist SSH known_hosts (trust-on-first-use) across executor restarts.
       # Mounted at the runtime user's ~/.ssh so the non-root process can write it.
       - praetor-ssh:/home/praetor/.ssh
