@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/rbac"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )

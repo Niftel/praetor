@@ -13,8 +13,8 @@ import (
 	"github.com/go-chi/render"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/dto"
-	"github.com/praetordev/rbac"
 	"github.com/praetordev/store"
 	"github.com/teambition/rrule-go"
 )

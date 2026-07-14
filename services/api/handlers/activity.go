@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/praetordev/rbac"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/render"
 )
 

@@ -7,8 +7,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/plog"
 	"github.com/praetordev/praetor/pkg/authorization"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
-	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 )
 
@@ -89,7 +89,7 @@ func NewAuthorizer(db *sqlx.DB) *Authorizer {
 	return &Authorizer{
 		Access: rbac.NewAccessChecker(db),
 		caps:   caps,
-		authz:  rbac.WithLegacySystemFlags(policy),
+		authz:  rbac.WithSystemFlags(policy),
 	}
 }
 

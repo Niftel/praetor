@@ -105,10 +105,9 @@ overrides and do not alter that declaration.
 
 ## Known transition items
 
-- Authorization decisions use `github.com/praetordev/rbac/v4`. The v1 module
-  remains temporarily for Praetor-specific capability vocabulary, assignment
-  writes, and the compatibility interface consumed by handlers. Those pieces
-  should move behind Praetor-owned contracts before the v1 dependency is removed.
+- Authorization decisions use `github.com/praetordev/rbac/v4`; Praetor-specific
+  capability vocabulary, assignment persistence, and handler contracts live in
+  this repository under `pkg/rbac`.
 - Several tests under `tests` still describe extracted services. They need to be
   classified as platform contract tests or moved to the owning service.
 - The UI client is handwritten. The external API contract should eventually
