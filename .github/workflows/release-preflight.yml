@@ -31,6 +31,14 @@ jobs:
           manifest_version=$(go run ./cmd/compatcheck -release -output summary | sed -E 's/^Praetor ([^ ]+).*/\1/')
           test "$RELEASE_TAG" = "v$manifest_version"
 
+      - name: Log in to GHCR for artifact verification
+        if: github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Verify published artifacts
         if: github.event_name == 'workflow_dispatch'
         run: ./scripts/release-preflight.sh --remote

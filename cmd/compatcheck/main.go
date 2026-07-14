@@ -62,7 +62,7 @@ type chartValues struct {
 
 func main() {
 	release := flag.Bool("release", false, "enforce stable-release invariants")
-	output := flag.String("output", "summary", "output format: summary, images, or contracts")
+	output := flag.String("output", "summary", "output format: summary, images, contracts, modules, or repositories")
 	flag.Parse()
 
 	var problems []string
@@ -208,6 +208,41 @@ func main() {
 		sort.Strings(modules)
 		for _, module := range modules {
 			fmt.Printf("%s@%s\n", module, m.Contracts[module])
+		}
+	case "modules":
+		modules := make(map[string]string, len(m.Contracts)+len(m.Components))
+		for module, version := range m.Contracts {
+			modules[module] = version
+		}
+		for _, component := range m.Components {
+			if component.Module != "" {
+				modules[component.Module] = "v" + strings.TrimPrefix(component.Version, "v")
+			}
+		}
+		names := make([]string, 0, len(modules))
+		for module := range modules {
+			names = append(names, module)
+		}
+		sort.Strings(names)
+		for _, module := range names {
+			fmt.Printf("%s@%s\n", module, modules[module])
+		}
+	case "repositories":
+		repositories := make(map[string]string, len(m.Components))
+		for _, component := range m.Components {
+			version := "v" + strings.TrimPrefix(component.Version, "v")
+			if existing, ok := repositories[component.Repository]; ok && existing != version {
+				fatalf("repository %s has conflicting component versions %s and %s", component.Repository, existing, version)
+			}
+			repositories[component.Repository] = version
+		}
+		names := make([]string, 0, len(repositories))
+		for repository := range repositories {
+			names = append(names, repository)
+		}
+		sort.Strings(names)
+		for _, repository := range names {
+			fmt.Printf("%s@%s\n", repository, repositories[repository])
 		}
 	default:
 		fatalf("unknown output format %q", *output)
