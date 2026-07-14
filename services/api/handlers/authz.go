@@ -6,8 +6,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/plog"
-	"github.com/praetordev/rbac"
+	"github.com/praetordev/praetor/pkg/authorization"
 	"github.com/praetordev/praetor/services/api/middleware"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 )
 
@@ -80,10 +81,15 @@ var capabilityTables = map[rbac.ContentType]string{
 
 func NewAuthorizer(db *sqlx.DB) *Authorizer {
 	caps := rbac.NewCapabilityStore(db, capabilityTables)
+	policy, err := authorization.NewPostgres(db, capabilityTables)
+	if err != nil {
+		// The embedded policy is compiled at startup and is a build-time invariant.
+		panic("compile RBAC v4 policy: " + err.Error())
+	}
 	return &Authorizer{
 		Access: rbac.NewAccessChecker(db),
 		caps:   caps,
-		authz:  rbac.WithLegacySystemFlags(caps),
+		authz:  rbac.WithLegacySystemFlags(policy),
 	}
 }
 

@@ -1,65 +1,87 @@
 # Praetor RBAC
 
-Praetor uses an **AWX-style object-role** model. There is exactly one role
-concept (an earlier permission-list `roles` table was removed in migration
-`000011`; do not reintroduce a `permissions` column).
+Praetor separates authorization into three explicit responsibilities:
 
-## Model
+1. Praetor's PostgreSQL schema stores role definitions, assignments, and the
+   materialized capability grants derived from them.
+2. `pkg/authorization` resolves trusted grants for an authenticated user.
+3. `github.com/praetordev/rbac/v4` is the domain-blind policy decision point
+   (PDP) that evaluates those grants using an immutable policy snapshot.
 
-A **role** is a grant of a particular kind of access *on a particular object*:
+HTTP handlers remain policy enforcement points. They express a capability
+question and do not inspect role names or assignment tables.
 
-| Concept | Where | Meaning |
+## Persisted grant model
+
+| Concept | Tables | Meaning |
 |---|---|---|
-| Object role | `roles(content_type, object_id, role_field)` | e.g. `admin_role` on `organization 5` |
-| Singleton role | `roles(singleton_name)` | system-wide: `system_administrator`, `system_auditor` |
-| Hierarchy | `role_parents` → `role_ancestors` | holding a parent role implies the child (the ancestors table is the flattened closure for fast lookups) |
-| Membership | `role_members` (user→role), `team_roles` (team→role), `team_members` (user→team) | who holds a role |
+| Capability | `dab_permissions` | Atomic codename such as `view_inventory` |
+| Role definition | `role_definitions`, `role_definition_permissions` | Named bundle of capabilities |
+| Scoped role | `object_roles` | A role definition applied globally or to an object |
+| Assignment | `role_user_assignments`, `role_team_assignments` | Users or teams holding an object role |
+| Evaluation cache | `role_evaluations` | Flattened scoped capabilities used during resolution |
 
-`role_field` values: `admin_role`, `read_role`, `use_role`, `execute_role`,
-`update_role`, `member_role`, plus the org-level `*_admin_role` variants.
+Praetor owns these tables and their migrations. RBAC v4 deliberately owns no
+database schema, content types, actions, role names, or hierarchy. The database
+triggers flatten organization-to-resource inheritance before a decision is
+made, as required by the engine's integration contract.
 
-Object roles are created automatically by triggers when an object is created
-(`create_organization_roles`, `create_project_roles`, `create_inventory_roles`,
-`create_job_template_roles`, `create_credential_roles`, `create_team_roles`),
-and parented into the hierarchy (e.g. an org's `admin_role` is an ancestor of
-its projects' `admin_role`).
+## Decision flow
 
-Superuser is the `users.is_superuser` flag (AWX-faithful); `is_system_auditor`
-grants read on everything. Both are resolved inside the checker.
+`services/api/handlers/authz.go` constructs one shared authorizer. Grant writes
+continue through the v1 compatibility package while the decision path uses v4:
 
-## Enforcement
+```text
+verified user id
+  -> PostgreSQL grant resolver
+  -> []rbac/v4.Grant
+  -> immutable Praetor policy snapshot
+  -> allow or deny
+  -> HTTP enforcement point
+```
 
-`pkg/rbac.AccessChecker` answers the questions — `CanRead`, `CanAdmin`,
-`CanUse`, `CanExecute`, `FilterAccessibleIDs`, plus membership management — by
-recursively resolving direct, ancestor, and team grants.
+Scopes are opaque to the engine. Praetor encodes an object scope as
+`<content-type>:<id>` (for example `inventory:42`) and uses the empty string for
+global grants. Grants are always resolved from server-controlled tables using
+the authenticated user id; request-provided roles or capabilities must never be
+passed into the engine.
 
-The API enforces via a shared `Authorizer` (`services/api/handlers/authz.go`)
-embedded by every resource handler:
+The embedded policy uses `DenyOverrides`, exact capability matching, exact
+scoped matching, and global grants. A missing policy, missing grant, malformed
+scope, database failure, or unmatched rule never grants access.
 
-- `authorize(w, r, contentType, id, action)` — writes 403/500 and returns
-  `false`; callers `return` on `false`.
-- `readableIDs(r, contentType)` — scopes list endpoints.
-- `grantCreatorAdmin(...)` — the creator of a new object gets its `admin_role`
-  (so a non-superuser can manage what they create).
+The temporary v1 dependency remains for Praetor-specific vocabulary,
+assignment writes, and compatibility interfaces. It is not the PDP. Removing it
+requires extracting those remaining domain and persistence APIs into a
+Praetor-owned package; that is a later migration and must not be conflated with
+the v4 decision cutover.
 
-### Verb mapping (what each endpoint requires)
+## Enforcement helpers
 
-| Action | Check |
-|---|---|
-| List | scope to `readableIDs` (read) |
-| Get | `CanRead` |
-| Create | `CanAdmin` on the **parent** (org), then grant creator admin |
-| Update / Delete | `CanAdmin` on the object |
-| Launch a job template | `CanExecute` on the template |
-| Attach project/inventory/credential to a template | `CanUse` on each |
-| Hosts / groups | governed by their **parent inventory** (no roles of their own): read to view, admin to mutate |
-| Jobs | scoped to jobs whose template the user can read; launch = execute on the template |
-| Users (create/update/delete) | superuser only (the update path can set `is_superuser`) |
+The API's shared `Authorizer` exposes:
 
-Role/team membership endpoints (`/roles/{id}/users`, `/teams`) require admin on
-the role's parent object; singleton-role grants require superuser.
+- `authorize` for an action on one object;
+- `authorizeOrgRole` for cross-type create capabilities held on an organization;
+- `requireGlobal` for system-scoped resources;
+- `readableIDs` and `canViewAll` for collection filtering;
+- `grantCreatorAdmin` for assignment after object creation.
 
-## Tests
+The legacy `users.is_superuser` break-glass behavior remains isolated in the
+existing compatibility decorator. Normal user and team decisions pass through
+RBAC v4. System-auditor access is represented by global capability assignments.
 
-`services/api/handlers/projects_rbac_test.go` exercises the pattern end-to-end
-against a migrated DB (triggers firing). Run with `TEST_DATABASE_URL` set.
+## Verification
+
+Pure adapter tests cover allow, default deny, global visibility, scoped
+visibility, and deny-overrides:
+
+```sh
+GOWORK=off go test ./pkg/authorization
+```
+
+The complete handler and schema integration runs against a throwaway migrated
+PostgreSQL instance:
+
+```sh
+make test-db
+```
