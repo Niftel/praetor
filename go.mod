@@ -14,9 +14,9 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.52.0
 	github.com/praetordev/consumer v0.1.0
-	github.com/praetordev/credentials v0.1.0
 	github.com/praetordev/db v0.1.0
 	github.com/praetordev/eventbus v0.1.0
+	github.com/praetordev/ingestion v0.1.0
 	github.com/praetordev/launch v0.1.0
 	github.com/praetordev/models v0.2.0
 	github.com/praetordev/notify v0.1.0
@@ -31,7 +31,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/go-git/go-billy/v5 v5.6.2 // indirect
+require (
+	github.com/go-git/go-billy/v5 v5.6.2 // indirect
+	github.com/praetordev/credentials v0.1.0 // indirect
+)
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
@@ -65,10 +68,9 @@ require (
 	github.com/praetordev/env v0.1.0
 	github.com/praetordev/events v0.1.0
 	github.com/praetordev/metrics v0.1.0
-	github.com/praetordev/objectstore v0.1.1
+	github.com/praetordev/objectstore v0.1.1 // indirect
 	github.com/praetordev/packspec v0.1.0
 	github.com/praetordev/registry v0.1.0 // indirect
-	github.com/praetordev/runtoken v0.1.0
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect

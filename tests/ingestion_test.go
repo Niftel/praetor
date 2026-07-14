@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/praetordev/ingestion/core"
+	"github.com/praetordev/ingestion/handler"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/services/ingestion/core"
-	"github.com/praetordev/praetor/services/ingestion/handler"
 )
 
 func TestIngestionHandler(t *testing.T) {
