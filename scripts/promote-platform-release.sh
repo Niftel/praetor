@@ -22,12 +22,16 @@ cd "$root_dir"
 export GOWORK=off
 export GOCACHE=${PRAETOR_RELEASE_CACHE:-${TMPDIR:-/tmp}/praetor-release-promote}/go-build
 
-compat_args=()
-if [[ $dry_run == false ]]; then
-    compat_args=(-release)
-fi
-summary=$(go run ./cmd/compatcheck "${compat_args[@]}" -output summary)
+summary=$(go run ./cmd/compatcheck -output summary)
 manifest_version=$(sed -E 's/^Praetor ([^ ]+).*/\1/' <<<"$summary")
+release_status=$(sed -E 's/^Praetor [^ ]+ \(([^)]+)\).*/\1/' <<<"$summary")
+compat_args=()
+preflight_args=(--development --remote)
+if [[ $release_status == stable ]]; then
+    compat_args=(-release)
+    preflight_args=(--remote)
+fi
+go run ./cmd/compatcheck "${compat_args[@]}" >/dev/null
 if [[ $requested_version != "$manifest_version" ]]; then
     printf 'requested platform version %s does not match manifest %s\n' "$requested_version" "$manifest_version" >&2
     exit 1
@@ -66,7 +70,7 @@ done
 
 printf 'Waiting for all declared tags, images, and modules to become available...\n'
 deadline=$((SECONDS + timeout_seconds))
-until ./scripts/release-preflight.sh --remote; do
+until ./scripts/release-preflight.sh "${preflight_args[@]}"; do
     if ((SECONDS >= deadline)); then
         printf 'release artifacts did not converge within %s seconds\n' "$timeout_seconds" >&2
         exit 1
@@ -76,9 +80,22 @@ until ./scripts/release-preflight.sh --remote; do
 done
 
 platform_tag="v$manifest_version"
-if gh release view "$platform_tag" --repo Niftel/praetor >/dev/null 2>&1; then
-    printf 'EXISTS  platform release %s\n' "$platform_tag"
+existing_draft=
+if existing_draft=$(gh release view "$platform_tag" --repo Niftel/praetor --json isDraft --jq .isDraft 2>/dev/null); then
+    if [[ $release_status == development && $existing_draft != true ]]; then
+        printf 'refusing to replace published release %s with a development draft\n' "$platform_tag" >&2
+        exit 1
+    fi
+    if [[ $release_status == stable && $existing_draft == true ]]; then
+        gh release edit "$platform_tag" --repo Niftel/praetor --draft=false
+        printf 'PUBLISHED platform release %s\n' "$platform_tag"
+    else
+        printf 'EXISTS  platform release %s (%s)\n' "$platform_tag" "$release_status"
+    fi
+elif [[ $release_status == development ]]; then
+    gh release create "$platform_tag" --repo Niftel/praetor --verify-tag --draft --title "Praetor $manifest_version" --generate-notes
+    printf 'CREATED development draft %s\n' "$platform_tag"
 else
     gh release create "$platform_tag" --repo Niftel/praetor --verify-tag --title "Praetor $manifest_version" --generate-notes
-    printf 'CREATED platform release %s\n' "$platform_tag"
+    printf 'CREATED stable release %s\n' "$platform_tag"
 fi
