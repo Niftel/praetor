@@ -40,7 +40,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/', // serve docs at the site root (no /docs prefix)
-          editUrl: 'https://github.com/praetordev/praetor/tree/main/docs-site/',
+          editUrl: 'https://github.com/Niftel/praetor/tree/main/docs-site/',
         },
         blog: false,
         theme: {
@@ -63,7 +63,7 @@ const config: Config = {
       },
       items: [
         {type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs'},
-        {href: 'https://github.com/praetordev/praetor', label: 'GitHub', position: 'right'},
+        {href: 'https://github.com/Niftel/praetor', label: 'GitHub', position: 'right'},
       ],
     },
     footer: {

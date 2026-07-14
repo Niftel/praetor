@@ -9,7 +9,7 @@ Follow these steps to deploy Praetor on a new machine with Docker installed.
 
 ## 1. Clone the Repository
 ```bash
-git clone https://github.com/praetordev/praetor.git
+git clone https://github.com/Niftel/praetor.git
 cd praetor
 ```
 
