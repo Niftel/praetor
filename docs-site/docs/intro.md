@@ -34,7 +34,7 @@ Plus **LDAP** (directory), **Gitea** (artifact registry: built Execution Packs, 
 
 ## The messaging fabric (NATS JetStream)
 
-Three subjects across two streams, defined in [`pkg/transport/nats/bus.go`](https://github.com/praetordev/praetor):
+Three subjects across two streams, defined in [`pkg/transport/nats/bus.go`](https://github.com/Niftel/praetor):
 
 | Stream | Subject(s) | Retention | Purpose |
 |---|---|---|---|
@@ -53,7 +53,7 @@ The executor binds a **durable, manual-ack, work-queue** consumer (`SubscribeToE
 
 ## Bootstrap: executor → host, over pure SSH
 
-For a run with an inventory, the executor ([`bootstrap_runner.go`](https://github.com/praetordev/praetor)) resolves the runner host's address from its inventory vars + the job's [Machine credential](./concepts/credentials.md), dials SSH (trust-on-first-use host keys, persisted in `known_hosts`), and over that one connection:
+For a run with an inventory, the executor ([`bootstrap_runner.go`](https://github.com/Niftel/praetor)) resolves the runner host's address from its inventory vars + the job's [Machine credential](./concepts/credentials.md), dials SSH (trust-on-first-use host keys, persisted in `known_hosts`), and over that one connection:
 
 1. `mkdir` the job dir (`/var/lib/praetor/jobs/<run_id>`) and plugin dirs.
 2. Push the checkpoint callback plugin (task-level resume).
@@ -63,7 +63,7 @@ For a run with an inventory, the executor ([`bootstrap_runner.go`](https://githu
 6. Install a `praetor-resume` systemd unit (best-effort) for reboot recovery.
 7. `setsid` the host-runner, detached, so it outlives the SSH session.
 
-The runner host therefore needs only **sshd, a POSIX shell, and `tar`**. Python is *not* required: the play runs the pack's `ansible-playbook`, and for module execution the runner uses the host's Python if present, else the pack's bundled interpreter ([`runtime.go`](https://github.com/praetordev/praetor) `resolveAnsible`). (Musl/Alpine hosts are unsupported — the pack's CPython is glibc.)
+The runner host therefore needs only **sshd, a POSIX shell, and `tar`**. Python is *not* required: the play runs the pack's `ansible-playbook`, and for module execution the runner uses the host's Python if present, else the pack's bundled interpreter ([`runtime.go`](https://github.com/Niftel/praetor) `resolveAnsible`). (Musl/Alpine hosts are unsupported — the pack's CPython is glibc.)
 
 ## Execution & the write-ahead log
 

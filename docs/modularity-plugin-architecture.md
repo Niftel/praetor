@@ -1,6 +1,6 @@
 # Praetor Modularity & Plugin Architecture Proposal
 
-*Prepared against the actual codebase at `github.com/praetordev/praetor` (Go 1.25). Every claim below is grounded in files read during this review; paths and line references are from the current `main`.*
+*Prepared against the actual codebase at `github.com/Niftel/praetor` (Go 1.25). Every claim below is grounded in files read during this review; paths and line references are from the current `main`.*
 
 ---
 
@@ -465,4 +465,3 @@ Pre-work that's safe now: rename the mapper's LDAP-specific upsert to a provider
 ## Closing judgment
 
 Praetor's instincts are already right in the two places that matter most: credentials (data-driven) and inventory (delegate to Ansible's plugin ecosystem). The pack pipeline's rigidity is a feature. The actionable debt is narrow: one hardcoded switch (notifications), one god-object (`ContentHandler`), one missing management API (credential types), and one half-finished interface (auth). A 40-line generic registry plus the discipline of "data where it's config-shaped, registry where it's code-shaped, explicit routes always" covers everything on the horizon — without importing a plugin framework the team would spend the next year maintaining.
-

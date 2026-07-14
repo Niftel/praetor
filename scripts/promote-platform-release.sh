@@ -76,9 +76,9 @@ until ./scripts/release-preflight.sh --remote; do
 done
 
 platform_tag="v$manifest_version"
-if gh release view "$platform_tag" --repo praetordev/praetor >/dev/null 2>&1; then
+if gh release view "$platform_tag" --repo Niftel/praetor >/dev/null 2>&1; then
     printf 'EXISTS  platform release %s\n' "$platform_tag"
 else
-    gh release create "$platform_tag" --repo praetordev/praetor --verify-tag --title "Praetor $manifest_version" --generate-notes
+    gh release create "$platform_tag" --repo Niftel/praetor --verify-tag --title "Praetor $manifest_version" --generate-notes
     printf 'CREATED platform release %s\n' "$platform_tag"
 fi
