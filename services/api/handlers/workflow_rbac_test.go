@@ -28,12 +28,13 @@ func TestWorkflowRBAC(t *testing.T) {
 	perWfAdmin := createUser(t, db, fmt.Sprintf("wf-wfadmin-%d", uniq)) // only wfA admin_role
 	execOnly := createUser(t, db, fmt.Sprintf("wf-exec-%d", uniq))      // only wfA execute_role
 	orgExec := createUser(t, db, fmt.Sprintf("wf-orgexec-%d", uniq))    // org execute_role
+	approver := createUser(t, db, fmt.Sprintf("wf-approver-%d", uniq))  // only wfA approval_role
 	nobody := createUser(t, db, fmt.Sprintf("wf-nobody-%d", uniq))
 	grantObjectRole(t, access, rbac.Organization, org, rbac.WorkflowAdminRole, creator)
 	grantObjectRole(t, access, rbac.Organization, org, rbac.ExecuteRole, orgExec)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, org)
-		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4,$5)`, creator, perWfAdmin, execOnly, orgExec, nobody)
+		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4,$5,$6)`, creator, perWfAdmin, execOnly, orgExec, approver, nobody)
 	})
 
 	creatorUC := middleware.UserContext{UserID: creator}
@@ -85,22 +86,93 @@ func TestWorkflowRBAC(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("execute-only edit: want 403, got %d", rec.Code)
 	}
-	rec = callJSON(t, wf.LaunchWorkflow, http.MethodPost, "", execUC, map[string]string{"id": fmt.Sprint(wfA)})
+	rec = callJSON(t, wf.LaunchWorkflow, http.MethodPost, `{"extra_vars":{"release":"canary"},"limit":"web-*"}`, execUC, map[string]string{"id": fmt.Sprint(wfA)})
 	if rec.Code == http.StatusForbidden {
 		t.Fatalf("execute-only launch: authz gate should pass, got 403")
 	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("execute-only launch: want 201, got %d (%s)", rec.Code, rec.Body)
+	}
+	var launched struct {
+		WorkflowJobID int64 `json:"workflow_job_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &launched); err != nil {
+		t.Fatalf("decode workflow launch: %v", err)
+	}
+	var launchArgs []byte
+	if err := db.Get(&launchArgs, `SELECT launch_args FROM workflow_jobs WHERE id=$1`, launched.WorkflowJobID); err != nil {
+		t.Fatalf("read workflow launch args: %v", err)
+	}
+	var args struct {
+		ExtraVars map[string]interface{} `json:"extra_vars"`
+		Limit     *string                `json:"limit"`
+	}
+	if err := json.Unmarshal(launchArgs, &args); err != nil {
+		t.Fatalf("decode workflow launch args: %v", err)
+	}
+	if args.ExtraVars["release"] != "canary" || args.Limit == nil || *args.Limit != "web-*" {
+		t.Fatalf("workflow launch inputs were not preserved: %s", launchArgs)
+	}
+	var launchedBy int64
+	if err := db.Get(&launchedBy, `SELECT launched_by_user_id FROM workflow_jobs WHERE id=$1`, launched.WorkflowJobID); err != nil || launchedBy != execOnly {
+		t.Fatalf("workflow requester was not recorded: got=%d err=%v", launchedBy, err)
+	}
 
-	// 4. Org execute_role holder can execute any workflow in the org (parent edge).
+	// 4. The approval inbox contains only pending nodes on workflows the caller
+	// may approve, and a second decision receives a stale-state conflict.
+	grantObjectRole(t, access, rbac.WorkflowTemplate, wfA, rbac.ApprovalRole, approver)
+	var approvalID int64
+	if err := db.Get(&approvalID, `
+		INSERT INTO workflow_job_nodes (workflow_job_id,node_key,node_type,name,status)
+		VALUES ($1,'release-gate','approval','Release gate','awaiting_approval') RETURNING id`, launched.WorkflowJobID); err != nil {
+		t.Fatalf("insert approval node: %v", err)
+	}
+	approverUC := middleware.UserContext{UserID: approver}
+	rec = callJSON(t, wf.ListWorkflowApprovals, http.MethodGet, "", approverUC, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list approvals: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	var approvals []map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &approvals); err != nil || len(approvals) != 1 {
+		t.Fatalf("approver should see one pending approval: err=%v body=%s", err, rec.Body)
+	}
+	if approvals[0]["requested_by"] != fmt.Sprintf("wf-exec-%d", uniq) || approvals[0]["awaiting_since"] == nil {
+		t.Fatalf("approval audit context missing from inbox: %s", rec.Body)
+	}
+	rec = callJSON(t, wf.ListWorkflowApprovals, http.MethodGet, "", execUC, nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "[]\n" {
+		t.Fatalf("execute-only user must not see approvals: code=%d body=%s", rec.Code, rec.Body)
+	}
+	rec = callJSON(t, wf.ApproveNode, http.MethodPost, "", approverUC, map[string]string{"id": fmt.Sprint(approvalID)})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("approve pending node: want 204, got %d (%s)", rec.Code, rec.Body)
+	}
+	var decision struct {
+		DecidedBy int64      `db:"decided_by_user_id"`
+		DecidedAt *time.Time `db:"decided_at"`
+	}
+	if err := db.Get(&decision, `SELECT decided_by_user_id, decided_at FROM workflow_job_nodes WHERE id=$1`, approvalID); err != nil {
+		t.Fatalf("read approval decision audit: %v", err)
+	}
+	if decision.DecidedBy != approver || decision.DecidedAt == nil {
+		t.Fatalf("approval decision audit not recorded: %+v", decision)
+	}
+	rec = callJSON(t, wf.ApproveNode, http.MethodPost, "", approverUC, map[string]string{"id": fmt.Sprint(approvalID)})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("approve stale node: want 409, got %d (%s)", rec.Code, rec.Body)
+	}
+
+	// 5. Org execute_role holder can execute any workflow in the org (parent edge).
 	if ok, err := capCheck(access, orgExec, rbac.WorkflowTemplate, wfB, rbac.Execute); err != nil || !ok {
 		t.Fatalf("org-execute should run any org workflow (wfB): ok=%v err=%v", ok, err)
 	}
 
-	// 5. Approval is NOT inherited from the workflow admin_role.
+	// 6. Approval is NOT inherited from the workflow admin_role.
 	if ok, _ := capCheck(access, creator, rbac.WorkflowTemplate, wfA, rbac.Approve); ok {
 		t.Fatalf("workflow admin must NOT inherit approval_role (manage != approve)")
 	}
 
-	// 6. List scoping: per-wf admin sees only wfA; a nobody sees none; the
+	// 7. List scoping: per-wf admin sees only wfA; a nobody sees none; the
 	//    creator (org workflow_admin) sees both.
 	if got := listWorkflowCount(t, wf, pwaUC); got != 1 {
 		t.Fatalf("per-wf admin should see 1 workflow, saw %d", got)
@@ -112,7 +184,7 @@ func TestWorkflowRBAC(t *testing.T) {
 		t.Fatalf("org workflow_admin should see both workflows, saw %d", got)
 	}
 
-	// 7. Delete removes the workflow's capability object_roles (rbac_on_object_delete).
+	// 8. Delete removes the workflow's capability object_roles (rbac_on_object_delete).
 	rec = callJSON(t, wf.DeleteWorkflow, http.MethodDelete, "", creatorUC, map[string]string{"id": fmt.Sprint(wfB)})
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete wfB: want 204, got %d", rec.Code)

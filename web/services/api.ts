@@ -138,9 +138,10 @@ export const api = {
     createWorkflow: (data: any) => fetchWithAuth('/workflow-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     updateWorkflow: (id: number, data: any) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'DELETE' }),
-    launchWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: '{}' }).then(r => r.json()),
+    launchWorkflow: (id: number, options: { extra_vars?: Record<string, unknown>; limit?: string } = {}) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: JSON.stringify(options) }).then(r => r.json()),
     getWorkflowJobs: () => fetchWithAuth('/workflow-jobs').then(r => r.json()),
     getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
+    getWorkflowApprovals: () => fetchWithAuth('/workflow-approvals').then(r => r.json()),
     approveWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/approve`, { method: 'POST' }),
     denyWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/deny`, { method: 'POST' }),
     // Triggers: event triggers (job outcome -> launch) + inbound webhook surface.
@@ -282,5 +283,3 @@ export const api = {
     getLdapConfig: () => fetchWithAuth('/ldap/config').then(r => r.json()),
     testLdapConnection: () => fetchWithAuth('/ldap/test-connection', { method: 'POST' }).then(r => r.json()),
 };
-
-

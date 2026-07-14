@@ -5,6 +5,7 @@ import {
   Search, LayoutDashboard, Play, FileText, Workflow, Server, CalendarClock,
   Package, GitBranch, Building2, Users, UsersRound, KeyRound, KeySquare,
   ScrollText, Settings as SettingsIcon, LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 
 // The command palette IS the control panel: no persistent sidebar. ⌘K opens one
@@ -20,6 +21,7 @@ const FUNCTIONS: { group: string; items: Fn[] }[] = [
       { label: 'Jobs', path: '/jobs', icon: Play, keywords: 'runs history executions' },
       { label: 'Templates', path: '/templates', icon: FileText, keywords: 'job template launch' },
       { label: 'Workflows', path: '/workflows', icon: Workflow, keywords: 'dag pipeline' },
+      { label: 'Approvals', path: '/approvals', icon: ShieldCheck, keywords: 'workflow gates approve deny pending' },
       { label: 'Inventories', path: '/inventories', icon: Server, keywords: 'hosts groups fleet' },
     ]
   },
@@ -77,9 +79,20 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
   const [history, setHistory] = useState<any[]>([]);
+  const [approvalCount, setApprovalCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const user = getCurrentUser();
   const initial = (user?.username || 'A').charAt(0).toUpperCase();
+
+  useEffect(() => {
+    let active = true;
+    const loadApprovals = () => api.getWorkflowApprovals()
+      .then(rows => { if (active) setApprovalCount((rows || []).length); })
+      .catch(() => {});
+    loadApprovals();
+    const timer = setInterval(loadApprovals, 10000);
+    return () => { active = false; clearInterval(timer); };
+  }, [location.pathname]);
 
   // Rotating example actions in the closed omnibar — teaches what's possible and
   // invites the user in. Holds still under prefers-reduced-motion.
@@ -179,6 +192,10 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         </button>
 
         <div className="ml-auto flex items-center gap-3.5">
+          <button onClick={() => navigate('/approvals')} title={`${approvalCount} pending approval${approvalCount === 1 ? '' : 's'}`} className="relative grid h-7 w-7 place-items-center rounded-lg text-dim hover:bg-panel hover:text-ink">
+            <ShieldCheck size={15} />
+            {approvalCount > 0 && <span className="absolute -right-1.5 -top-1.5 min-w-[17px] rounded-full bg-changed px-1 font-mono text-[9px] font-semibold leading-[17px] text-[#1a1203] tabular-nums">{approvalCount > 99 ? '99+' : approvalCount}</span>}
+          </button>
           <button onClick={onLogout} title="Sign out" className="w-7 h-7 grid place-items-center rounded-lg text-dim hover:text-ink hover:bg-panel">
             <LogOut size={15} />
           </button>

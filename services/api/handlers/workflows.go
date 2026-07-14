@@ -3,9 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
@@ -27,7 +30,6 @@ type WorkflowStore interface {
 	Delete(ctx context.Context, id int64) error
 	AllowSimultaneous(ctx context.Context, id int64) bool
 	ActiveRunCount(ctx context.Context, id int64) (int, error)
-	LaunchSnapshot(ctx context.Context, templateID int64, opts launch.Options) (int64, error)
 	ListJobsByTemplates(ctx context.Context, templateIDs []int64) ([]store.WorkflowRun, error)
 	JobMeta(ctx context.Context, id int64) (store.WorkflowJobMeta, error)
 	JobNodes(ctx context.Context, jobID int64) ([]store.WorkflowJobNode, error)
@@ -50,6 +52,19 @@ func NewWorkflowsResource(db *sqlx.DB, authz *Authorizer) *WorkflowsResource {
 // workflowNode / workflowEdge alias the store DTOs so handler code reads unchanged.
 type workflowNode = store.WorkflowNode
 type workflowEdge = store.WorkflowEdge
+
+type workflowApproval struct {
+	ID                 int64     `db:"id" json:"id"`
+	WorkflowJobID      int64     `db:"workflow_job_id" json:"workflow_job_id"`
+	WorkflowTemplateID int64     `db:"workflow_template_id" json:"workflow_template_id"`
+	OrganizationID     int64     `db:"organization_id" json:"organization_id"`
+	WorkflowName       string    `db:"workflow_name" json:"workflow_name"`
+	NodeName           string    `db:"node_name" json:"node_name"`
+	NodeKey            string    `db:"node_key" json:"node_key"`
+	RunCreatedAt       time.Time `db:"run_created_at" json:"run_created_at"`
+	AwaitingSince      time.Time `db:"awaiting_since" json:"awaiting_since"`
+	RequestedBy        *string   `db:"requested_by" json:"requested_by,omitempty"`
+}
 
 // ListWorkflows GET /api/v1/workflow-templates
 func (rs *WorkflowsResource) ListWorkflows(w http.ResponseWriter, r *http.Request) {
@@ -211,12 +226,37 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Manual launches carry no overrides today: workflow-level prompt-on-launch
-	// (extra_vars/survey/limit questions) is a separate feature. The typed Options
-	// path exists so machine-originated launches (schedules, webhooks, EDA) can
-	// carry context; wiring a manual prompt UI is now a one-place change (#90).
-	wjID, err := rs.store.LaunchSnapshot(r.Context(), id, launch.Options{})
+	// Manual launches use the same typed options path as schedules, webhooks and
+	// EDA triggers. An empty body remains valid for existing clients and relaunch
+	// actions, while operators can supply variables and a host limit when needed.
+	var body struct {
+		ExtraVars map[string]interface{} `json:"extra_vars,omitempty"`
+		Limit     *string                `json:"limit,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+	tx, err := rs.DB.BeginTxx(r.Context(), nil)
 	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	defer tx.Rollback()
+	wjID, err := launch.Workflow(r.Context(), tx, id, launch.Options{
+		ExtraVars: body.ExtraVars,
+		Limit:     body.Limit,
+	})
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(),
+		`UPDATE workflow_jobs SET launched_by_user_id=$1 WHERE id=$2`, currentUser(r).UserID, wjID); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -232,6 +272,43 @@ func (rs *WorkflowsResource) ListWorkflowJobs(w http.ResponseWriter, r *http.Req
 	}
 	rows, err := rs.store.ListJobsByTemplates(r.Context(), ids)
 	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, rows)
+}
+
+// ListWorkflowApprovals GET /api/v1/workflow-approvals — pending approval
+// nodes scoped to workflows on which the caller holds the approve capability.
+func (rs *WorkflowsResource) ListWorkflowApprovals(w http.ResponseWriter, r *http.Request) {
+	ids, err := rs.authz.VisibleIDs(r.Context(), rs.subject(r), rbac.Approve, rbac.WorkflowTemplate)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if len(ids) == 0 {
+		render.JSON(w, r, []workflowApproval{})
+		return
+	}
+	query, args, err := sqlx.In(`
+		SELECT wjn.id, wjn.workflow_job_id, wj.workflow_template_id,
+		       wt.organization_id, wt.name AS workflow_name,
+		       COALESCE(NULLIF(wjn.name, ''), wjn.node_key) AS node_name,
+		       wjn.node_key, wj.created_at AS run_created_at,
+		       COALESCE(wjn.awaiting_since, wj.created_at) AS awaiting_since,
+		       launcher.username AS requested_by
+		FROM workflow_job_nodes wjn
+		JOIN workflow_jobs wj ON wj.id = wjn.workflow_job_id
+		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
+		LEFT JOIN users launcher ON launcher.id = wj.launched_by_user_id
+		WHERE wjn.status = 'awaiting_approval' AND wt.id IN (?)
+		ORDER BY wj.created_at ASC, wjn.id ASC`, ids)
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	rows := []workflowApproval{}
+	if err := rs.DB.SelectContext(r.Context(), &rows, rs.DB.Rebind(query), args...); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -283,8 +360,21 @@ func (rs *WorkflowsResource) setNodeApproval(w http.ResponseWriter, r *http.Requ
 	if !rs.authorize(w, r, rbac.WorkflowTemplate, tplID, actApprove) {
 		return
 	}
-	if err := rs.store.SetNodeApproval(r.Context(), id, status); err != nil {
+	result, err := rs.DB.ExecContext(r.Context(), `
+		UPDATE workflow_job_nodes
+		SET status=$1, decided_by_user_id=$2
+		WHERE id=$3 AND status='awaiting_approval'`, status, currentUser(r).UserID, id)
+	if err != nil {
 		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if changed == 0 {
+		render.ErrConflict(fmt.Errorf("this approval has already been decided")).Render(w, r)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
