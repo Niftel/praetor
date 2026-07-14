@@ -6,17 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/praetordev/plog"
 	"io"
-	"github.com/praetordev/praetor/pkg/plog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/credentials"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/credentials"
+	"github.com/praetordev/events"
 	"github.com/praetordev/praetor/pkg/inventoryrender"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/objectstore"
+	"github.com/praetordev/models"
+	"github.com/praetordev/objectstore"
 )
 
 // logger is the ingestion package component logger (handler installed by pkg/plog).

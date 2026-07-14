@@ -2,11 +2,11 @@ package core
 
 import (
 	"fmt"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 	"sync"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // logger is the executor package component logger; the composition root

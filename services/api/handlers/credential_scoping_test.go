@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -18,7 +18,7 @@ import (
 func TestUpdateTemplateRechecksUse(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	rs := handlers.NewTemplatesResource(db)
+	rs := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 	ctx := context.Background()
 
@@ -78,7 +78,7 @@ func TestUpdateTemplateRechecksUse(t *testing.T) {
 func TestCredentialGrantOrgFence(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	h := handlers.NewAccessResource(db)
+	h := handlers.NewAccessResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 	ctx := context.Background()
 

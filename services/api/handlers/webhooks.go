@@ -13,9 +13,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/launch"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // WebhookStore is the inbound-webhook data access the handler depends on.

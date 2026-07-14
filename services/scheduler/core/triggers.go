@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 )
 
 // sqlExec is satisfied by both *sqlx.DB and *sqlx.Tx, so launchTarget works inside

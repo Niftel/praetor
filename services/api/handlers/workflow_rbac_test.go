@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -19,7 +19,7 @@ import (
 func TestWorkflowRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	wf := handlers.NewWorkflowsResource(db)
+	wf := handlers.NewWorkflowsResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()

@@ -8,10 +8,9 @@ import (
 	"strconv"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/middleware"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // AccessStore is the access/audit read access (per-resource access, user access,
@@ -31,8 +30,8 @@ type AccessResource struct {
 	store AccessStore
 }
 
-func NewAccessResource(db *sqlx.DB) *AccessResource {
-	return &AccessResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewAccessStore(db)}
+func NewAccessResource(db *sqlx.DB, authz *Authorizer) *AccessResource {
+	return &AccessResource{DB: db, Authorizer: authz, store: store.NewAccessStore(db)}
 }
 
 // access.go surfaces RBAC the AWX way: per-resource (who holds which RoleDefinition on
@@ -41,7 +40,6 @@ func NewAccessResource(db *sqlx.DB) *AccessResource {
 // ResourceAccess GET /api/v1/access?content_type=&object_id=
 // Lists the object's RoleDefinition assignments, each with the users and teams holding it.
 func (h *AccessResource) ResourceAccess(w http.ResponseWriter, r *http.Request) {
-	uc := r.Context().Value(middleware.UserContextKey).(middleware.UserContext)
 	ct := r.URL.Query().Get("content_type")
 	oid, err := strconv.ParseInt(r.URL.Query().Get("object_id"), 10, 64)
 	if ct == "" || err != nil {
@@ -49,8 +47,14 @@ func (h *AccessResource) ResourceAccess(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	canRead, _ := h.caps.HasCapability(r.Context(), uc.UserID, rbac.ContentType(ct), oid, rbac.Codename(rbac.ContentType(ct), rbac.ActionView))
-	if !canRead && !uc.IsSuperuser && !uc.IsSystemAuditor {
+	// You may view an object's access list if you can view the object — break-glass
+	// superusers (via the decorator) and global-view system roles (auditor) pass.
+	canRead, err := h.authz.CanCodename(r.Context(), h.subject(r), rbac.Codename(rbac.ContentType(ct), rbac.ActionView), rbac.Obj(rbac.ContentType(ct), oid))
+	if err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if !canRead {
 		render.ErrForbidden(nil).Render(w, r)
 		return
 	}
@@ -101,11 +105,9 @@ type accessGrantRequest struct {
 
 // gateManage lets the request through only if the caller may administer the object.
 func (h *AccessResource) gateManage(w http.ResponseWriter, r *http.Request, ct string, oid int64) bool {
-	uc := currentUser(r)
-	if uc.IsSuperuser {
-		return true
-	}
-	ok, err := h.caps.HasCapability(r.Context(), uc.UserID, rbac.ContentType(ct), oid, rbac.Codename(rbac.ContentType(ct), rbac.ActionManage))
+	// Administering an object's grants requires manage on it — superusers pass via
+	// the decorator inside the injected Authorizer.
+	ok, err := h.authz.CanCodename(r.Context(), h.subject(r), rbac.Codename(rbac.ContentType(ct), rbac.ActionManage), rbac.Obj(rbac.ContentType(ct), oid))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return false

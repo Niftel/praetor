@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 	"github.com/google/uuid"
-	"github.com/praetordev/praetor/pkg/models"
-	praetorRender "github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/models"
+	praetorRender "github.com/praetordev/render"
 	"github.com/praetordev/praetor/services/ingestion/core"
 )
 

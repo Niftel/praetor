@@ -12,10 +12,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // requireSCMPlaybook enforces that a job template's playbook comes from source
@@ -64,8 +64,8 @@ type TemplatesResource struct {
 }
 
 // NewTemplatesResource creates a new templates resource handler
-func NewTemplatesResource(db *sqlx.DB) *TemplatesResource {
-	return &TemplatesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewTemplateStore(db), notifications: store.NewNotificationStore(db)}
+func NewTemplatesResource(db *sqlx.DB, authz *Authorizer) *TemplatesResource {
+	return &TemplatesResource{DB: db, Authorizer: authz, store: store.NewTemplateStore(db), notifications: store.NewNotificationStore(db)}
 }
 
 // Routes creates a REST router for the Templates resource
@@ -86,12 +86,15 @@ func (rs *TemplatesResource) Routes() chi.Router {
 // ListTemplates GET /api/v1/job-templates
 func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
-	uc := currentUser(r)
-
 	var templates []models.JobTemplate
 	var total int64
 
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		var err error
 		if templates, err = rs.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)

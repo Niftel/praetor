@@ -9,10 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // HostStore is the hosts-domain data access the handler depends on.
@@ -37,8 +37,8 @@ type HostsResource struct {
 }
 
 // NewHostsResource creates a new hosts resource handler
-func NewHostsResource(db *sqlx.DB) *HostsResource {
-	return &HostsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewHostStore(db)}
+func NewHostsResource(db *sqlx.DB, authz *Authorizer) *HostsResource {
+	return &HostsResource{DB: db, Authorizer: authz, store: store.NewHostStore(db)}
 }
 
 // authorizeHost enforces access on a host via its parent inventory's roles

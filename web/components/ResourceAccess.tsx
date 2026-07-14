@@ -19,10 +19,6 @@ interface RoleDefinition {
   managed: boolean;
 }
 
-// RoleDefinition names are already display-ready ("Inventory Admin"); kept for callers
-// that still want a formatter.
-export const roleLabel = (name: string) => name;
-
 interface Props {
   contentType: string;   // 'organization' | 'inventory' | 'project' | 'job_template' | 'credential' | 'team'
   objectId: number;

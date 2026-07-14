@@ -64,9 +64,9 @@ export function confirmDialog(
 }
 
 const kindStyles: Record<ToastKind, { ring: string; icon: React.ReactNode }> = {
-  success: { ring: 'border-green-200', icon: <CheckCircle className="text-green-500" size={18} /> },
-  error: { ring: 'border-red-200', icon: <XCircle className="text-red-500" size={18} /> },
-  info: { ring: 'border-blue-200', icon: <Info className="text-blue-500" size={18} /> },
+  success: { ring: 'border-ok/30', icon: <CheckCircle className="text-ok" size={18} /> },
+  error: { ring: 'border-err/30', icon: <XCircle className="text-err" size={18} /> },
+  info: { ring: 'border-run/30', icon: <Info className="text-run" size={18} /> },
 };
 
 export const ToastHost: React.FC = () => {
@@ -96,15 +96,15 @@ export const ToastHost: React.FC = () => {
           <div
             key={t.id}
             role="status"
-            className={`flex items-start gap-2 bg-white border ${kindStyles[t.kind].ring} rounded-md shadow-md p-3 text-sm`}
+            className={`flex items-start gap-2 bg-panel border ${kindStyles[t.kind].ring} rounded-lg shadow-2xl p-3 text-sm`}
           >
             <span className="shrink-0 mt-0.5">{kindStyles[t.kind].icon}</span>
-            <span className="flex-1 text-gray-800 whitespace-pre-wrap break-words">{t.message}</span>
+            <span className="flex-1 text-ink2 whitespace-pre-wrap break-words">{t.message}</span>
             <button
               type="button"
               onClick={() => dismiss(t.id)}
               aria-label="Dismiss notification"
-              className="shrink-0 text-gray-400 hover:text-gray-600"
+              className="shrink-0 text-dim hover:text-ink"
             >
               <X size={16} />
             </button>
@@ -115,7 +115,7 @@ export const ToastHost: React.FC = () => {
       {/* Confirm dialog */}
       {confirm && (
         <Modal isOpen title={confirm.title} onClose={() => resolveConfirm(false)} size="md">
-          <p className="text-sm text-gray-600 whitespace-pre-wrap">{confirm.message}</p>
+          <p className="text-sm text-ink2 whitespace-pre-wrap">{confirm.message}</p>
           <div className="mt-5 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={() => resolveConfirm(false)}>Cancel</Button>
             <Button

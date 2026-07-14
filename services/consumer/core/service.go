@@ -2,9 +2,9 @@ package core
 
 import (
 	"context"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/plog"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // logger is the consumer package component logger (handler installed by pkg/plog).

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 )
 
 // processWorkflows advances every running workflow one step per tick: it reaps

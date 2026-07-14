@@ -9,10 +9,10 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/render"
 	"github.com/jmoiron/sqlx"
-	promMetrics "github.com/praetordev/praetor/pkg/metrics"
+	promMetrics "github.com/praetordev/metrics"
 	"github.com/praetordev/praetor/services/api/handlers"
 	modelAuth "github.com/praetordev/praetor/services/api/middleware"
-	praetorRender "github.com/praetordev/praetor/services/api/render"
+	praetorRender "github.com/praetordev/render"
 )
 
 // Config holds the API's externally-supplied configuration, resolved from env in
@@ -30,6 +30,12 @@ type Config struct {
 // NewRouter instantiates the chi Router and wires middleware.
 func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	r := chi.NewRouter()
+
+	// The authorization enforcement helper (PEP) is built once and injected into
+	// every resource that enforces access. It wraps the capability store (PDP)
+	// with the legacy is_superuser decorator — the single place that bypass
+	// lives, so removing it later is one edit here, not a sweep of handlers.
+	authz := handlers.NewAuthorizer(db)
 
 	// Base Middleware
 	r.Use(middleware.RequestID)
@@ -51,12 +57,12 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	}))
 
 	// Identity / access domains (formerly the ContentHandler god-object — B6/#85).
-	auth := handlers.NewAuthResource(db)
+	auth := handlers.NewAuthResource(db, authz)
 	auth.LDAPConfigPath = cfg.LDAPConfigPath // enables LDAP login when set
-	orgs := handlers.NewOrgsResource(db)
-	users := handlers.NewUsersResource(db)
-	teams := handlers.NewTeamsResource(db)
-	access := handlers.NewAccessResource(db)
+	orgs := handlers.NewOrgsResource(db, authz)
+	users := handlers.NewUsersResource(db, authz)
+	teams := handlers.NewTeamsResource(db, authz)
+	access := handlers.NewAccessResource(db, authz)
 
 	// Auth Routes (Public). Login is rate-limited per IP to blunt password
 	// brute-forcing (20 attempts/minute).
@@ -72,7 +78,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	r.Handle("/metrics", promMetrics.Handler())
 
 	// Public Host Runner Heartbeat (for host-runner agents)
-	hosts := handlers.NewHostsResource(db)
+	hosts := handlers.NewHostsResource(db, authz)
 	r.Post("/api/v1/hosts/{hostId}/runner-heartbeat", hosts.RunnerHeartbeat)
 
 	// Public inbound webhooks (GitHub/GitLab/generic -> launch). Verified by the
@@ -87,7 +93,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 
 	// Public event-driven-automation intake (EDA-style): a source pushes an event,
 	// verified by the source's shared token; matching rules launch remediation.
-	events := handlers.NewEventsResource(db)
+	events := handlers.NewEventsResource(db, authz)
 	r.Post("/api/v1/events/{source}", events.Intake)
 
 	// Protected Routes
@@ -96,14 +102,14 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
 
 		// Execution Packs registry (the self-contained runtimes pushed to hosts).
-		r.Mount("/execution-packs", handlers.NewExecutionPacksResource(db).Routes())
+		r.Mount("/execution-packs", handlers.NewExecutionPacksResource(db, authz).Routes())
 
 		// Event-driven automation (EDA): sources + rules management.
 		r.Mount("/event-sources", events.SourceRoutes())
 		r.Mount("/event-rules", events.RuleRoutes())
 
 		// Personal access tokens (headless / CI API auth) — each user manages own.
-		r.Mount("/tokens", handlers.NewTokensResource(db).Routes())
+		r.Mount("/tokens", handlers.NewTokensResource(db, authz).Routes())
 
 		// Activity stream (audit log) — superuser/auditor only
 		r.Get("/activity-stream", access.ListActivityStream)
@@ -192,7 +198,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// =======================================================================
 		// Projects
 		// =======================================================================
-		projects := handlers.NewProjectsResource(db)
+		projects := handlers.NewProjectsResource(db, authz)
 		r.Get("/projects", projects.ListProjects)
 		r.Post("/projects", projects.CreateProject)
 		r.Post("/projects/{id}/sync", projects.SyncProject)
@@ -200,24 +206,24 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// =======================================================================
 		// Jobs
 		// =======================================================================
-		jobs := handlers.NewJobsResource(db, cfg.IngestionURL, cfg.InternalToken)
+		jobs := handlers.NewJobsResource(db, cfg.IngestionURL, cfg.InternalToken, authz)
 		r.Mount("/jobs", jobs.Routes())
 
 		// =======================================================================
 		// Job Templates
 		// =======================================================================
-		templates := handlers.NewTemplatesResource(db)
+		templates := handlers.NewTemplatesResource(db, authz)
 		r.Mount("/job-templates", templates.Routes())
 
 		// Notification templates (org-scoped targets; attachments live under job-templates)
-		notifications := handlers.NewNotificationsResource(db)
+		notifications := handlers.NewNotificationsResource(db, authz)
 		r.Get("/notification-types", notifications.ListNotificationTypes) // registered backends + their config schema
 		r.Get("/notification-templates", notifications.ListNotificationTemplates)
 		r.Post("/notification-templates", notifications.CreateNotificationTemplate)
 		r.Delete("/notification-templates/{id}", notifications.DeleteNotificationTemplate)
 
 		// Workflows (DAG of templates with success/failure/approval edges)
-		wf := handlers.NewWorkflowsResource(db)
+		wf := handlers.NewWorkflowsResource(db, authz)
 		r.Get("/workflow-templates", wf.ListWorkflows)
 		r.Post("/workflow-templates", wf.CreateWorkflow)
 		r.Get("/workflow-templates/{id}", wf.GetWorkflow)
@@ -234,15 +240,15 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Delete("/workflow-templates/{id}/notifications/{ntId}/{event}", wf.DetachWorkflowNotification)
 
 		// Triggers: event triggers (job outcome -> launch) + webhook trigger surface
-		r.Mount("/triggers", handlers.NewTriggersResource(db).Routes())
+		r.Mount("/triggers", handlers.NewTriggersResource(db, authz).Routes())
 
 		// =======================================================================
 		// Inventories with nested hosts/groups
 		// =======================================================================
-		hostsHandler := handlers.NewHostsResource(db)
-		groups := handlers.NewGroupsResource(db)
+		hostsHandler := handlers.NewHostsResource(db, authz)
+		groups := handlers.NewGroupsResource(db, authz)
 
-		inventories := handlers.NewInventoriesResource(db)
+		inventories := handlers.NewInventoriesResource(db, authz)
 		r.Route("/inventories", func(r chi.Router) {
 			r.Get("/", inventories.ListInventories)
 			r.Post("/", inventories.CreateInventory)
@@ -267,16 +273,16 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// =======================================================================
 		// Credentials
 		// =======================================================================
-		credTypes := handlers.NewCredentialTypesResource(db)
+		credTypes := handlers.NewCredentialTypesResource(db, authz)
 		r.Mount("/credential-types", credTypes.Routes())
 
-		creds := handlers.NewCredentialsResource(db)
+		creds := handlers.NewCredentialsResource(db, authz)
 		r.Mount("/credentials", creds.Routes())
 
 		// =======================================================================
 		// Schedules
 		// =======================================================================
-		schedules := handlers.NewSchedulesResource(db)
+		schedules := handlers.NewSchedulesResource(db, authz)
 		r.Mount("/schedules", schedules.Routes())
 
 	})

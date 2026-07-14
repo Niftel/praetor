@@ -12,9 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/store"
 	"github.com/teambition/rrule-go"
 )
 
@@ -36,8 +36,8 @@ type SchedulesResource struct {
 	store ScheduleStore
 }
 
-func NewSchedulesResource(db *sqlx.DB) *SchedulesResource {
-	return &SchedulesResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewScheduleStore(db)}
+func NewSchedulesResource(db *sqlx.DB, authz *Authorizer) *SchedulesResource {
+	return &SchedulesResource{DB: db, Authorizer: authz, store: store.NewScheduleStore(db)}
 }
 
 func (rs *SchedulesResource) Routes() chi.Router {
@@ -53,10 +53,14 @@ func (rs *SchedulesResource) Routes() chi.Router {
 }
 
 func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Request) {
-	uc := currentUser(r)
 	var schedules []models.Schedule
 	var err error
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeOrganization)
+	if verr != nil {
+		render.Render(w, r, ErrInternal(verr))
+		return
+	}
+	if viewAll {
 		if schedules, err = rs.store.ListAll(r.Context()); err != nil {
 			render.Render(w, r, ErrInternal(err))
 			return

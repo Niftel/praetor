@@ -3,7 +3,7 @@ package core
 import (
 	"time"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // Runner defines the interface for running a job.

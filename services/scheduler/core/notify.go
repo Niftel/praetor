@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/notify"
+	"github.com/praetordev/notify"
 )
 
 // notifyWorkflow fires a workflow template's attached notifications for a

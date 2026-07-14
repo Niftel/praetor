@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // DefaultURL is the local-dev NATS address, used by mains that resolve NATS_URL
@@ -222,8 +222,8 @@ func (b *NatsBus) SubscribeToExecutionRequests() (<-chan events.ExecutionRequest
 					_ = msg.Term()
 					continue
 				}
-				_ = msg.Ack()  // ack on receipt; recovery is the reconciler's job
-				ch <- req      // blocks until a worker takes it — natural backpressure
+				_ = msg.Ack() // ack on receipt; recovery is the reconciler's job
+				ch <- req     // blocks until a worker takes it — natural backpressure
 			}
 		}
 	}()

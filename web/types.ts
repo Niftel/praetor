@@ -1,13 +1,5 @@
 // Types matching backend models exactly (snake_case field names)
 
-// Pagination wrapper for list responses
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
 // Job/Execution models
 export interface UnifiedJob {
   id: number;
@@ -24,41 +16,6 @@ export interface UnifiedJob {
 
 // Alias for backwards compatibility
 export type Job = UnifiedJob;
-
-export enum JobStatus {
-  SUCCESSFUL = 'successful',
-  FAILED = 'failed',
-  RUNNING = 'running',
-  PENDING = 'pending'
-}
-
-export interface ExecutionRun {
-  id: string;
-  unified_job_id: number;
-  attempt_number: number;
-  executor_instance_id?: number;
-  created_at: string;
-  started_at?: string;
-  finished_at?: string;
-  state: string;
-  last_heartbeat_at?: string;
-  last_event_seq: number;
-  persisted_event_seq: number;
-}
-
-export interface JobEvent {
-  id: number;
-  unified_job_id: number;
-  execution_run_id: string;
-  seq: number;
-  event_type: string;
-  host_id?: number;
-  task_name?: string;
-  play_name?: string;
-  event_data: any;
-  stdout_snippet?: string;
-  created_at: string;
-}
 
 // Resource models
 export interface Project {
@@ -242,15 +199,6 @@ export interface Role {
   modified_at?: string;
   // Legacy field kept for backwards compat
   permissions?: any;
-}
-
-export interface RoleBinding {
-  id: number;
-  role_id: number;
-  user_id?: number;
-  team_id?: number;
-  organization_id?: number;
-  created_at: string;
 }
 
 export interface Organization {

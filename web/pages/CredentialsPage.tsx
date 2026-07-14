@@ -1,14 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Credential, CredentialType } from '../types';
-import Card from '../components/ui/Card';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Key, Lock, Plus, Loader, ArrowLeft } from 'lucide-react';
+import { Key, Lock, Plus, ArrowLeft, Cloud, GitBranch, Shield, Server, Pencil, Trash2 } from 'lucide-react';
 import { PageSpinner } from '../components/ui/PageSpinner';
+import { toast, confirmDialog } from '../components/ui/toast';
+
+interface Field { id: string; label?: string; type?: string; secret?: boolean; multiline?: boolean; }
+
+const kindIcon = (typeName: string, size = 15) => {
+  const n = typeName.toLowerCase();
+  if (n.includes('cloud') || n.includes('aws') || n.includes('gcp') || n.includes('azure')) return <Cloud size={size} />;
+  if (n.includes('source') || n.includes('git') || n.includes('scm')) return <GitBranch size={size} />;
+  if (n.includes('vault')) return <Shield size={size} />;
+  if (n.includes('machine') || n.includes('ssh')) return <Key size={size} />;
+  return <Server size={size} />;
+};
 
 const CredentialsPage = () => {
   const { orgId: orgIdStr } = useParams();
@@ -16,200 +26,224 @@ const CredentialsPage = () => {
   const [orgName, setOrgName] = useState('');
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newCred, setNewCred] = useState<Partial<Credential>>({});
-  const [selectedTypeId, setSelectedTypeId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  // Local state for dynamic form fields
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [typeId, setTypeId] = useState<number | null>(null);
   const [formFields, setFormFields] = useState<Record<string, string>>({});
 
-  // Load credentials and credential types on mount
   useEffect(() => {
-    const fetchData = async () => {
+    (async () => {
       try {
         setLoading(true);
-        const [credsData, typesData, orgsData] = await Promise.all([
-          api.getCredentials(),
-          api.getCredentialTypes(),
-          api.getOrganizations().catch(() => [])
+        const [creds, types, tpls, orgs] = await Promise.all([
+          api.getCredentials(), api.getCredentialTypes(), api.getTemplates().catch(() => []), api.getOrganizations().catch(() => []),
         ]);
-        const types = typesData || [];
-        setCredentials(unwrap<Credential>(credsData).filter(c => (c as any).organization_id === orgId));
-        setCredentialTypes(types);
-        setOrgName(unwrap<{ id: number; name: string }>(orgsData).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
-        if (types.length > 0) {
-          setSelectedTypeId(types[0].id);
-        }
-      } catch (err) {
-        console.error('Failed to load credentials', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        const list = unwrap<Credential>(creds).filter(c => (c as any).organization_id === orgId);
+        setCredentials(list);
+        setCredentialTypes(types || []);
+        setTemplates(unwrap(tpls));
+        setSelectedId(prev => prev ?? (list[0]?.id ?? null));
+        setOrgName(unwrap<{ id: number; name: string }>(orgs).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
+      } catch (err) { console.error('Failed to load credentials', err); }
+      finally { setLoading(false); }
+    })();
   }, [orgId]);
 
-  const selectedType = credentialTypes.find(t => t.id === selectedTypeId);
+  const typeOf = (c?: Credential | null) => credentialTypes.find(t => t.id === c?.credential_type_id);
+  const typeName = (c?: Credential | null) => typeOf(c)?.name || 'Credential';
+  const fieldsOf = (t?: CredentialType): Field[] => {
+    if (!t?.inputs) return [];
+    try { const s = typeof t.inputs === 'string' ? JSON.parse(t.inputs) : t.inputs; return s.fields || []; } catch { return []; }
+  };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  // Group credentials by their type (the "keyring by kind").
+  const groups = useMemo(() => {
+    const m = new Map<string, Credential[]>();
+    for (const c of credentials) { const k = typeName(c); if (!m.has(k)) m.set(k, []); m.get(k)!.push(c); }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [credentials, credentialTypes]);
+
+  const usedByCount = (id: number) => templates.filter(t => t.credential_id === id).length;
+
+  const openCreate = () => { setEditingId(null); setName(''); setDescription(''); setTypeId(credentialTypes[0]?.id ?? null); setFormFields({}); setModalOpen(true); };
+  const openEdit = (c: Credential) => { setEditingId(c.id); setName(c.name); setDescription(c.description || ''); setTypeId(c.credential_type_id); setFormFields({}); setModalOpen(true); };
+
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCred.name || !selectedTypeId) return;
-
+    if (!name.trim() || !typeId) return;
+    // Only send the fields the operator actually filled (secrets are write-only;
+    // blank = keep existing on edit).
+    const inputs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(formFields)) if (v.trim() !== '') inputs[k] = v;
+    const body: any = { name: name.trim(), description: description || '', credential_type_id: typeId, organization_id: orgId, inputs };
     try {
-      const credData = {
-        name: newCred.name,
-        description: newCred.description || '',
-        credential_type_id: selectedTypeId,
-        organization_id: orgId,
-        inputs: formFields
-      };
-
-      const created = await api.createCredential(credData);
-      setCredentials([...credentials, created]);
-      setIsModalOpen(false);
-      setNewCred({});
-      setFormFields({});
-    } catch (err) {
-      console.error('Failed to create credential', err);
-    }
+      if (editingId) { const u = await api.updateCredential(editingId, body); setCredentials(cs => cs.map(c => c.id === editingId ? u : c)); toast.success('Credential updated'); }
+      else { const c = await api.createCredential(body); setCredentials(cs => [...cs, c]); setSelectedId(c.id); toast.success('Credential created'); }
+      setModalOpen(false);
+    } catch { toast.error(`Failed to ${editingId ? 'update' : 'create'} credential`); }
   };
 
-  const getTypeLabel = (cred: Credential) => {
-    const type = credentialTypes.find(t => t.id === cred.credential_type_id);
-    return type?.name || 'Unknown';
+  const remove = async (id: number) => {
+    if (!(await confirmDialog('Delete this credential?', { destructive: true, confirmText: 'Delete' }))) return;
+    try { await api.deleteCredential(id); setCredentials(cs => cs.filter(c => c.id !== id)); if (selectedId === id) setSelectedId(null); }
+    catch { toast.error('Failed to delete credential'); }
   };
 
-  const getTypeKind = (cred: Credential) => {
-    const type = credentialTypes.find(t => t.id === cred.credential_type_id);
-    const n = (type?.name || '').toLowerCase();
-    return n.includes('machine') || n.includes('source control') ? 'SSH' : 'Cloud';
-  };
+  const selected = credentials.find(c => c.id === selectedId) || null;
+  const selType = typeOf(selected);
+  const selFields = fieldsOf(selType);
+  const selInputs: Record<string, any> = (selected?.inputs as any) || {};
+  const usedByTemplates = selected ? templates.filter(t => t.credential_id === selected.id) : [];
+  const modalType = credentialTypes.find(t => t.id === typeId);
 
-  // Parse schema fields from selected credential type
-  const getTypeFields = () => {
-    if (!selectedType?.inputs) return [];
-    try {
-      const schema = typeof selectedType.inputs === 'string'
-        ? JSON.parse(selectedType.inputs)
-        : selectedType.inputs;
-      return schema.fields || [];
-    } catch {
-      return [];
-    }
-  };
-
-  const renderFields = () => {
-    const fields = getTypeFields();
-    return fields.map((field: any) => {
-      // A multi-line field (e.g. an SSH private key) needs a textarea — pasting a
-      // PEM key into a single-line password box is unusable. Keys are pasted
-      // visibly (as in AWX), so a secret textarea still renders as a textarea.
-      const isTextarea = field.type === 'textarea' || field.multiline;
-      const label = field.label || field.id;
-      return isTextarea ? (
-        <Textarea
-          key={field.id}
-          label={label}
-          rows={6}
-          placeholder={field.secret ? '-----BEGIN OPENSSH PRIVATE KEY-----\n...' : ''}
-          className="font-mono text-xs"
-          value={formFields[field.id] || ''}
-          onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-        />
-      ) : (
-        <Input
-          key={field.id}
-          label={label}
-          type={field.secret ? 'password' : 'text'}
-          value={formFields[field.id] || ''}
-          onChange={e => setFormFields({ ...formFields, [field.id]: e.target.value })}
-        />
-      );
-    });
-  };
-
-  if (loading) {
-    return (
-      <PageSpinner />
-    );
-  }
+  if (loading) return <PageSpinner />;
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-end">
-        <div>
-          <Link to="/credentials" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
-            <ArrowLeft size={14} /> Organizations
-          </Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">{orgName} · Credentials</h1>
+    <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
+      <div className="grid grid-cols-[300px_1fr] flex-1 min-h-0 max-[820px]:grid-cols-1">
+        {/* Keyring */}
+        <div className="flex flex-col min-h-0 border-r border-line bg-tree max-[820px]:hidden">
+          <div className="flex items-center gap-2.5 h-[52px] px-4 border-b border-line shrink-0">
+            <Link to="/credentials" className="text-mut hover:text-ink" title="All organizations"><ArrowLeft size={16} /></Link>
+            <span className="text-[14px] font-semibold">Credentials</span>
+            <span className="font-mono text-[11px] text-dim">{credentials.length}</span>
+            <button onClick={openCreate} className="ml-auto flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-line2 text-[11.5px] font-medium text-ink2 hover:bg-panel"><Plus size={13} /> Add</button>
+          </div>
+          <div className="flex-1 overflow-auto scroll-tint px-2.5 pb-6">
+            {groups.map(([kind, creds]) => (
+              <div key={kind} className="mt-3">
+                <div className="flex items-center gap-2.5 h-6 px-2.5">
+                  <span className="text-dim">{kindIcon(kind, 13)}</span>
+                  <span className="font-mono text-[9px] tracking-[0.14em] uppercase text-dim">{kind}</span>
+                  <span className="ml-auto font-mono text-[10px] text-faint">{creds.length}</span>
+                </div>
+                {creds.map(c => {
+                  const sel = c.id === selectedId;
+                  const used = usedByCount(c.id);
+                  return (
+                    <button key={c.id} onClick={() => setSelectedId(c.id)} className={`w-full flex items-center gap-3 h-[38px] px-2.5 rounded-lg ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>
+                      <span className={sel ? 'text-acc2' : 'text-mut'}>{kindIcon(kind)}</span>
+                      <span className="flex-1 min-w-0 text-left">
+                        <span className={`block font-mono text-[12.5px] truncate ${sel ? 'text-ink' : 'text-ink2'}`}>{c.name}</span>
+                        <span className="block font-mono text-[10px] text-faint">{used ? `used by ${used}` : 'unused'}</span>
+                      </span>
+                      <Lock size={12} className="text-faint shrink-0" />
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {credentials.length === 0 && <p className="px-3 py-8 text-[12px] text-dim text-center">No credentials. Add one to store a secret.</p>}
+          </div>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} icon={<Plus size={16} />}>Add Credential</Button>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {credentials.map(cred => (
-          <Card key={cred.id} className="hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between mb-4">
-              <div className="p-2 bg-brand-50 rounded-lg">
-                <Key className="text-brand-600" size={24} />
+        {/* Sealed-secret detail */}
+        {selected ? (
+          <div className="flex flex-col min-h-0 bg-bg">
+            <div className="flex items-start gap-4 px-9 pt-6 pb-5 border-b border-line shrink-0 max-[820px]:px-5">
+              <div>
+                <div className="font-mono text-[21px] font-semibold tracking-tight">{selected.name}</div>
+                <div className="mt-2.5 flex items-center gap-2.5">
+                  <span className="font-mono text-[11.5px] text-dim">{typeName(selected)}</span>
+                  <span className="inline-flex items-center gap-1.5 h-[22px] px-2.5 rounded-md font-mono text-[10.5px] text-ink2 border border-line2"><Lock size={12} /> encrypted</span>
+                </div>
               </div>
-              <Badge variant="info">{getTypeKind(cred)}</Badge>
-            </div>
-
-            <h3 className="text-lg font-bold text-gray-900 mb-1">{cred.name}</h3>
-            <p className="text-sm text-gray-500 mb-4">{getTypeLabel(cred)}</p>
-
-            <div className="space-y-2 border-t border-gray-100 pt-4">
-              <div className="flex justify-between text-sm items-center">
-                <span className="text-gray-500">Secret</span>
-                <span className="flex items-center text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                  <Lock size={10} className="mr-1" /> Encrypted
-                </span>
+              <div className="ml-auto flex items-center gap-2.5 pt-0.5">
+                <button onClick={() => openEdit(selected)} className="h-[34px] px-3.5 rounded-lg text-[12.5px] font-medium flex items-center gap-1.5 border border-line2 text-ink2 hover:border-white/25"><Pencil size={13} /> Edit</button>
+                <button onClick={() => remove(selected.id)} className="w-[34px] h-[34px] grid place-items-center rounded-lg text-dim hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={15} /></button>
               </div>
             </div>
-          </Card>
-        ))}
-        {credentials.length === 0 && (
-          <p className="text-gray-500 col-span-full text-center py-8">No credentials found. Click "Add Credential" to create one.</p>
+
+            <div className="flex-1 overflow-auto scroll-tint px-9 pb-16 max-[820px]:px-5">
+              <div className="max-w-[620px]">
+                <Sec title="Inputs" hint="secrets are write-only">
+                  {selFields.length === 0 && <p className="font-mono text-[12px] text-faint py-1">This credential type declares no input fields.</p>}
+                  {selFields.map(f => {
+                    const val = selInputs[f.id];
+                    return (
+                      <div key={f.id} className="grid grid-cols-[158px_1fr] gap-5 items-center py-2.5 border-b border-line last:border-0 group">
+                        <span className="font-mono text-[12px] text-dim">{f.label || f.id}</span>
+                        <span className="font-mono text-[12.5px] flex items-center gap-3 min-w-0">
+                          {f.secret ? (
+                            <>
+                              <span className="text-faint tracking-[2px] truncate">••••••••••••••••</span>
+                              <span className="inline-flex items-center gap-1.5 font-mono text-[9.5px] text-acc2 whitespace-nowrap"><Lock size={11} /> sealed</span>
+                            </>
+                          ) : (
+                            <span className="text-ink truncate">{val !== undefined && val !== '' ? String(val) : <span className="text-faint">stored</span>}</span>
+                          )}
+                          <button onClick={() => openEdit(selected)} className="ml-auto font-mono text-[10.5px] text-dim hover:text-acc opacity-0 group-hover:opacity-100">replace</button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </Sec>
+
+                <Sec title="Security">
+                  <KV k="encryption" v="encrypted at rest" />
+                  <KV k="scope" v={`org · ${orgName}`} />
+                  {(selected as any).created_at && <KV k="created" v={new Date((selected as any).created_at).toLocaleDateString()} />}
+                </Sec>
+
+                <Sec title="Used by" hint={`${usedByTemplates.length} template${usedByTemplates.length === 1 ? '' : 's'}`}>
+                  {usedByTemplates.length === 0 ? <p className="font-mono text-[11.5px] text-dim">No templates use this credential.</p> : (
+                    <div className="flex flex-wrap gap-2">
+                      {usedByTemplates.map(t => <span key={t.id} className="font-mono text-[12px] text-ink2 border border-line rounded-lg px-2.5 py-1.5">{t.name}</span>)}
+                    </div>
+                  )}
+                </Sec>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid place-items-center text-dim">
+            <div className="text-center"><Key size={38} className="mx-auto mb-3 opacity-20" /><p className="text-sm mb-4">No credentials in {orgName} yet.</p><Button icon={<Plus size={15} />} onClick={openCreate}>Add credential</Button></div>
+          </div>
         )}
       </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={`New Credential in ${orgName}`}>
-        <form onSubmit={handleCreate} className="space-y-4">
-          <Input
-            label="Name"
-            type="text"
-            required
-            value={newCred.name || ''}
-            onChange={e => setNewCred({ ...newCred, name: e.target.value })}
-          />
-          <Select
-            label="Type"
-            value={selectedTypeId || ''}
-            onChange={e => {
-              setSelectedTypeId(Number(e.target.value));
-              setFormFields({}); // Reset fields when type changes
-            }}
-          >
-            {credentialTypes.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
+      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? 'Edit credential' : `New credential in ${orgName}`}>
+        <form onSubmit={save} className="space-y-4">
+          <Input label="Name" required value={name} onChange={e => setName(e.target.value)} />
+          <Input label="Description" value={description} onChange={e => setDescription(e.target.value)} />
+          <Select label="Type" value={typeId || ''} disabled={!!editingId} onChange={e => { setTypeId(Number(e.target.value)); setFormFields({}); }}>
+            {credentialTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
-
-          <div className="pt-2 border-t border-gray-100 space-y-4">
-            {renderFields()}
+          <div className="pt-2 border-t border-line space-y-4">
+            {editingId && <p className="text-[11px] text-dim -mb-1">Leave a field blank to keep its current value.</p>}
+            {fieldsOf(modalType).map(f => {
+              const isTextarea = f.type === 'textarea' || f.multiline;
+              const label = f.label || f.id;
+              return isTextarea ? (
+                <Textarea key={f.id} label={label} rows={6} placeholder={f.secret ? '-----BEGIN OPENSSH PRIVATE KEY-----\n...' : ''} className="font-mono text-xs"
+                  value={formFields[f.id] || ''} onChange={e => setFormFields({ ...formFields, [f.id]: e.target.value })} />
+              ) : (
+                <Input key={f.id} label={label} type={f.secret ? 'password' : 'text'} value={formFields[f.id] || ''} onChange={e => setFormFields({ ...formFields, [f.id]: e.target.value })} />
+              );
+            })}
           </div>
-
-          <div className="mt-5 flex justify-end gap-3 pt-4">
-            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-            <Button type="submit">Save</Button>
-          </div>
+          <div className="mt-5 flex justify-end gap-3 pt-4"><Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button><Button type="submit">Save</Button></div>
         </form>
       </Modal>
     </div>
   );
 };
+
+const Sec: React.FC<{ title: string; hint?: string; children: React.ReactNode }> = ({ title, hint, children }) => (
+  <div className="py-6 border-t border-line first:border-t-0 first:pt-2">
+    <div className="flex items-baseline gap-2.5 mb-4"><span className="font-mono text-[10px] tracking-[0.16em] uppercase text-mut">{title}</span>{hint && <span className="font-mono text-[9.5px] text-faint">{hint}</span>}</div>
+    {children}
+  </div>
+);
+
+const KV: React.FC<{ k: string; v: React.ReactNode }> = ({ k, v }) => (
+  <div className="flex justify-between gap-4 py-2.5 border-b border-line last:border-0 font-mono text-[12px]"><span className="text-dim">{k}</span><span className="text-ink2">{v}</span></div>
+);
 
 export default CredentialsPage;

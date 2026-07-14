@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // GroupStore is the groups-domain data access the handler depends on.
@@ -35,8 +35,8 @@ type GroupsResource struct {
 }
 
 // NewGroupsResource creates a new groups resource handler
-func NewGroupsResource(db *sqlx.DB) *GroupsResource {
-	return &GroupsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewGroupStore(db)}
+func NewGroupsResource(db *sqlx.DB, authz *Authorizer) *GroupsResource {
+	return &GroupsResource{DB: db, Authorizer: authz, store: store.NewGroupStore(db)}
 }
 
 // authorizeGroup enforces access on a group via its parent inventory's roles

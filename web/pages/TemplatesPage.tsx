@@ -1,14 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
-import { Template, Project, Inventory, Credential, PaginatedResponse, SurveyQuestion } from '../types';
-import Card from '../components/ui/Card';
+import { Template, Project, Inventory, Credential, SurveyQuestion } from '../types';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
-import { Plus, Edit2, Play, Trash2, Loader, ArrowLeft } from 'lucide-react';
+import { Plus, Search, Check, Trash2, Play, ArrowLeft, Rocket } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
+
+type Editing = number | 'new' | null;
+
+const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void }> = ({ on, onChange }) => (
+  <button type="button" onClick={() => onChange(!on)}
+    className={`relative w-9 h-[21px] rounded-full shrink-0 transition-colors ${on ? 'bg-acc' : 'bg-line2'}`}>
+    <span className={`absolute top-[2.5px] w-4 h-4 rounded-full transition-transform ${on ? 'translate-x-[15px] bg-[#06231e]' : 'translate-x-[2.5px] bg-[#c3c9d4]'}`} />
+  </button>
+);
+
+const TogRow: React.FC<{ title: string; sub: string; on: boolean; onChange: (v: boolean) => void }> = ({ title, sub, on, onChange }) => (
+  <div className="flex items-center gap-4 py-2.5">
+    <div className="flex-1">
+      <div className="text-[12.5px] text-ink2">{title}</div>
+      <div className="font-mono text-[10.5px] text-dim mt-0.5">{sub}</div>
+    </div>
+    <Toggle on={on} onChange={onChange} />
+  </div>
+);
+
+const Row: React.FC<{ label: string; hint?: string; top?: boolean; children: React.ReactNode }> = ({ label, hint, top, children }) => (
+  <div className={`grid grid-cols-[158px_1fr] gap-6 py-2.5 ${top ? 'items-start' : 'items-center'}`}>
+    <label className="text-[12.5px] text-ink2">{label}{hint && <span className="block font-mono text-[10px] text-dim mt-1 leading-snug">{hint}</span>}</label>
+    {children}
+  </div>
+);
+
+const uinp = 'w-full max-w-[320px] bg-transparent border-b border-line2 focus:border-acc hover:border-mut text-ink font-mono text-[13px] py-1.5 outline-none placeholder:text-faint';
+const usel = 'min-w-[240px] max-w-[320px] bg-transparent border-b border-line2 focus:border-acc hover:border-mut text-ink font-mono text-[13px] py-1.5 outline-none';
+
+const SLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">{children}</div>
+);
 
 const TemplatesPage = () => {
   const { orgId: orgIdStr } = useParams();
@@ -20,21 +52,20 @@ const TemplatesPage = () => {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [executionPacks, setExecutionPacks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
+  const [filter, setFilter] = useState('');
 
-  // Form State
+  const [editing, setEditing] = useState<Editing>(null);
   const [formData, setFormData] = useState<Partial<Template>>({});
   const [varsText, setVarsText] = useState('');
   const [survey, setSurvey] = useState<SurveyQuestion[]>([]);
-  // Notifications (edit mode): org targets + this template's attachments.
+  const [formMsg, setFormMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Notifications
   const [notifTargets, setNotifTargets] = useState<any[]>([]);
   const [notifAttached, setNotifAttached] = useState<any[]>([]);
-  // Backend types + their config schema, fetched from the API so the form is
-  // driven by whichever notification backends are registered (webhook/slack/…).
   const [notifTypes, setNotifTypes] = useState<any[]>([]);
-  const [newNotif, setNewNotif] = useState<{ name: string; notification_type: string; config: Record<string, string> }>(
-    { name: '', notification_type: 'webhook', config: {} });
+  const [newNotif, setNewNotif] = useState<{ name: string; notification_type: string; config: Record<string, string> }>({ name: '', notification_type: 'webhook', config: {} });
 
   // Launch dialog
   const [launchTpl, setLaunchTpl] = useState<Template | null>(null);
@@ -42,147 +73,101 @@ const TemplatesPage = () => {
   const [launchLimit, setLaunchLimit] = useState('');
   const [launchAnswers, setLaunchAnswers] = useState<Record<string, string>>({});
   const [launchMsg, setLaunchMsg] = useState('');
-  const [formMsg, setFormMsg] = useState('');
 
   const blankQuestion = (): SurveyQuestion => ({ variable: '', question_name: '', type: 'text', required: false, default: '' });
-  const updateQ = (i: number, patch: Partial<SurveyQuestion>) =>
-    setSurvey(prev => prev.map((q, j) => (j === i ? { ...q, ...patch } : q)));
+  const updateQ = (i: number, patch: Partial<SurveyQuestion>) => setSurvey(prev => prev.map((q, j) => (j === i ? { ...q, ...patch } : q)));
 
   useEffect(() => {
-    const fetchData = async () => {
+    (async () => {
       try {
         setLoading(true);
-        const [templatesData, projectsData, inventoriesData, credentialsData, packsData, orgsData] = await Promise.all([
-          api.getTemplates(),
-          api.getProjects(),
-          api.getInventories(),
-          api.getCredentials(),
-          api.getExecutionPacks(),
-          api.getOrganizations().catch(() => [])
+        const [t, p, i, c, packs, orgs] = await Promise.all([
+          api.getTemplates(), api.getProjects(), api.getInventories(), api.getCredentials(), api.getExecutionPacks(), api.getOrganizations().catch(() => []),
         ]);
-        // Scope everything to the org from the route.
         const byOrg = <T extends { organization_id?: number }>(arr: T[]) => arr.filter(x => x.organization_id === orgId);
-        setTemplates(byOrg(unwrap<Template>(templatesData)));
-        setProjects(byOrg(unwrap<Project>(projectsData)));
-        setInventories(byOrg(unwrap<Inventory>(inventoriesData)));
-        setCredentials(byOrg(unwrap<Credential>(credentialsData)));
-        setExecutionPacks(packsData || []);
-        setOrgName(unwrap<{ id: number; name: string }>(orgsData).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
-      } catch (err) {
-        console.error('Failed to load data', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        setTemplates(byOrg(unwrap<Template>(t)));
+        setProjects(byOrg(unwrap<Project>(p)));
+        setInventories(byOrg(unwrap<Inventory>(i)));
+        setCredentials(byOrg(unwrap<Credential>(c)));
+        setExecutionPacks(packs || []);
+        setOrgName(unwrap<{ id: number; name: string }>(orgs).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
+      } catch (err) { console.error('Failed to load data', err); }
+      finally { setLoading(false); }
+    })();
   }, [orgId]);
 
-  const openCreateModal = () => {
-    setEditingTemplate(null);
-    setFormData({ organization_id: orgId }); // org fixed by the route
-    setVarsText('');
-    setSurvey([]);
-    setFormMsg('');
-    setIsModalOpen(true);
-  };
+  const startNew = () => { setEditing('new'); setFormData({ organization_id: orgId }); setVarsText(''); setSurvey([]); setFormMsg(''); };
 
-  const openEditModal = (template: Template) => {
-    setEditingTemplate(template);
-    setFormData(template);
-    setVarsText(
-      template.extra_vars && Object.keys(template.extra_vars).length
-        ? JSON.stringify(template.extra_vars, null, 2)
-        : ''
-    );
-    setSurvey(template.survey_spec?.spec || []);
+  const startEdit = (t: Template) => {
+    setEditing(t.id);
+    setFormData(t);
+    setVarsText(t.extra_vars && Object.keys(t.extra_vars).length ? JSON.stringify(t.extra_vars, null, 2) : '');
+    setSurvey(t.survey_spec?.spec || []);
     setFormMsg('');
     setNewNotif({ name: '', notification_type: 'webhook', config: {} });
     api.getNotificationTypes().then(d => setNotifTypes(d || [])).catch(() => setNotifTypes([]));
-    if (template.organization_id) {
-      api.getNotificationTemplates(template.organization_id).then(d => setNotifTargets(d || [])).catch(() => setNotifTargets([]));
-      api.getTemplateNotifications(template.id).then(d => setNotifAttached(d || [])).catch(() => setNotifAttached([]));
+    if (t.organization_id) {
+      api.getNotificationTemplates(t.organization_id).then(d => setNotifTargets(d || [])).catch(() => setNotifTargets([]));
+      api.getTemplateNotifications(t.id).then(d => setNotifAttached(d || [])).catch(() => setNotifAttached([]));
     }
-    setIsModalOpen(true);
   };
 
-  const isAttached = (ntId: number, event: string) =>
-    notifAttached.some(a => a.notification_template_id === ntId && a.event === event);
-
+  const isAttached = (ntId: number, event: string) => notifAttached.some(a => a.notification_template_id === ntId && a.event === event);
   const toggleNotif = async (ntId: number, event: string) => {
-    if (!editingTemplate) return;
-    if (isAttached(ntId, event)) await api.detachTemplateNotification(editingTemplate.id, ntId, event);
-    else await api.attachTemplateNotification(editingTemplate.id, { notification_template_id: ntId, event });
-    api.getTemplateNotifications(editingTemplate.id).then(d => setNotifAttached(d || [])).catch(() => {});
+    if (typeof editing !== 'number') return;
+    if (isAttached(ntId, event)) await api.detachTemplateNotification(editing, ntId, event);
+    else await api.attachTemplateNotification(editing, { notification_template_id: ntId, event });
+    api.getTemplateNotifications(editing).then(d => setNotifAttached(d || [])).catch(() => { });
   };
-
-  // Fields of the currently-selected backend type (drives the dynamic form).
   const notifFields = (): { id: string; label: string; type: string }[] =>
     notifTypes.find(t => t.type === newNotif.notification_type)?.fields || [{ id: 'url', label: 'URL', type: 'text' }];
-
   const addNotifTarget = async () => {
-    if (!editingTemplate || !newNotif.name.trim()) return;
-    // Every field the selected backend declares must be filled.
+    if (typeof editing !== 'number' || !newNotif.name.trim() || !formData.organization_id) return;
     if (notifFields().some(f => !(newNotif.config[f.id] || '').trim())) return;
-    await api.createNotificationTemplate({
-      organization_id: editingTemplate.organization_id,
-      name: newNotif.name,
-      notification_type: newNotif.notification_type,
-      config: newNotif.config,
-    });
+    await api.createNotificationTemplate({ organization_id: formData.organization_id, name: newNotif.name, notification_type: newNotif.notification_type, config: newNotif.config });
     setNewNotif({ name: '', notification_type: 'webhook', config: {} });
-    api.getNotificationTemplates(editingTemplate.organization_id).then(d => setNotifTargets(d || [])).catch(() => {});
+    api.getNotificationTemplates(formData.organization_id).then(d => setNotifTargets(d || [])).catch(() => { });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const save = async () => {
     setFormMsg('');
     let extra_vars: any = {};
-    if (varsText.trim()) {
-      try { extra_vars = JSON.parse(varsText); }
-      catch { setFormMsg('Variables must be valid JSON'); return; }
-    }
-    if (!editingTemplate && !formData.organization_id) { setFormMsg('Select an organization'); return; }
-    const payload = {
-      ...formData,
-      extra_vars,
-      survey_spec: { spec: survey.filter(q => q.variable.trim()) },
-    };
+    if (varsText.trim()) { try { extra_vars = JSON.parse(varsText); } catch { setFormMsg('Variables must be valid JSON'); return; } }
+    if (!formData.name?.trim()) { setFormMsg('Name is required'); return; }
+    const payload = { ...formData, extra_vars, survey_spec: { spec: survey.filter(q => q.variable.trim()) } };
+    setSaving(true);
     try {
-      if (editingTemplate) {
-        const updated = await api.updateTemplate(editingTemplate.id, payload);
-        setTemplates(templates.map(t => t.id === editingTemplate.id ? updated : t));
+      if (typeof editing === 'number') {
+        const updated = await api.updateTemplate(editing, payload);
+        setTemplates(ts => ts.map(t => (t.id === editing ? updated : t)));
+        toast.success('Template saved');
       } else {
-        const newTemplate = await api.createTemplate(payload);
-        setTemplates([...templates, newTemplate]);
+        const created = await api.createTemplate(payload);
+        setTemplates(ts => [...ts, created]);
+        setEditing(created.id);
+        toast.success('Template created');
       }
-      setIsModalOpen(false);
-    } catch (err: any) {
-      // Surface the failure in the modal instead of failing silently.
-      setFormMsg(err?.message || 'Failed to save template');
-    }
+    } catch (err: any) { setFormMsg(err?.message || 'Failed to save template'); }
+    finally { setSaving(false); }
+  };
+
+  const remove = async (id: number) => {
+    const t = templates.find(t => t.id === id);
+    if (!(await confirmDialog(`Delete template "${t?.name ?? id}"?`, { destructive: true, confirmText: 'Delete' }))) return;
+    try { await api.deleteTemplate(id); setTemplates(ts => ts.filter(t => t.id !== id)); if (editing === id) setEditing(null); }
+    catch (err: any) { toast.error(err?.message || 'Failed to delete template'); }
   };
 
   const openLaunch = (t: Template) => {
-    setLaunchTpl(t);
-    setLaunchVars('');
-    setLaunchLimit(t.limit || '');
-    // Seed survey answers from each question's default.
+    setLaunchTpl(t); setLaunchVars(''); setLaunchLimit(t.limit || '');
     const seed: Record<string, string> = {};
     (t.survey_spec?.spec || []).forEach(q => { seed[q.variable] = q.default || ''; });
-    setLaunchAnswers(seed);
-    setLaunchMsg('');
+    setLaunchAnswers(seed); setLaunchMsg('');
   };
-
-  const handleLaunch = async () => {
+  const doLaunch = async () => {
     if (!launchTpl) return;
-    const payload: any = {
-      unified_job_template_id: launchTpl.unified_job_template_id,
-      name: launchTpl.name,
-    };
+    const payload: any = { unified_job_template_id: launchTpl.unified_job_template_id, name: launchTpl.name };
     if (launchTpl.survey_enabled) {
-      // Survey answers are submitted as extra_vars; the API validates them
-      // against the spec (required/defaults).
       const answers: Record<string, any> = {};
       for (const q of launchTpl.survey_spec?.spec || []) {
         const raw = launchAnswers[q.variable];
@@ -191,394 +176,262 @@ const TemplatesPage = () => {
       }
       payload.extra_vars = answers;
     } else if (launchTpl.ask_variables_on_launch && launchVars.trim()) {
-      try { payload.extra_vars = JSON.parse(launchVars); }
-      catch { setLaunchMsg('Variables must be valid JSON'); return; }
+      try { payload.extra_vars = JSON.parse(launchVars); } catch { setLaunchMsg('Variables must be valid JSON'); return; }
     }
-    if (launchTpl.ask_limit_on_launch && launchLimit.trim()) {
-      payload.limit = launchLimit.trim();
-    }
-    try {
-      await api.launchJob(payload);
-      setLaunchTpl(null);
-    } catch (err) {
-      setLaunchMsg('Launch failed');
-      console.error(err);
-    }
+    if (launchTpl.ask_limit_on_launch && launchLimit.trim()) payload.limit = launchLimit.trim();
+    try { await api.launchJob(payload); setLaunchTpl(null); toast.success('Launched'); }
+    catch (err) { setLaunchMsg('Launch failed'); console.error(err); }
   };
 
-  const handleDelete = async (id: number) => {
-    const t = templates.find(t => t.id === id);
-    if (!(await confirmDialog(`Delete template "${t?.name ?? id}"? This cannot be undone.`))) return;
-    try {
-      await api.deleteTemplate(id);
-      setTemplates(templates.filter(t => t.id !== id));
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to delete template');
-    }
-  };
+  const shown = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    return q ? templates.filter(t => t.name.toLowerCase().includes(q) || (t.playbook || '').toLowerCase().includes(q)) : templates;
+  }, [templates, filter]);
 
-  if (loading) {
-    return (
-      <PageSpinner />
-    );
-  }
+  const set = (patch: Partial<Template>) => setFormData(f => ({ ...f, ...patch }));
+
+  if (loading) return <PageSpinner />;
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-end">
-        <div>
-          <Link to="/templates" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
-            <ArrowLeft size={14} /> Organizations
-          </Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">{orgName} · Templates</h1>
-        </div>
-        <Button onClick={openCreateModal} icon={<Plus size={16} />}>
-          Add Template
-        </Button>
+    <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
+      <div className="flex items-center gap-4 h-[54px] px-6 border-b border-line shrink-0">
+        <Link to="/templates" className="w-7 h-7 grid place-items-center rounded-md border border-line2 text-mut hover:text-ink hover:border-white/20 transition-colors" title="All organizations"><ArrowLeft size={15} /></Link>
+        <span className="text-[15px] font-semibold tracking-tight">Templates</span>
+        <span className="font-mono text-[11px] text-dim">{orgName} · {templates.length} template{templates.length === 1 ? '' : 's'}</span>
       </div>
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Inventory</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Playbook</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {templates.map((template) => (
-              <tr key={template.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-4">
-                  <div className="text-sm font-medium text-gray-900">{template.name}</div>
-                  <div className="text-sm text-gray-500">{template.description}</div>
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500">
-                  {projects.find(p => p.id === template.project_id)?.name || '-'}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500">
-                  {inventories.find(i => i.id === template.inventory_id)?.name || '-'}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500 font-mono">
-                  {template.playbook}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => openLaunch(template)} className="text-green-600 hover:text-green-900" title="Launch">
-                      <Play size={18} />
-                    </button>
-                    <button onClick={() => openEditModal(template)} className="text-blue-600 hover:text-blue-900" title="Edit">
-                      <Edit2 size={18} />
-                    </button>
-                    <button onClick={() => handleDelete(template.id)} className="text-red-600 hover:text-red-900" title="Delete">
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {templates.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-6 py-4 text-center text-gray-500">No templates found.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        </div>
-      </Card>
-
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={editingTemplate ? "Edit Template" : "New Job Template"}
-        size="lg"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Name"
-            type="text"
-            required
-            value={formData.name || ''}
-            onChange={e => setFormData({ ...formData, name: e.target.value })}
-          />
-          <Input
-            label="Description"
-            type="text"
-            value={formData.description || ''}
-            onChange={e => setFormData({ ...formData, description: e.target.value })}
-          />
-          <div className="grid grid-cols-2 gap-4">
-            <Select
-              label="Project"
-              value={formData.project_id || ''}
-              onChange={e => setFormData({ ...formData, project_id: Number(e.target.value) })}
-            >
-              <option value="">Select Project</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </Select>
-            <Select
-              label="Inventory"
-              value={formData.inventory_id || ''}
-              onChange={e => setFormData({ ...formData, inventory_id: Number(e.target.value) })}
-            >
-              <option value="">Select Inventory</option>
-              {inventories.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </Select>
+      <div className="grid grid-cols-[288px_1fr] flex-1 min-h-0 max-[820px]:grid-cols-1">
+        {/* Catalog */}
+        <div className="flex flex-col min-h-0 border-r border-line bg-tree max-[820px]:hidden">
+          <div className="flex items-center gap-2.5 h-[46px] px-4 border-b border-line shrink-0">
+            <Search size={14} className="text-dim shrink-0" />
+            <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter templates" className="flex-1 bg-transparent border-none outline-none text-[12.5px] text-ink placeholder:text-dim" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Playbook"
-              type="text"
-              placeholder="site.yml"
-              value={formData.playbook || ''}
-              onChange={e => setFormData({ ...formData, playbook: e.target.value })}
-            />
-            <Select
-              label="Credential"
-              value={formData.credential_id || ''}
-              onChange={e => setFormData({ ...formData, credential_id: Number(e.target.value) })}
-            >
-              <option value="">Select Credential</option>
-              {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
+          <div className="flex items-center h-[34px] px-4 mt-1.5 shrink-0">
+            <span className="font-mono text-[9px] tracking-[0.16em] uppercase text-dim">Job templates</span>
+            <button onClick={startNew} className="ml-auto text-dim hover:text-ink" title="New template"><Plus size={15} /></button>
           </div>
-          <Select
-            label="Execution Pack"
-            hint="The self-contained Python+Ansible runtime this job runs in (pushed to the host). Default = the standard pack."
-            value={formData.execution_pack_id || ''}
-            onChange={e => setFormData({ ...formData, execution_pack_id: e.target.value ? Number(e.target.value) : undefined })}
-          >
-            <option value="">Default</option>
-            {executionPacks.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </Select>
-          <Textarea
-            label="Default Variables (JSON)"
-            rows={4}
-            placeholder={'{\n  "key": "value"\n}'}
-            className="font-mono text-sm"
-            value={varsText}
-            onChange={e => setVarsText(e.target.value)}
-          />
-          <Input
-            label="Limit (default host pattern)"
-            type="text"
-            placeholder="e.g. web* or host1:host2"
-            value={formData.limit || ''}
-            onChange={e => setFormData({ ...formData, limit: e.target.value })}
-          />
-          <div className="border-t pt-3">
-            <p className="text-sm font-medium text-gray-700 mb-2">Prompt on launch</p>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={!!formData.ask_variables_on_launch}
-                onChange={e => setFormData({ ...formData, ask_variables_on_launch: e.target.checked })}
-              />
-              Ask for variables when launching
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700 mt-1">
-              <input
-                type="checkbox"
-                checked={!!formData.ask_limit_on_launch}
-                onChange={e => setFormData({ ...formData, ask_limit_on_launch: e.target.checked })}
-              />
-              Ask for limit when launching
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700 mt-3 pt-2 border-t">
-              <input
-                type="checkbox"
-                checked={!!formData.use_fact_cache}
-                onChange={e => setFormData({ ...formData, use_fact_cache: e.target.checked })}
-              />
-              Use fact cache (persist &amp; reuse gathered facts across runs)
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700 mt-3">
-              <input
-                type="checkbox"
-                checked={!!formData.allow_simultaneous}
-                onChange={e => setFormData({ ...formData, allow_simultaneous: e.target.checked })}
-              />
-              Allow simultaneous runs (off = a launch is refused while a run is still active)
-            </label>
-          </div>
-          <div className="border-t pt-3">
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-              <input
-                type="checkbox"
-                checked={!!formData.survey_enabled}
-                onChange={e => setFormData({ ...formData, survey_enabled: e.target.checked })}
-              />
-              Enable survey
-            </label>
-            {formData.survey_enabled && (
-              <div className="space-y-3">
-                {survey.map((q, i) => (
-                  <div key={i} className="border rounded p-2 space-y-2 bg-gray-50">
-                    <div className="grid grid-cols-2 gap-2">
-                      <input placeholder="variable (e.g. app_version)" className="border p-1 rounded text-sm font-mono"
-                        value={q.variable} onChange={e => updateQ(i, { variable: e.target.value })} />
-                      <input placeholder="Question label" className="border p-1 rounded text-sm"
-                        value={q.question_name} onChange={e => updateQ(i, { question_name: e.target.value })} />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 items-center">
-                      <select className="border p-1 rounded text-sm" value={q.type}
-                        onChange={e => updateQ(i, { type: e.target.value as SurveyQuestion['type'] })}>
-                        <option value="text">Text</option>
-                        <option value="textarea">Textarea</option>
-                        <option value="password">Password</option>
-                        <option value="integer">Integer</option>
-                        <option value="multiplechoice">Multiple choice</option>
-                      </select>
-                      <input placeholder="default" className="border p-1 rounded text-sm"
-                        value={q.default || ''} onChange={e => updateQ(i, { default: e.target.value })} />
-                      <label className="flex items-center gap-1 text-xs text-gray-600">
-                        <input type="checkbox" checked={q.required} onChange={e => updateQ(i, { required: e.target.checked })} />
-                        Required
-                      </label>
-                    </div>
-                    {q.type === 'multiplechoice' && (
-                      <textarea rows={2} placeholder="one choice per line" className="w-full border p-1 rounded text-sm"
-                        value={q.choices || ''} onChange={e => updateQ(i, { choices: e.target.value })} />
-                    )}
-                    <button type="button" className="text-xs text-red-600 hover:underline"
-                      onClick={() => setSurvey(survey.filter((_, j) => j !== i))}>Remove question</button>
-                  </div>
-                ))}
-                <Button type="button" variant="secondary" onClick={() => setSurvey([...survey, blankQuestion()])}>+ Add question</Button>
+          <div className="flex-1 overflow-auto scroll-tint px-2.5 pb-6">
+            {editing === 'new' && (
+              <div className="p-2.5 rounded-lg bg-acc/[0.09] shadow-[inset_0_0_0_1px_rgba(77,224,200,0.5)]">
+                <div className="flex items-center gap-2"><span className="text-[13px] font-medium text-ink">{formData.name || 'New template'}</span><span className="ml-auto font-mono text-[9px] text-acc uppercase tracking-[0.1em]">new</span></div>
               </div>
             )}
+            {shown.map(t => {
+              const sel = editing === t.id;
+              const inv = inventories.find(i => i.id === t.inventory_id);
+              return (
+                <button key={t.id} onClick={() => startEdit(t)} className={`w-full text-left p-2.5 rounded-lg flex flex-col gap-1 ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>
+                  <div className="flex items-center gap-2"><span className={`text-[13px] font-medium ${sel ? 'text-ink' : 'text-ink2'}`}>{t.name}</span></div>
+                  <div className="font-mono text-[10.5px] text-dim truncate">{t.playbook || '—'}<span className="text-faint mx-1.5">›</span>{inv?.name || 'no inventory'}</div>
+                </button>
+              );
+            })}
+            {shown.length === 0 && editing !== 'new' && <p className="px-3 py-6 text-[12px] text-dim text-center">No templates.</p>}
           </div>
-          {editingTemplate && (
-            <div className="border-t pt-3">
-              <p className="text-sm font-medium text-gray-700 mb-2">Notifications</p>
-              {notifTargets.length === 0 && (
-                <p className="text-xs text-gray-500 mb-2">No notification targets in this organization yet — add one below.</p>
-              )}
-              {notifTargets.map(nt => (
-                <div key={nt.id} className="flex items-center gap-3 text-sm py-1">
-                  <span className="flex-1 truncate">{nt.name} <span className="text-xs text-gray-400">({nt.notification_type})</span></span>
-                  {['success', 'error', 'started'].map(ev => (
-                    <label key={ev} className="flex items-center gap-1 text-xs text-gray-600">
-                      <input type="checkbox" checked={isAttached(nt.id, ev)} onChange={() => toggleNotif(nt.id, ev)} />
-                      {ev}
-                    </label>
-                  ))}
-                </div>
-              ))}
-              <div className="flex flex-wrap gap-2 mt-2 items-center">
-                <input placeholder="name" className="border p-1 rounded text-sm w-1/4"
-                  value={newNotif.name} onChange={e => setNewNotif({ ...newNotif, name: e.target.value })} />
-                <select className="border p-1 rounded text-sm"
-                  value={newNotif.notification_type}
-                  onChange={e => setNewNotif({ ...newNotif, notification_type: e.target.value, config: {} })}>
-                  {(notifTypes.length ? notifTypes.map(t => t.type) : ['webhook', 'slack']).map((tp: string) => (
-                    <option key={tp} value={tp}>{tp.charAt(0).toUpperCase() + tp.slice(1)}</option>
-                  ))}
-                </select>
-                {/* Inputs rendered from the selected backend's config schema. */}
-                {notifFields().map(f => (
-                  <input key={f.id} placeholder={f.label}
-                    type={f.type === 'password' ? 'password' : 'text'}
-                    className="border p-1 rounded text-sm flex-1 min-w-[120px]"
-                    value={newNotif.config[f.id] || ''}
-                    onChange={e => setNewNotif({ ...newNotif, config: { ...newNotif.config, [f.id]: e.target.value } })} />
-                ))}
-                <Button type="button" variant="secondary" onClick={addNotifTarget}>Add</Button>
+        </div>
+
+        {/* Editor */}
+        {editing === null ? (
+          <div className="grid place-items-center text-dim">
+            <div className="text-center">
+              <Rocket size={38} className="mx-auto mb-3 opacity-20" />
+              <p className="text-sm mb-4">Select a template to edit, or create one.</p>
+              <Button icon={<Plus size={15} />} onClick={startNew}>New template</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col min-h-0 bg-bg">
+            <div className="flex items-start gap-5 px-10 pt-5 pb-4 border-b border-line shrink-0 max-[820px]:px-5">
+              <div className="flex-1 min-w-0">
+                <input value={formData.name || ''} onChange={e => set({ name: e.target.value })} placeholder="Template name"
+                  className="w-full text-[22px] font-semibold tracking-tight text-ink bg-transparent border-b border-transparent hover:border-line focus:border-acc pb-1 outline-none" />
+                <input value={formData.description || ''} onChange={e => set({ description: e.target.value })} placeholder="Describe what this template does…"
+                  className="w-full mt-2 text-[12.5px] text-mut bg-transparent border-b border-transparent hover:border-line focus:border-acc pb-0.5 outline-none" />
+              </div>
+              <div className="flex items-center gap-2.5 pt-1.5 shrink-0">
+                {typeof editing === 'number' && <button onClick={() => openLaunch(templates.find(t => t.id === editing)!)} className="h-[34px] px-3.5 rounded-lg text-[12.5px] font-medium flex items-center gap-1.5 border border-line2 text-ink2 hover:border-white/25"><Play size={13} /> Launch</button>}
+                <button onClick={() => setEditing(null)} className="h-[34px] px-3.5 rounded-lg text-[12.5px] font-medium border border-line2 text-ink2 hover:border-white/25">Cancel</button>
+                <Button onClick={save} disabled={saving} icon={<Check size={14} />}>Save</Button>
               </div>
             </div>
-          )}
-          <div className="border-t pt-3">
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-              <input
-                type="checkbox"
-                checked={!!formData.webhook_enabled}
-                onChange={e => setFormData({ ...formData, webhook_enabled: e.target.checked })}
-              />
-              Enable webhook trigger
-            </label>
-            {formData.webhook_enabled && (
-              <div className="space-y-2">
-                <select className="border p-1 rounded text-sm"
-                  value={formData.webhook_service || 'generic'}
-                  onChange={e => setFormData({ ...formData, webhook_service: e.target.value })}>
-                  <option value="github">GitHub</option>
-                  <option value="gitlab">GitLab</option>
-                  <option value="generic">Generic</option>
-                </select>
-                {editingTemplate && formData.webhook_key ? (
-                  <div className="text-xs text-gray-600 space-y-1">
-                    <div>URL: <code className="bg-gray-100 px-1 break-all">{window.location.origin}/api/v1/webhooks/job-templates/{editingTemplate.id}/{formData.webhook_service || 'generic'}</code></div>
-                    <div>Secret: <code className="bg-gray-100 px-1 break-all">{formData.webhook_key}</code></div>
-                    <p className="text-gray-400">Configure this URL + secret in your Git provider (GitHub HMAC, GitLab token, or generic X-Praetor-Token).</p>
+
+            <div className="flex-1 overflow-auto scroll-tint px-10 py-6 max-[820px]:px-5">
+              <div className="max-w-[640px]">
+                {/* What it runs */}
+                <div>
+                  <SLabel>What it runs</SLabel>
+                  <Row label="Project">
+                    <select className={usel} value={formData.project_id || ''} onChange={e => set({ project_id: Number(e.target.value) })}>
+                      <option value="" className="bg-panel">Select project</option>
+                      {projects.map(p => <option key={p.id} value={p.id} className="bg-panel">{p.name}</option>)}
+                    </select>
+                  </Row>
+                  <Row label="Playbook" hint="path within the project repo">
+                    <input className={uinp} placeholder="site.yml" value={formData.playbook || ''} onChange={e => set({ playbook: e.target.value })} />
+                  </Row>
+                  <Row label="Inventory">
+                    <select className={usel} value={formData.inventory_id || ''} onChange={e => set({ inventory_id: Number(e.target.value) })}>
+                      <option value="" className="bg-panel">Select inventory</option>
+                      {inventories.map(i => <option key={i.id} value={i.id} className="bg-panel">{i.name}</option>)}
+                    </select>
+                  </Row>
+                  <Row label="Credential">
+                    <select className={usel} value={formData.credential_id || ''} onChange={e => set({ credential_id: Number(e.target.value) })}>
+                      <option value="" className="bg-panel">Select credential</option>
+                      {credentials.map(c => <option key={c.id} value={c.id} className="bg-panel">{c.name}</option>)}
+                    </select>
+                  </Row>
+                  <Row label="Execution pack" hint="runtime pushed to the host">
+                    <select className={usel} value={formData.execution_pack_id || ''} onChange={e => set({ execution_pack_id: e.target.value ? Number(e.target.value) : undefined })}>
+                      <option value="" className="bg-panel">Default pack</option>
+                      {executionPacks.map(p => <option key={p.id} value={p.id} className="bg-panel">{p.name}</option>)}
+                    </select>
+                  </Row>
+                </div>
+
+                {/* Defaults */}
+                <div className="mt-8 pt-6 border-t border-line">
+                  <SLabel>Defaults</SLabel>
+                  <Row label="Variables" hint="applied unless overridden at launch" top>
+                    <textarea className="w-full max-w-[420px] rounded-lg border border-line bg-[#070809] p-3 font-mono text-[12.5px] leading-relaxed text-ink2 outline-none focus:border-acc/50" rows={4}
+                      placeholder={'{\n  "app_env": "production"\n}'} value={varsText} onChange={e => setVarsText(e.target.value)} />
+                  </Row>
+                  <Row label="Limit" hint="default host pattern">
+                    <input className={`${uinp} max-w-[150px]`} placeholder="web*" value={formData.limit || ''} onChange={e => set({ limit: e.target.value })} />
+                  </Row>
+                  <TogRow title="Use fact cache" sub="persist & reuse gathered facts across runs" on={!!formData.use_fact_cache} onChange={v => set({ use_fact_cache: v })} />
+                  <TogRow title="Allow simultaneous runs" sub="off = a launch is refused while a run is active" on={!!formData.allow_simultaneous} onChange={v => set({ allow_simultaneous: v })} />
+                </div>
+
+                {/* Prompt on launch */}
+                <div className="mt-8 pt-6 border-t border-line">
+                  <SLabel>Prompt on launch</SLabel>
+                  <TogRow title="Ask for variables" sub="let the operator pass extra_vars at launch" on={!!formData.ask_variables_on_launch} onChange={v => set({ ask_variables_on_launch: v })} />
+                  <TogRow title="Ask for limit" sub="let the operator narrow the host pattern" on={!!formData.ask_limit_on_launch} onChange={v => set({ ask_limit_on_launch: v })} />
+                  <TogRow title="Enable survey" sub="collect structured answers before the run" on={!!formData.survey_enabled} onChange={v => set({ survey_enabled: v })} />
+
+                  {formData.survey_enabled && (
+                    <div className="mt-3 space-y-3">
+                      {survey.map((q, i) => (
+                        <div key={i} className="rounded-xl border border-line bg-panel2 p-3.5">
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                            <SurveyField label="Variable"><input className={`${uinp} max-w-none`} placeholder="app_version" value={q.variable} onChange={e => updateQ(i, { variable: e.target.value })} /></SurveyField>
+                            <SurveyField label="Question"><input className={`${uinp} max-w-none`} placeholder="Which release?" value={q.question_name} onChange={e => updateQ(i, { question_name: e.target.value })} /></SurveyField>
+                            <SurveyField label="Type">
+                              <select className={`${usel} min-w-0 max-w-none`} value={q.type} onChange={e => updateQ(i, { type: e.target.value as SurveyQuestion['type'] })}>
+                                {['text', 'textarea', 'password', 'integer', 'multiplechoice'].map(t => <option key={t} value={t} className="bg-panel">{t}</option>)}
+                              </select>
+                            </SurveyField>
+                            <SurveyField label="Default"><input className={`${uinp} max-w-none`} value={q.default || ''} onChange={e => updateQ(i, { default: e.target.value })} /></SurveyField>
+                          </div>
+                          {q.type === 'multiplechoice' && (
+                            <textarea rows={2} placeholder="one choice per line" className="mt-3 w-full rounded-lg border border-line bg-[#070809] p-2 font-mono text-[12px] text-ink2 outline-none focus:border-acc/50" value={q.choices || ''} onChange={e => updateQ(i, { choices: e.target.value })} />
+                          )}
+                          <div className="flex items-center gap-5 mt-3 pt-3 border-t border-line">
+                            <label className="flex items-center gap-2 font-mono text-[11px] text-mut cursor-pointer"><Toggle on={q.required} onChange={v => updateQ(i, { required: v })} /> Required</label>
+                            <button type="button" className="ml-auto font-mono text-[11px] text-err hover:underline" onClick={() => setSurvey(survey.filter((_, j) => j !== i))}>remove</button>
+                          </div>
+                        </div>
+                      ))}
+                      <button type="button" className="flex items-center gap-2 font-mono text-[12px] text-dim hover:text-acc" onClick={() => setSurvey([...survey, blankQuestion()])}><Plus size={13} /> add question</button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Notifications (edit only) */}
+                {typeof editing === 'number' && (
+                  <div className="mt-8 pt-6 border-t border-line">
+                    <SLabel>Notifications</SLabel>
+                    {notifTargets.length === 0 && <p className="font-mono text-[11px] text-dim mb-2">No notification targets in this org yet — add one below.</p>}
+                    {notifTargets.map(nt => (
+                      <div key={nt.id} className="flex items-center gap-3 py-1.5 text-[13px]">
+                        <span className="flex-1 truncate">{nt.name} <span className="font-mono text-[11px] text-dim">({nt.notification_type})</span></span>
+                        {['success', 'error', 'started'].map(ev => (
+                          <label key={ev} className="flex items-center gap-1.5 font-mono text-[11px] text-mut cursor-pointer">
+                            <input type="checkbox" className="accent-acc" checked={isAttached(nt.id, ev)} onChange={() => toggleNotif(nt.id, ev)} /> {ev}
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                    <div className="flex flex-wrap gap-2 mt-3 items-center">
+                      <input placeholder="name" className={`${uinp} max-w-[140px]`} value={newNotif.name} onChange={e => setNewNotif({ ...newNotif, name: e.target.value })} />
+                      <select className={`${usel} min-w-0 max-w-[130px]`} value={newNotif.notification_type} onChange={e => setNewNotif({ ...newNotif, notification_type: e.target.value, config: {} })}>
+                        {(notifTypes.length ? notifTypes.map(t => t.type) : ['webhook', 'slack']).map((tp: string) => <option key={tp} value={tp} className="bg-panel">{tp}</option>)}
+                      </select>
+                      {notifFields().map(f => (
+                        <input key={f.id} placeholder={f.label} type={f.type === 'password' ? 'password' : 'text'} className={`${uinp} flex-1 min-w-[120px] max-w-none`}
+                          value={newNotif.config[f.id] || ''} onChange={e => setNewNotif({ ...newNotif, config: { ...newNotif.config, [f.id]: e.target.value } })} />
+                      ))}
+                      <Button size="sm" variant="secondary" type="button" onClick={addNotifTarget}>Add</Button>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-gray-400">Save the template to generate the webhook URL and secret.</p>
+                )}
+
+                {/* Webhook trigger */}
+                <div className="mt-8 pt-6 border-t border-line">
+                  <TogRow title="Enable webhook trigger" sub="launch this template from an inbound Git webhook" on={!!formData.webhook_enabled} onChange={v => set({ webhook_enabled: v })} />
+                  {formData.webhook_enabled && (
+                    <div className="mt-2 space-y-2">
+                      <select className={`${usel} min-w-0 max-w-[160px]`} value={formData.webhook_service || 'generic'} onChange={e => set({ webhook_service: e.target.value })}>
+                        <option value="github" className="bg-panel">GitHub</option>
+                        <option value="gitlab" className="bg-panel">GitLab</option>
+                        <option value="generic" className="bg-panel">Generic</option>
+                      </select>
+                      {typeof editing === 'number' && formData.webhook_key ? (
+                        <div className="font-mono text-[11px] text-mut space-y-1 rounded-lg border border-line bg-panel2 p-3">
+                          <div>URL: <span className="text-ink2 break-all">{window.location.origin}/api/v1/webhooks/job-templates/{editing}/{formData.webhook_service || 'generic'}</span></div>
+                          <div>Secret: <span className="text-ink2 break-all">{formData.webhook_key}</span></div>
+                        </div>
+                      ) : <p className="font-mono text-[11px] text-dim">Save the template to generate the webhook URL and secret.</p>}
+                    </div>
+                  )}
+                </div>
+
+                {formMsg && <p className="mt-5 text-sm text-err">{formMsg}</p>}
+                {typeof editing === 'number' && (
+                  <div className="mt-8 pt-6 border-t border-line">
+                    <button onClick={() => remove(editing)} className="flex items-center gap-2 text-[12.5px] text-err/90 hover:text-err"><Trash2 size={14} /> Delete template</button>
+                  </div>
                 )}
               </div>
-            )}
+            </div>
           </div>
-          {formMsg && <p className="mt-4 text-sm text-red-600">{formMsg}</p>}
-          <div className="mt-5 flex justify-end gap-3">
-            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-            <Button type="submit">Save Template</Button>
-          </div>
-        </form>
-      </Modal>
+        )}
+      </div>
 
-      <Modal
-        isOpen={!!launchTpl}
-        onClose={() => setLaunchTpl(null)}
-        title={launchTpl ? `Launch: ${launchTpl.name}` : 'Launch'}
-        size="md"
-      >
+      {/* Launch modal */}
+      <Modal isOpen={!!launchTpl} onClose={() => setLaunchTpl(null)} title={launchTpl ? `Launch: ${launchTpl.name}` : 'Launch'} size="md">
         {launchTpl && (
           <div className="space-y-4">
-            {!launchTpl.survey_enabled && !launchTpl.ask_variables_on_launch && !launchTpl.ask_limit_on_launch && (
-              <p className="text-sm text-gray-500">This template runs with its saved configuration.</p>
-            )}
+            {!launchTpl.survey_enabled && !launchTpl.ask_variables_on_launch && !launchTpl.ask_limit_on_launch && <p className="text-sm text-mut">This template runs with its saved configuration.</p>}
             {launchTpl.survey_enabled && (launchTpl.survey_spec?.spec || []).map((q, i) => {
               const label = q.question_name || q.variable;
-              if (q.type === 'textarea') return (
-                <Textarea key={i} label={label} required={q.required} rows={3}
-                  value={launchAnswers[q.variable] || ''}
-                  onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
-              );
+              if (q.type === 'textarea') return <Textarea key={i} label={label} required={q.required} rows={3} value={launchAnswers[q.variable] || ''} onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />;
               if (q.type === 'multiplechoice') return (
-                <Select key={i} label={label} required={q.required}
-                  value={launchAnswers[q.variable] || ''}
-                  onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })}>
+                <Select key={i} label={label} required={q.required} value={launchAnswers[q.variable] || ''} onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })}>
                   <option value="">Select…</option>
                   {(q.choices || '').split('\n').map(c => c.trim()).filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
                 </Select>
               );
-              return (
-                <Input key={i} label={label} required={q.required}
-                  type={q.type === 'password' ? 'password' : q.type === 'integer' ? 'number' : 'text'}
-                  value={launchAnswers[q.variable] || ''}
-                  onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />
-              );
+              return <Input key={i} label={label} required={q.required} type={q.type === 'password' ? 'password' : q.type === 'integer' ? 'number' : 'text'} value={launchAnswers[q.variable] || ''} onChange={e => setLaunchAnswers({ ...launchAnswers, [q.variable]: e.target.value })} />;
             })}
-            {!launchTpl.survey_enabled && launchTpl.ask_variables_on_launch && (
-              <Textarea label="Variables (JSON)" rows={4} placeholder={'{\n  "key": "value"\n}'} className="font-mono text-sm"
-                value={launchVars} onChange={e => setLaunchVars(e.target.value)} />
-            )}
-            {launchTpl.ask_limit_on_launch && (
-              <Input label="Limit" type="text" placeholder="host pattern"
-                value={launchLimit} onChange={e => setLaunchLimit(e.target.value)} />
-            )}
-            {launchMsg && <p className="text-sm text-red-600">{launchMsg}</p>}
-            <div className="mt-5 flex justify-end gap-3">
-              <Button type="button" variant="secondary" onClick={() => setLaunchTpl(null)}>Cancel</Button>
-              <Button type="button" onClick={handleLaunch}>Launch</Button>
-            </div>
+            {!launchTpl.survey_enabled && launchTpl.ask_variables_on_launch && <Textarea label="Variables (JSON)" rows={4} placeholder={'{\n  "key": "value"\n}'} className="font-mono text-sm" value={launchVars} onChange={e => setLaunchVars(e.target.value)} />}
+            {launchTpl.ask_limit_on_launch && <Input label="Limit" placeholder="host pattern" value={launchLimit} onChange={e => setLaunchLimit(e.target.value)} />}
+            {launchMsg && <p className="text-sm text-err">{launchMsg}</p>}
+            <div className="mt-5 flex justify-end gap-3"><Button variant="secondary" onClick={() => setLaunchTpl(null)}>Cancel</Button><Button onClick={doLaunch} icon={<Play size={14} />}>Launch</Button></div>
           </div>
         )}
       </Modal>
     </div>
   );
 };
+
+const SurveyField: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div>
+    <div className="font-mono text-[9px] tracking-[0.12em] uppercase text-dim mb-1.5">{label}</div>
+    {children}
+  </div>
+);
 
 export default TemplatesPage;

@@ -23,10 +23,10 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 
-	"github.com/praetordev/praetor/pkg/credentials"
-	"github.com/praetordev/praetor/pkg/events"
-	"github.com/praetordev/praetor/pkg/hostconn"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/credentials"
+	"github.com/praetordev/events"
+	"github.com/praetordev/hostconn"
+	"github.com/praetordev/plog"
 	"golang.org/x/crypto/ssh"
 )
 

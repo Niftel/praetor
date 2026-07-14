@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/praetordev/praetor/pkg/runtoken"
+	"github.com/praetordev/runtoken"
 )
 
 const testSecret = "test-internal-secret"

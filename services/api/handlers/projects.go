@@ -11,10 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // ProjectStore is the projects-domain data access the handler depends on.
@@ -36,19 +36,22 @@ type ProjectsResource struct {
 	store ProjectStore
 }
 
-func NewProjectsResource(db *sqlx.DB) *ProjectsResource {
-	return &ProjectsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewProjectStore(db)}
+func NewProjectsResource(db *sqlx.DB, authz *Authorizer) *ProjectsResource {
+	return &ProjectsResource{DB: db, Authorizer: authz, store: store.NewProjectStore(db)}
 }
 
 // ListProjects GET /api/v1/projects
 func (h *ProjectsResource) ListProjects(w http.ResponseWriter, r *http.Request) {
 	pg := render.ParsePagination(r)
-	uc := currentUser(r)
-
 	var projects []models.Project
 	var total int64
 
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := h.canViewAll(r, rbac.ContentTypeProject)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		var err error
 		if projects, err = h.store.ListAll(r.Context(), pg.Limit, pg.Offset); err != nil {
 			render.ErrInternal(err).Render(w, r)

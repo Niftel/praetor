@@ -10,8 +10,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/crypto"
-	"github.com/praetordev/praetor/services/api/render"
+	"github.com/praetordev/crypto"
+	"github.com/praetordev/render"
 )
 
 // jwtSecret is resolved at package init. A misconfiguration (unset JWT_SECRET

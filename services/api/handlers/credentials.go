@@ -8,11 +8,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/crypto"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/crypto"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // CredentialStore is the credentials-domain data access the handler depends on.
@@ -32,8 +32,8 @@ type CredentialsResource struct {
 	store CredentialStore
 }
 
-func NewCredentialsResource(db *sqlx.DB) *CredentialsResource {
-	return &CredentialsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewCredentialStore(db)}
+func NewCredentialsResource(db *sqlx.DB, authz *Authorizer) *CredentialsResource {
+	return &CredentialsResource{DB: db, Authorizer: authz, store: store.NewCredentialStore(db)}
 }
 
 func (rs *CredentialsResource) Routes() chi.Router {
@@ -47,10 +47,13 @@ func (rs *CredentialsResource) Routes() chi.Router {
 }
 
 func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Request) {
-	uc := currentUser(r)
-
 	var creds []models.Credential
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeCredential)
+	if verr != nil {
+		render.ErrInternal(verr).Render(w, r)
+		return
+	}
+	if viewAll {
 		var err error
 		if creds, err = rs.store.ListAll(r.Context()); err != nil {
 			render.ErrInternal(err).Render(w, r)

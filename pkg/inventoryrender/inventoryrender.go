@@ -12,53 +12,40 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
+	"github.com/praetordev/store"
 )
 
 // Render returns the INI inventory for an inventory's enabled hosts and groups.
 // An inventory with no hosts renders to the empty string (the executor treats
 // that as localhost). Group memberships are fetched in a single batched query.
+//
+// The reads go through the shared store (github.com/praetordev/store), the same
+// data-access layer the API uses, so the explicit dispatch-path column lists live
+// in exactly one place (#91) instead of being duplicated here.
 func Render(ctx context.Context, db *sqlx.DB, inventoryID int64) (string, error) {
-	// Explicit column lists (never SELECT *): this runs on the dispatch path — the
-	// executor fetches the rendered inventory by reference at every job dispatch —
-	// so a `SELECT *` here turns any new hosts/groups column into a runtime scan
-	// failure ("missing destination name X") that stops jobs from launching (#91).
-	var hosts []models.Host
-	if err := db.SelectContext(ctx, &hosts,
-		`SELECT `+models.HostCols+` FROM hosts WHERE inventory_id = $1 AND enabled = true`, inventoryID); err != nil {
+	hosts := store.NewHostStore(db)
+	groups := store.NewGroupStore(db)
+
+	hostList, err := hosts.ListEnabledByInventory(ctx, inventoryID)
+	if err != nil {
 		return "", fmt.Errorf("fetch hosts: %w", err)
 	}
-	var groups []models.Group
-	if err := db.SelectContext(ctx, &groups,
-		`SELECT `+models.GroupCols+` FROM groups WHERE inventory_id = $1`, inventoryID); err != nil {
+	groupList, err := groups.ListByInventory(ctx, inventoryID)
+	if err != nil {
 		return "", fmt.Errorf("fetch groups: %w", err)
 	}
 
-	// All group memberships in one query (not one per group), keyed by group id.
-	membersByGroup := make(map[int64][]int64, len(groups))
-	if len(groups) > 0 {
-		groupIDs := make([]int64, len(groups))
-		for i, g := range groups {
-			groupIDs[i] = g.ID
-		}
-		q, args, err := sqlx.In(`SELECT group_id, host_id FROM host_groups WHERE group_id IN (?)`, groupIDs)
-		if err != nil {
-			return "", fmt.Errorf("build memberships query: %w", err)
-		}
-		q = db.Rebind(q)
-		rows := []struct {
-			GroupID int64 `db:"group_id"`
-			HostID  int64 `db:"host_id"`
-		}{}
-		if err := db.SelectContext(ctx, &rows, q, args...); err != nil {
-			return "", fmt.Errorf("fetch memberships: %w", err)
-		}
-		for _, r := range rows {
-			membersByGroup[r.GroupID] = append(membersByGroup[r.GroupID], r.HostID)
-		}
+	groupIDs := make([]int64, len(groupList))
+	for i, g := range groupList {
+		groupIDs[i] = g.ID
+	}
+	membersByGroup, err := groups.MembershipsByGroups(ctx, groupIDs)
+	if err != nil {
+		return "", fmt.Errorf("fetch memberships: %w", err)
 	}
 
-	return build(hosts, groups, membersByGroup), nil
+	return build(hostList, groupList, membersByGroup), nil
 }
 
 // Facts returns the stored ansible_facts for every host in an inventory, keyed by
@@ -66,31 +53,7 @@ func Render(ctx context.Context, db *sqlx.DB, inventoryID int64) (string, error)
 // Nil when the inventory has no stored facts. Fetched by reference at dispatch
 // (like the INI) so it doesn't bloat the outbox/NATS message (#48).
 func Facts(ctx context.Context, db *sqlx.DB, inventoryID int64) (map[string]json.RawMessage, error) {
-	rows, err := db.QueryxContext(ctx, `
-		SELECT h.name, hf.facts
-		FROM host_facts hf JOIN hosts h ON h.id = hf.host_id
-		WHERE h.inventory_id = $1`, inventoryID)
-	if err != nil {
-		return nil, fmt.Errorf("fetch host facts: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[string]json.RawMessage{}
-	for rows.Next() {
-		var name string
-		var facts []byte
-		if err := rows.Scan(&name, &facts); err != nil {
-			return nil, err
-		}
-		out[name] = json.RawMessage(facts)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
+	return store.NewHostStore(db).FactsByInventory(ctx, inventoryID)
 }
 
 // build renders the INI from already-fetched data (pure; O(hosts+members)).

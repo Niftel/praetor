@@ -13,7 +13,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/launch"
+	"github.com/praetordev/launch"
 )
 
 // TestWorkflowNotificationsFire proves the scheduler dispatches every workflow

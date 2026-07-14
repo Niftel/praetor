@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/events"
-	"github.com/praetordev/praetor/pkg/notify"
+	"github.com/praetordev/events"
+	"github.com/praetordev/notify"
 )
 
 // Notifier dispatches notifications when a job reaches a lifecycle event. It is

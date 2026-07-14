@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 	natsbus "github.com/praetordev/praetor/pkg/transport/nats"
 )
 

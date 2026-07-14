@@ -1,7 +1,7 @@
 package core
 
 import (
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // EventSubscriber defines how the executor listens for jobs.

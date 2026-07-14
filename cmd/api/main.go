@@ -5,10 +5,10 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/praetordev/praetor/pkg/crypto"
-	"github.com/praetordev/praetor/pkg/db"
-	"github.com/praetordev/praetor/pkg/env"
-	"github.com/praetordev/praetor/pkg/plog"
+	"github.com/praetordev/crypto"
+	"github.com/praetordev/db"
+	"github.com/praetordev/env"
+	"github.com/praetordev/plog"
 	"github.com/praetordev/praetor/services/api"
 )
 

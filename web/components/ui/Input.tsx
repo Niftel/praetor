@@ -5,9 +5,10 @@ import React, { useId } from 'react';
 // input styles and the missing label associations across the app.
 
 const controlBase =
-  'block w-full rounded-md border border-gray-300 shadow-sm p-2 text-sm ' +
-  'focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none ' +
-  'disabled:bg-gray-50 disabled:text-gray-500';
+  'block w-full rounded-lg border border-line2 bg-panel px-3 py-2 text-sm text-ink ' +
+  'placeholder:text-dim transition-[border-color,box-shadow] duration-150 ' +
+  'focus:border-acc/60 focus:ring-2 focus:ring-acc/25 focus:outline-none ' +
+  'disabled:bg-panel2 disabled:text-dim disabled:cursor-not-allowed';
 
 interface FieldWrapProps {
   label?: string;
@@ -25,14 +26,14 @@ interface FieldWrapProps {
 const Field: React.FC<FieldWrapProps> = ({ label, hint, error, required, id, wrapperClassName, children }) => (
   <div className={wrapperClassName}>
     {label && (
-      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
+      <label htmlFor={id} className="block text-sm font-medium text-ink2 mb-1">
         {label}
-        {required && <span className="text-red-500"> *</span>}
+        {required && <span className="text-err"> *</span>}
       </label>
     )}
     {children(id)}
-    {hint && !error && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
-    {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    {hint && !error && <p className="mt-1 text-xs text-mut">{hint}</p>}
+    {error && <p className="mt-1 text-xs text-err">{error}</p>}
   </div>
 );
 
@@ -51,7 +52,7 @@ export const Input: React.FC<InputProps> = ({ label, hint, error, className = ''
       {(fid) => (
         <input
           id={fid}
-          className={`${controlBase} ${error ? 'border-red-400' : ''} ${className}`}
+          className={`${controlBase} ${error ? 'border-err' : ''} ${className}`}
           aria-invalid={error ? true : undefined}
           {...rest}
         />
@@ -75,7 +76,7 @@ export const Textarea: React.FC<TextareaProps> = ({ label, hint, error, classNam
       {(fid) => (
         <textarea
           id={fid}
-          className={`${controlBase} ${error ? 'border-red-400' : ''} ${className}`}
+          className={`${controlBase} ${error ? 'border-err' : ''} ${className}`}
           aria-invalid={error ? true : undefined}
           {...rest}
         />
@@ -99,7 +100,7 @@ export const Select: React.FC<SelectProps> = ({ label, hint, error, className = 
       {(fid) => (
         <select
           id={fid}
-          className={`${controlBase} bg-white ${error ? 'border-red-400' : ''} ${className}`}
+          className={`${controlBase} bg-panel ${error ? 'border-err' : ''} ${className}`}
           aria-invalid={error ? true : undefined}
           {...rest}
         >

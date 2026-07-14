@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/events"
-	"github.com/praetordev/praetor/pkg/launch"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/events"
+	"github.com/praetordev/launch"
+	"github.com/praetordev/models"
 )
 
 // manifest.go owns turning a claimed unified_job into an execution manifest —

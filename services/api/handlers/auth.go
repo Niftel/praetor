@@ -8,10 +8,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/auth"
-	"github.com/praetordev/praetor/pkg/crypto"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/crypto"
+	"github.com/praetordev/models"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -28,8 +28,8 @@ type AuthResource struct {
 	LDAPConfigPath string
 }
 
-func NewAuthResource(db *sqlx.DB) *AuthResource {
-	return &AuthResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewUserStore(db)}
+func NewAuthResource(db *sqlx.DB, authz *Authorizer) *AuthResource {
+	return &AuthResource{DB: db, Authorizer: authz, store: store.NewUserStore(db)}
 }
 
 var jwtSecret = []byte(getJWTSecret())

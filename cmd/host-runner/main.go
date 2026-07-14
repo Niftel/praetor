@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 var (

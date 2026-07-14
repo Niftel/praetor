@@ -9,10 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/notify"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/notify"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // NotificationStore is the notifications data access shared by the notifications
@@ -40,8 +40,8 @@ type NotificationsResource struct {
 	store NotificationStore
 }
 
-func NewNotificationsResource(db *sqlx.DB) *NotificationsResource {
-	return &NotificationsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewNotificationStore(db)}
+func NewNotificationsResource(db *sqlx.DB, authz *Authorizer) *NotificationsResource {
+	return &NotificationsResource{DB: db, Authorizer: authz, store: store.NewNotificationStore(db)}
 }
 
 // ListNotificationTemplates GET /api/v1/notification-templates?organization_id=N

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import Layout from './components/Layout';
+import Shell from './components/Shell';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import JobsPage from './pages/JobsPage';
 import JobDetailPage from './pages/JobDetailPage';
 import TemplatesPage from './pages/TemplatesPage';
 import WorkflowsPage from './pages/WorkflowsPage';
+import WorkflowBuilderPage from './pages/WorkflowBuilderPage';
 import WorkflowRunPage from './pages/WorkflowRunPage';
 import ProjectsPage from './pages/ProjectsPage';
 import InventoriesPage from './pages/InventoriesPage';
@@ -21,6 +22,7 @@ import OrganizationsPage from './pages/OrganizationsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
 import SettingsPage from './pages/SettingsPage';
 import { ProjectsLanding, InventoriesLanding, TemplatesLanding, WorkflowsLanding, CredentialsLanding, SchedulesLanding } from './pages/landings';
+import WorkflowDagPreview from './pages/WorkflowDagPreview';
 import { ToastHost } from './components/ui/toast';
 import { getAuthToken, removeAuthToken } from './services/api';
 
@@ -43,9 +45,15 @@ const App = () => {
           element={!isAuthenticated ? <LoginPage onLogin={handleLogin} /> : <Navigate to="/" replace />}
         />
 
+        {/* Dev-only visual check for WorkflowDag — no auth, no backend. Stripped
+            from production builds via import.meta.env.DEV. */}
+        {import.meta.env.DEV && (
+          <Route path="/_preview/workflow-dag" element={<WorkflowDagPreview />} />
+        )}
+
         <Route
           path="/"
-          element={isAuthenticated ? <Layout onLogout={handleLogout} /> : <Navigate to="/login" replace />}
+          element={isAuthenticated ? <Shell onLogout={handleLogout} /> : <Navigate to="/login" replace />}
         >
           <Route index element={<DashboardPage />} />
           <Route path="jobs" element={<JobsPage />} />
@@ -55,6 +63,8 @@ const App = () => {
           <Route path="templates/org/:orgId" element={<TemplatesPage />} />
           <Route path="workflows" element={<WorkflowsLanding />} />
           <Route path="workflows/org/:orgId" element={<WorkflowsPage />} />
+          <Route path="workflows/org/:orgId/builder" element={<WorkflowBuilderPage />} />
+          <Route path="workflows/org/:orgId/builder/:workflowId" element={<WorkflowBuilderPage />} />
           <Route path="workflows/runs/:jobId" element={<WorkflowRunPage />} />
           <Route path="projects" element={<ProjectsLanding />} />
           <Route path="projects/org/:orgId" element={<ProjectsPage />} />

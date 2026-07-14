@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 func TestGalaxyEnv(t *testing.T) {

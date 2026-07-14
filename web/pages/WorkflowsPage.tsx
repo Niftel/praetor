@@ -1,23 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
-import { Workflow, WorkflowNode, WorkflowEdge, WorkflowNodeType, WorkflowEdgeType, WorkflowRunSummary } from '../types';
-import Card from '../components/ui/Card';
-import { Input, Select } from '../components/ui/Input';
-import Button from '../components/ui/Button';
-import Modal from '../components/ui/Modal';
-import Badge from '../components/ui/Badge';
-import WorkflowDag from '../components/WorkflowDag';
-import { Plus, Trash2, Rocket, Workflow as WorkflowIcon, RefreshCw, Eye, ChevronDown, ChevronRight, Pencil, ArrowLeft } from 'lucide-react';
+import { Workflow, WorkflowRunSummary } from '../types';
+import { Plus, Trash2, Rocket, GitFork, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 
-const EDGE_TYPES: WorkflowEdgeType[] = ['success', 'failure', 'always'];
-
-const statusVariant = (s: string): 'success' | 'error' | 'info' | 'neutral' => {
-  if (s === 'successful') return 'success';
-  if (s === 'failed' || s === 'error') return 'error';
-  if (s === 'running') return 'info';
-  return 'neutral';
+const runTone = (s: string): { text: string; dot: string } => {
+  if (s === 'successful') return { text: 'text-ok', dot: 'bg-ok' };
+  if (s === 'failed' || s === 'error') return { text: 'text-err', dot: 'bg-err' };
+  if (s === 'running' || s === 'pending') return { text: 'text-run', dot: 'bg-run' };
+  return { text: 'text-mut', dot: 'bg-dim' };
 };
 
 const WorkflowsPage = () => {
@@ -27,30 +19,30 @@ const WorkflowsPage = () => {
   const [orgName, setOrgName] = useState('');
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
-  const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Builder state
-  const [builderOpen, setBuilderOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [name, setName] = useState('');
-  const [nodes, setNodes] = useState<WorkflowNode[]>([]);
-  const [edges, setEdges] = useState<WorkflowEdge[]>([]);
-  const [nodeSeq, setNodeSeq] = useState(1);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  // Webhook trigger (a remote event launches the whole workflow)
-  const [whEnabled, setWhEnabled] = useState(false);
-  const [whService, setWhService] = useState('generic');
-  const [whKey, setWhKey] = useState('');
-  const [allowSim, setAllowSim] = useState(false);
-
-  // Template preview modal
-  const [viewWf, setViewWf] = useState<Workflow | null>(null);
-
-  // Recent runs grouped by workflow (runs arrive newest-first).
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
+
+  // silent=true for background polls so the list stays live without flashing the
+  // full-page spinner or disturbing scroll.
+  const load = (silent = false) => {
+    if (!silent) setLoading(true);
+    return Promise.all([
+      api.getWorkflows().catch(() => []),
+      api.getWorkflowJobs().catch(() => []),
+      api.getOrganizations().catch(() => ({})),
+    ]).then(([wf, rs, o]) => {
+      setWorkflows(unwrap<Workflow>(wf).filter(w => (w as any).organization_id === orgId));
+      setRuns(rs || []);
+      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
+    }).finally(() => { if (!silent) setLoading(false); });
+  };
+  useEffect(() => {
+    load();
+    const h = setInterval(() => load(true), 5000);
+    return () => clearInterval(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+
   const runGroups = useMemo(() => {
     const m = new Map<number, { id: number; name: string; runs: WorkflowRunSummary[] }>();
     for (const r of runs) {
@@ -61,341 +53,89 @@ const WorkflowsPage = () => {
   }, [runs]);
   const toggleGroup = (id: number) => setCollapsed(c => ({ ...c, [id]: !c[id] }));
 
-  const templateName = (id?: number | null) => {
-    const t = templates.find(t => t.id === id);
-    return t ? t.name : (id ? `template ${id}` : 'no template');
+  const launch = async (wf: Workflow) => {
+    try { const res = await api.launchWorkflow(wf.id); navigate(`/workflows/runs/${res.workflow_job_id}`); }
+    catch (e: any) { toast.error(e.message || 'Launch failed.'); }
   };
-
-  const load = () => {
-    setLoading(true);
-    Promise.all([
-      api.getWorkflows().catch(() => []),
-      api.getWorkflowJobs().catch(() => []),
-      api.getTemplates().catch(() => ({})),
-      api.getOrganizations().catch(() => ({})),
-    ]).then(([wf, rs, tpls, o]) => {
-      setWorkflows(unwrap<Workflow>(wf).filter(w => (w as any).organization_id === orgId));
-      setRuns(rs || []);
-      setTemplates(unwrap(tpls));
-      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
-    }).finally(() => setLoading(false));
+  const remove = async (wf: Workflow) => {
+    if (!(await confirmDialog(`Delete workflow "${wf.name}"?`, { destructive: true, confirmText: 'Delete' }))) return;
+    try { await api.deleteWorkflow(wf.id); setWorkflows(ws => ws.filter(w => w.id !== wf.id)); } catch { toast.error('Failed to delete'); }
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [orgId]);
-
-  // Builder helpers
-  const openBuilder = () => {
-    setEditingId(null);
-    setName(''); setNodes([]); setEdges([]); setNodeSeq(1); setError('');
-    setWhEnabled(false); setWhService('generic'); setWhKey(''); setAllowSim(false);
-    setBuilderOpen(true);
-  };
-  const openEdit = async (wf: Workflow) => {
-    setError('');
-    try {
-      const full = await api.getWorkflow(wf.id);
-      setEditingId(wf.id);
-      setName(full.name ?? wf.name);
-      const ns: WorkflowNode[] = (full.nodes || []).map((n: any) => ({
-        node_key: n.node_key, node_type: n.node_type, name: n.name || '',
-        job_template_id: n.job_template_id ?? null, webhook_url: n.webhook_url || '', webhook_body: n.webhook_body || '',
-      }));
-      setNodes(ns);
-      setEdges(full.edges || []);
-      // Continue node keys past the highest existing nN so new nodes don't collide.
-      const maxN = ns.reduce((m, n) => { const x = /^n(\d+)$/.exec(n.node_key); return x ? Math.max(m, +x[1]) : m; }, 0);
-      setNodeSeq(maxN + 1);
-      setWhEnabled(!!full.webhook_enabled);
-      setWhService(full.webhook_service || 'generic');
-      setAllowSim(!!full.allow_simultaneous);
-      setWhKey(''); // never returned; blank keeps the existing secret
-      setBuilderOpen(true);
-    } catch (e: any) { toast.error(e.message || 'Failed to load workflow for editing.'); }
-  };
-  const addNode = () => {
-    const key = `n${nodeSeq}`;
-    setNodeSeq(s => s + 1);
-    setNodes(ns => [...ns, { node_key: key, name: '', node_type: 'job', job_template_id: templates[0]?.id ?? null }]);
-  };
-  const updateNode = (key: string, patch: Partial<WorkflowNode>) => setNodes(ns => ns.map(n => n.node_key === key ? { ...n, ...patch } : n));
-  const removeNode = (key: string) => {
-    setNodes(ns => ns.filter(n => n.node_key !== key));
-    setEdges(es => es.filter(e => e.parent_key !== key && e.child_key !== key));
-  };
-  const addEdge = () => {
-    if (nodes.length < 2) return;
-    setEdges(es => [...es, { parent_key: nodes[0].node_key, child_key: nodes[1].node_key, edge_type: 'success' }]);
-  };
-  const updateEdge = (i: number, patch: Partial<WorkflowEdge>) => setEdges(es => es.map((e, idx) => idx === i ? { ...e, ...patch } : e));
-  const removeEdge = (i: number) => setEdges(es => es.filter((_, idx) => idx !== i));
-
-  const save = async () => {
-    setError('');
-    if (!name.trim()) return setError('Name is required.');
-    if (nodes.length === 0) return setError('Add at least one node.');
-    for (const n of nodes) {
-      if (!n.name.trim()) return setError('Every node needs a name.');
-      if (n.node_type === 'job' && !n.job_template_id) return setError(`Node "${n.name}" needs a job template.`);
-      if (n.node_type === 'webhook_out' && !n.webhook_url?.trim()) return setError(`Node "${n.name}" needs a URL to call.`);
-    }
-    if (whEnabled && !whKey.trim() && !editingId) return setError('A webhook trigger needs a secret key.');
-    for (const e of edges) if (e.parent_key === e.child_key) return setError('An edge cannot connect a node to itself.');
-    setSaving(true);
-    const payload = {
-      organization_id: orgId, name: name.trim(),
-      webhook_enabled: whEnabled,
-      webhook_service: whEnabled ? whService : '',
-      webhook_key: whEnabled ? whKey.trim() : '',
-      allow_simultaneous: allowSim,
-      nodes: nodes.map(n => ({
-        node_key: n.node_key, node_type: n.node_type, name: n.name.trim(),
-        job_template_id: n.node_type === 'job' ? n.job_template_id : null,
-        webhook_url: n.node_type === 'webhook_out' ? (n.webhook_url || '').trim() : '',
-        webhook_body: n.node_type === 'webhook_out' ? (n.webhook_body || '') : '',
-      })),
-      edges,
-    };
-    try {
-      if (editingId) await api.updateWorkflow(editingId, payload);
-      else await api.createWorkflow(payload);
-      setBuilderOpen(false);
-      load();
-    } catch (e: any) {
-      setError(e.message || `Failed to ${editingId ? 'update' : 'create'} workflow.`);
-    } finally { setSaving(false); }
-  };
-
-  const onView = async (wf: Workflow) => {
-    try { setViewWf({ ...wf, ...(await api.getWorkflow(wf.id)) }); } catch { /* ignore */ }
-  };
-  const onDelete = async (wf: Workflow) => {
-    if (!(await confirmDialog(`Delete workflow "${wf.name}"?`))) return;
-    try { await api.deleteWorkflow(wf.id); setWorkflows(ws => ws.filter(w => w.id !== wf.id)); } catch { /* ignore */ }
-  };
-  const onLaunch = async (wf: Workflow) => {
-    try {
-      const res = await api.launchWorkflow(wf.id);
-      navigate(`/workflows/runs/${res.workflow_job_id}`); // go straight to the persistent run page
-    } catch (e: any) { toast.error(e.message || 'Launch failed.'); }
-  };
+  const edit = (wf: Workflow) => navigate(`/workflows/org/${orgId}/builder/${wf.id}`);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <Link to="/workflows" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-brand-600">
-            <ArrowLeft size={14} /> Organizations
-          </Link>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2 mt-1"><WorkflowIcon size={24} /> {orgName} · Workflows</h1>
-          <p className="text-sm text-gray-500 mt-1">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
+    <div className="flex flex-col h-full min-h-0 bg-bg text-ink overflow-auto scroll-tint">
+      <div className="max-w-[1060px] w-full mx-auto px-8 pt-6 pb-16">
+        <div className="flex items-start gap-4 mb-6">
+          <div>
+            <Link to="/workflows" className="inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-acc"><ArrowLeft size={14} /> Organizations</Link>
+            <h1 className="text-[21px] font-semibold tracking-tight mt-1.5 flex items-center gap-2"><GitFork size={20} className="text-acc2" /> {orgName} · Workflows</h1>
+            <p className="mt-2 text-[12.5px] text-mut max-w-[560px] leading-relaxed">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={load} disabled={loading} className="text-gray-600 hover:text-gray-900 p-2 rounded-lg hover:bg-gray-100" title="Refresh">
-            <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-          </button>
-          <Button icon={<Plus size={16} />} onClick={openBuilder}>New Workflow</Button>
+
+        {/* Catalog */}
+        <div className="rounded-2xl border border-line overflow-hidden mb-8">
+          {workflows.map(wf => {
+            const nodeCount = (wf as any).nodes?.length;
+            return (
+              <div key={wf.id} onClick={() => edit(wf)} className="group flex items-center gap-3 px-5 py-4 border-b border-line last:border-0 hover:bg-white/[0.02] cursor-pointer">
+                <span className="w-9 h-9 rounded-lg border border-line2 grid place-items-center text-acc2 shrink-0"><GitFork size={17} /></span>
+                <div className="min-w-0">
+                  <div className="text-[14px] font-semibold tracking-tight truncate">{wf.name}</div>
+                  <div className="font-mono text-[11px] text-dim mt-0.5">
+                    {typeof nodeCount === 'number' ? `${nodeCount} node${nodeCount === 1 ? '' : 's'}` : 'DAG'}
+                    {(wf as any).webhook_enabled ? ' · webhook trigger' : ''}
+                  </div>
+                </div>
+                <div className="ml-auto flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => edit(wf)} className="h-8 px-2.5 rounded-md text-[12px] font-medium flex items-center gap-1.5 text-ink2 hover:bg-white/5"><Pencil size={13} /> Edit</button>
+                  <button onClick={() => launch(wf)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>
+                  <button onClick={() => remove(wf)} className="w-8 h-8 grid place-items-center rounded-md text-faint hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={15} /></button>
+                </div>
+              </div>
+            );
+          })}
+          {workflows.length === 0 && !loading && (
+            <div className="px-6 py-12 text-center">
+              <GitFork size={34} className="mx-auto mb-3 text-dim opacity-40" />
+              <p className="text-sm text-dim mb-4">No workflows in this organization yet.</p>
+              <button onClick={() => navigate(`/workflows/org/${orgId}/builder`)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2"><Plus size={15} /> New workflow</button>
+            </div>
+          )}
+        </div>
+
+        {/* Recent runs */}
+        <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-mut mb-3">Recent runs</div>
+        <div className="rounded-2xl border border-line overflow-hidden">
+          {runGroups.length === 0 && !loading && <p className="px-5 py-8 text-center text-sm text-dim">No runs yet. Launch a workflow to see it here.</p>}
+          {runGroups.map(g => {
+            const open = !collapsed[g.id];
+            const active = g.runs.filter(r => r.status === 'running').length;
+            return (
+              <div key={g.id} className="border-b border-line last:border-0">
+                <button onClick={() => toggleGroup(g.id)} className="w-full flex items-center gap-2.5 px-5 py-3 hover:bg-white/[0.02] text-left">
+                  {open ? <ChevronDown size={15} className="text-dim" /> : <ChevronRight size={15} className="text-dim" />}
+                  <span className="text-[13.5px] font-medium truncate">{g.name}</span>
+                  <span className="font-mono text-[11px] text-dim">{g.runs.length} run{g.runs.length === 1 ? '' : 's'}</span>
+                  {active > 0 && <span className="font-mono text-[10px] text-run">{active} running</span>}
+                  <span className="ml-auto font-mono text-[10.5px] text-dim">latest {new Date(g.runs[0].created_at).toLocaleString()}</span>
+                </button>
+                {open && g.runs.map(r => {
+                  const t = runTone(r.status);
+                  return (
+                    <div key={r.id} onClick={() => navigate(`/workflows/runs/${r.id}`)} className="flex items-center gap-3 pl-12 pr-5 py-2 border-t border-line hover:bg-white/[0.02] cursor-pointer">
+                      <span className="font-mono text-[12px] text-acc2 w-14">#{r.id}</span>
+                      <span className={`inline-flex items-center gap-1.5 text-[12px] ${t.text}`}><span className={`w-[6px] h-[6px] rounded-full ${t.dot} ${r.status === 'running' ? 'animate-pulse' : ''}`} />{r.status}</span>
+                      <span className="ml-auto font-mono text-[11px] text-dim">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       </div>
-
-      {/* Templates */}
-      <Card title="Templates" className="overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {workflows.map(wf => (
-              <tr key={wf.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onView(wf)}>
-                <td className="px-4 py-2 text-sm font-medium text-brand-600 hover:underline">{wf.name}</td>
-                <td className="px-4 py-2 text-right space-x-1 whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                  <Button variant="ghost" size="sm" icon={<Eye size={14} />} onClick={() => onView(wf)}>View</Button>
-                  <Button variant="ghost" size="sm" icon={<Pencil size={14} />} onClick={() => openEdit(wf)}>Edit</Button>
-                  <Button variant="primary" size="sm" icon={<Rocket size={14} />} onClick={() => onLaunch(wf)}>Launch</Button>
-                  <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => onDelete(wf)} />
-                </td>
-              </tr>
-            ))}
-            {workflows.length === 0 && !loading && (
-              <tr><td colSpan={2} className="px-4 py-6 text-center text-sm text-gray-500">No workflows in this organization yet. Create one to chain templates together.</td></tr>
-            )}
-          </tbody>
-        </table>
-        </div>
-      </Card>
-
-      {/* Recent runs — grouped by workflow */}
-      <Card title="Recent runs" className="overflow-hidden">
-        {runs.length === 0 && !loading ? (
-          <p className="px-4 py-6 text-center text-sm text-gray-500">No runs yet. Launch a workflow to see it here.</p>
-        ) : (
-          <div className="divide-y divide-gray-200">
-            {runGroups.map(g => {
-              const open = !collapsed[g.id];
-              const active = g.runs.filter(r => r.status === 'running').length;
-              return (
-                <div key={g.id}>
-                  <button onClick={() => toggleGroup(g.id)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 text-left">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
-                      <span className="text-sm font-semibold text-gray-800 truncate">{g.name}</span>
-                      <span className="text-xs text-gray-400 whitespace-nowrap">{g.runs.length} run{g.runs.length !== 1 ? 's' : ''}</span>
-                      {active > 0 && <Badge variant="info">{active} running</Badge>}
-                    </div>
-                    <span className="text-xs text-gray-400 whitespace-nowrap">latest {new Date(g.runs[0].created_at).toLocaleString()}</span>
-                  </button>
-                  {open && (
-                    <div className="overflow-x-auto">
-                    <table className="min-w-full">
-                      <tbody className="divide-y divide-gray-50">
-                        {g.runs.map(r => (
-                          <tr key={r.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/workflows/runs/${r.id}`)}>
-                            <td className="pl-10 pr-4 py-2 text-sm font-medium text-brand-600 hover:underline w-28">#{r.id}</td>
-                            <td className="px-4 py-2 text-sm w-40"><Badge variant={statusVariant(r.status)}>{r.status}</Badge></td>
-                            <td className="px-4 py-2 text-sm text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-
-      {/* Builder */}
-      <Modal isOpen={builderOpen} onClose={() => setBuilderOpen(false)} title={editingId ? 'Edit Workflow' : `New Workflow in ${orgName}`} size="full">
-        <div className="space-y-4">
-          <Input label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="nightly-deploy" />
-
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={allowSim} onChange={e => setAllowSim(e.target.checked)} />
-            Allow simultaneous runs (off = a launch is refused while a run is still active)
-          </label>
-
-          {/* Webhook trigger — a remote event launches the whole workflow */}
-          <div className="border border-gray-200 rounded-md p-3 bg-gray-50">
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <input type="checkbox" checked={whEnabled} onChange={e => setWhEnabled(e.target.checked)} />
-              Trigger this workflow from an inbound webhook
-            </label>
-            {whEnabled && (
-              <div className="grid grid-cols-2 gap-3 mt-3">
-                <Select label="Provider" value={whService} onChange={e => setWhService(e.target.value)}>
-                  <option value="generic">Generic (token)</option>
-                  <option value="github">GitHub (HMAC)</option>
-                  <option value="gitlab">GitLab (token)</option>
-                </Select>
-                <Input label="Secret key" className="font-mono" value={whKey} onChange={e => setWhKey(e.target.value)} placeholder={editingId ? 'leave blank to keep current' : 'shared secret'} />
-                <p className="col-span-2 text-[11px] text-gray-500">
-                  After saving, POST to <span className="font-mono">/api/v1/webhooks/workflow-templates/&lt;id&gt;/{whService}</span> with this secret to launch a run.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <h4 className="text-sm font-semibold text-gray-700">Nodes</h4>
-                <Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={addNode}>Add node</Button>
-              </div>
-              <div className="space-y-2 max-h-64 overflow-auto pr-1">
-                {nodes.map(n => (
-                  <div key={n.node_key} className="bg-gray-50 rounded-md p-2 border border-gray-200 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-gray-400 w-8">{n.node_key}</span>
-                      <input value={n.name} onChange={e => updateNode(n.node_key, { name: e.target.value })} placeholder="name" className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm min-w-0" />
-                      <select value={n.node_type} onChange={e => updateNode(n.node_key, { node_type: e.target.value as WorkflowNodeType })} className="border border-gray-300 rounded px-1 py-1 text-xs">
-                        <option value="job">job</option>
-                        <option value="approval">approval</option>
-                        <option value="webhook_in">webhook in (wait)</option>
-                        <option value="webhook_out">webhook out (call)</option>
-                      </select>
-                      {n.node_type === 'job' && (
-                        <select value={n.job_template_id ?? ''} onChange={e => updateNode(n.node_key, { job_template_id: Number(e.target.value) })} className="border border-gray-300 rounded px-1 py-1 text-xs max-w-[120px]">
-                          <option value="">template…</option>
-                          {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
-                      )}
-                      <button onClick={() => removeNode(n.node_key)} className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
-                    </div>
-                    {n.node_type === 'webhook_out' && (
-                      <input value={n.webhook_url || ''} onChange={e => updateNode(n.node_key, { webhook_url: e.target.value })}
-                        placeholder="https://example.com/hook  (URL to POST)" className="w-full border border-gray-300 rounded px-2 py-1 text-xs font-mono" />
-                    )}
-                    {n.node_type === 'webhook_in' && (
-                      <p className="text-[11px] text-purple-700 pl-10">Pauses here until an external system POSTs the node's callback URL (shown on the run page).</p>
-                    )}
-                  </div>
-                ))}
-                {nodes.length === 0 && <p className="text-xs text-gray-400 italic">No nodes yet.</p>}
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <h4 className="text-sm font-semibold text-gray-700">Edges</h4>
-                <Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={addEdge} disabled={nodes.length < 2}>Add edge</Button>
-              </div>
-              <div className="space-y-2 max-h-64 overflow-auto pr-1">
-                {edges.map((e, i) => (
-                  <div key={i} className="flex items-center gap-1 bg-gray-50 rounded-md p-2 border border-gray-200 text-xs">
-                    <select value={e.parent_key} onChange={ev => updateEdge(i, { parent_key: ev.target.value })} className="border border-gray-300 rounded px-1 py-1 flex-1 min-w-0">
-                      {nodes.map(n => <option key={n.node_key} value={n.node_key}>{n.name || n.node_key}</option>)}
-                    </select>
-                    <select value={e.edge_type} onChange={ev => updateEdge(i, { edge_type: ev.target.value as WorkflowEdgeType })} className="border border-gray-300 rounded px-1 py-1">
-                      {EDGE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <span className="text-gray-400">→</span>
-                    <select value={e.child_key} onChange={ev => updateEdge(i, { child_key: ev.target.value })} className="border border-gray-300 rounded px-1 py-1 flex-1 min-w-0">
-                      {nodes.map(n => <option key={n.node_key} value={n.node_key}>{n.name || n.node_key}</option>)}
-                    </select>
-                    <button onClick={() => removeEdge(i)} className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
-                  </div>
-                ))}
-                {edges.length === 0 && <p className="text-xs text-gray-400 italic">No edges — nodes will all start at once.</p>}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">Preview</h4>
-            <WorkflowDag nodes={nodes} edges={edges} templateName={templateName} />
-          </div>
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
-            <Button variant="secondary" onClick={() => setBuilderOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : (editingId ? 'Save changes' : 'Create workflow')}</Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Template preview */}
-      <Modal isOpen={!!viewWf} onClose={() => setViewWf(null)} title={viewWf ? `Workflow: ${viewWf.name}` : ''} size="full">
-        {viewWf && (
-          <div className="space-y-4">
-            {viewWf.webhook_enabled && (
-              <div className="text-xs bg-cyan-50 border border-cyan-200 rounded-md px-3 py-2 text-cyan-900">
-                <b>Webhook trigger enabled</b> ({viewWf.webhook_service || 'generic'}). POST to{' '}
-                <span className="font-mono">/api/v1/webhooks/workflow-templates/{viewWf.id}/{viewWf.webhook_service || 'generic'}</span>{' '}
-                with the configured secret to launch a run.
-              </div>
-            )}
-            <WorkflowDag nodes={viewWf.nodes || []} edges={viewWf.edges || []} templateName={templateName} />
-            <div className="flex justify-end">
-              <Button icon={<Rocket size={16} />} onClick={() => { const w = viewWf; setViewWf(null); if (w) onLaunch(w); }}>Launch</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };

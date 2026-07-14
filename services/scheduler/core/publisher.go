@@ -1,7 +1,7 @@
 package core
 
 import (
-	"github.com/praetordev/praetor/pkg/events"
+	"github.com/praetordev/events"
 )
 
 // EventPublisher defines the interface for publishing events to the bus/stream.

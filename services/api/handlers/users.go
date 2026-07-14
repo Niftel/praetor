@@ -7,9 +7,10 @@ import (
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -33,8 +34,8 @@ type UsersResource struct {
 	store UserStore
 }
 
-func NewUsersResource(db *sqlx.DB) *UsersResource {
-	return &UsersResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewUserStore(db)}
+func NewUsersResource(db *sqlx.DB, authz *Authorizer) *UsersResource {
+	return &UsersResource{DB: db, Authorizer: authz, store: store.NewUserStore(db)}
 }
 
 // userInput is the create/update payload: the user fields plus a write-only
@@ -66,8 +67,7 @@ func (h *UsersResource) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser POST /api/v1/users
 func (h *UsersResource) CreateUser(w http.ResponseWriter, r *http.Request) {
-	if uc := currentUser(r); !uc.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.requireGlobal(w, r, rbac.CapManageUser) {
 		return
 	}
 
@@ -111,8 +111,7 @@ func (h *UsersResource) GetUser(w http.ResponseWriter, r *http.Request) {
 func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// This endpoint can set is_superuser/is_active, so it is superuser-only.
 	// Self-service profile editing belongs in a separate, field-restricted route.
-	if uc := currentUser(r); !uc.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.requireGlobal(w, r, rbac.CapManageUser) {
 		return
 	}
 
@@ -149,8 +148,7 @@ func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 // DeleteUser DELETE /api/v1/users/{id}
 func (h *UsersResource) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	if uc := currentUser(r); !uc.IsSuperuser {
-		render.ErrForbidden(nil).Render(w, r)
+	if !h.requireGlobal(w, r, rbac.CapManageUser) {
 		return
 	}
 

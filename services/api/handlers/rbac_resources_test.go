@@ -11,10 +11,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/rbac"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
-	"github.com/praetordev/praetor/services/api/store"
 )
 
 func rbacTestDB(t *testing.T) *sqlx.DB {
@@ -42,7 +41,8 @@ func grantObjectRole(t *testing.T, access *rbac.AccessChecker, ct rbac.ContentTy
 // capCheck answers a capability question with the same (bool, error) shape the legacy
 // Can* checks had, so the RBAC tests read the same after the cutover.
 func capCheck(access *rbac.AccessChecker, user int64, ct rbac.ContentType, id int64, a rbac.Action) (bool, error) {
-	return store.NewCapabilityStore(access.DB).HasCapability(context.Background(), user, ct, id, rbac.Codename(ct, a))
+	// HasCapability never touches the content-type→table map, so nil is fine here.
+	return rbac.NewCapabilityStore(access.DB, nil).HasCapability(context.Background(), user, ct, id, rbac.Codename(ct, a))
 }
 
 // TestInventoryHostRBAC covers inventory create-scoping, the creator-admin
@@ -52,8 +52,8 @@ func capCheck(access *rbac.AccessChecker, user int64, ct rbac.ContentType, id in
 func TestInventoryHostRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	invRes := handlers.NewInventoriesResource(db)
-	hostRes := handlers.NewHostsResource(db)
+	invRes := handlers.NewInventoriesResource(db, handlers.NewAuthorizer(db))
+	hostRes := handlers.NewHostsResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()
@@ -118,8 +118,8 @@ func TestInventoryHostRBAC(t *testing.T) {
 func TestTemplateExecuteRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	tmplRes := handlers.NewTemplatesResource(db)
-	jobsRes := handlers.NewJobsResource(db, "", "")
+	tmplRes := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
+	jobsRes := handlers.NewJobsResource(db, "", "", handlers.NewAuthorizer(db))
 	access := rbac.NewAccessChecker(db)
 
 	uniq := time.Now().UnixNano()

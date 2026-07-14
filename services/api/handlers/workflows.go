@@ -9,10 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/launch"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // WorkflowStore is the workflows-domain data access the handler depends on.
@@ -43,8 +43,8 @@ type WorkflowsResource struct {
 	notifications NotificationStore
 }
 
-func NewWorkflowsResource(db *sqlx.DB) *WorkflowsResource {
-	return &WorkflowsResource{DB: db, Authorizer: NewAuthorizer(db), store: store.NewWorkflowStore(db), notifications: store.NewNotificationStore(db)}
+func NewWorkflowsResource(db *sqlx.DB, authz *Authorizer) *WorkflowsResource {
+	return &WorkflowsResource{DB: db, Authorizer: authz, store: store.NewWorkflowStore(db), notifications: store.NewNotificationStore(db)}
 }
 
 // workflowNode / workflowEdge alias the store DTOs so handler code reads unchanged.

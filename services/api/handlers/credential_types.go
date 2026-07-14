@@ -14,9 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/services/api/render"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/models"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/render"
+	"github.com/praetordev/store"
 )
 
 // CredentialTypeStore is the credential-types data access the handler depends on.
@@ -29,12 +30,13 @@ type CredentialTypeStore interface {
 }
 
 type CredentialTypesResource struct {
+	*Authorizer
 	DB    *sqlx.DB
 	store CredentialTypeStore
 }
 
-func NewCredentialTypesResource(db *sqlx.DB) *CredentialTypesResource {
-	return &CredentialTypesResource{DB: db, store: store.NewCredentialTypeStore(db)}
+func NewCredentialTypesResource(db *sqlx.DB, authz *Authorizer) *CredentialTypesResource {
+	return &CredentialTypesResource{Authorizer: authz, DB: db, store: store.NewCredentialTypeStore(db)}
 }
 
 func (rs *CredentialTypesResource) Routes() chi.Router {
@@ -118,7 +120,7 @@ func validateCredentialTypeSpec(inputsRaw, injectorsRaw json.RawMessage) error {
 
 // CreateCredentialType POST /credential-types — define a new user credential type.
 func (rs *CredentialTypesResource) CreateCredentialType(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageCredentialType) {
 		return
 	}
 	var in credentialTypeInput
@@ -147,7 +149,7 @@ func (rs *CredentialTypesResource) CreateCredentialType(w http.ResponseWriter, r
 
 // UpdateCredentialType PUT /credential-types/{id} — edit a user credential type.
 func (rs *CredentialTypesResource) UpdateCredentialType(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageCredentialType) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -194,7 +196,7 @@ func (rs *CredentialTypesResource) UpdateCredentialType(w http.ResponseWriter, r
 
 // DeleteCredentialType DELETE /credential-types/{id} — remove a user credential type.
 func (rs *CredentialTypesResource) DeleteCredentialType(w http.ResponseWriter, r *http.Request) {
-	if !requireSuperuser(w, r) {
+	if !rs.requireGlobal(w, r, rbac.CapManageCredentialType) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

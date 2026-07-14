@@ -17,11 +17,11 @@ import (
 	"github.com/go-chi/render"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/launch"
-	"github.com/praetordev/praetor/pkg/models"
-	"github.com/praetordev/praetor/pkg/plog"
-	"github.com/praetordev/praetor/pkg/rbac"
-	"github.com/praetordev/praetor/services/api/store"
+	"github.com/praetordev/launch"
+	"github.com/praetordev/models"
+	"github.com/praetordev/plog"
+	"github.com/praetordev/rbac"
+	"github.com/praetordev/store"
 )
 
 // JobStore is the jobs-domain data access the handler depends on (implemented by
@@ -59,10 +59,10 @@ type JobsResource struct {
 	log           *slog.Logger
 }
 
-func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string) *JobsResource {
+func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string, authz *Authorizer) *JobsResource {
 	return &JobsResource{
 		DB:            db,
-		Authorizer:    NewAuthorizer(db),
+		Authorizer:    authz,
 		IngestionURL:  ingestionURL,
 		internalToken: internalToken,
 		store:         store.NewJobStore(db),
@@ -83,8 +83,12 @@ func (rs *JobsResource) authorizeRunRead(w http.ResponseWriter, r *http.Request,
 	if ok {
 		return rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actRead)
 	}
-	uc := currentUser(r)
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	if verr != nil {
+		render.Render(w, r, ErrInternal(verr))
+		return false
+	}
+	if viewAll {
 		return true
 	}
 	render.Render(w, r, ErrForbidden)
@@ -106,9 +110,12 @@ func (rs *JobsResource) Routes() chi.Router {
 
 // ListUnifiedJobs returns a list of unified jobs
 func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) {
-	uc := currentUser(r)
-
-	if uc.IsSuperuser || uc.IsSystemAuditor {
+	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	if verr != nil {
+		render.Render(w, r, ErrInternal(verr))
+		return
+	}
+	if viewAll {
 		jobs, err := rs.store.ListRecent(r.Context(), 50)
 		if err != nil {
 			render.Render(w, r, ErrInternal(err))

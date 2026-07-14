@@ -8,7 +8,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/models"
+	"github.com/praetordev/models"
 	"github.com/praetordev/praetor/services/api/handlers"
 )
 
@@ -42,7 +42,7 @@ func TestListTemplatesRepro(t *testing.T) {
 		t.Fatalf("Failed to seed template: %v", err)
 	}
 
-	resource := handlers.NewTemplatesResource(db)
+	resource := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
 	req := httptest.NewRequest("GET", "/api/v1/job-templates", nil)
 	w := httptest.NewRecorder()
 
