@@ -8,7 +8,7 @@ image:
   # Registry + repo prefix for the seven service images. Empty registry means the
   # image is referenced bare (repo:tag) — used by the local/k3d flow where images
   # are imported into the cluster rather than pulled from a registry.
-  registry: ghcr.io/praetordev
+  registry: ghcr.io/niftel
   # Tag shared by all service images. Empty → defaults to .Chart.appVersion.
   tag: ""
   pullPolicy: IfNotPresent
