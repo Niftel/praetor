@@ -209,7 +209,7 @@ const WorkflowBuilderPage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_360px] flex-1 min-h-0 max-[960px]:grid-cols-1">
+      <div className="grid grid-cols-[minmax(0,1fr)_360px] flex-1 min-h-0 max-[720px]:grid-cols-1 max-[720px]:grid-rows-[minmax(260px,1fr)_minmax(220px,42%)]">
         {/* Canvas workspace */}
         <div ref={viewRef} onWheel={onWheel} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           className="relative overflow-hidden cursor-grab active:cursor-grabbing"
@@ -271,7 +271,7 @@ const WorkflowBuilderPage = () => {
         </div>
 
         {/* Editor panel */}
-        <div className="border-l border-line bg-panel2 flex flex-col min-h-0 overflow-auto scroll-tint max-[960px]:hidden">
+        <div className="border-l border-line bg-panel2 flex flex-col min-h-0 overflow-auto scroll-tint max-[720px]:border-l-0 max-[720px]:border-t">
           {/* Nodes */}
           <div className="px-4 py-3 border-b border-line">
             <div className="flex items-center mb-2.5">
