@@ -16,8 +16,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
+	"github.com/praetordev/eventbus"
 	"github.com/praetordev/events"
-	natsbus "github.com/praetordev/praetor/pkg/transport/nats"
 	consumercore "github.com/praetordev/praetor/services/consumer/core"
 )
 
@@ -52,7 +52,7 @@ func TestDBOutageConvergence(t *testing.T) {
 
 	db := sqlx.MustConnect("postgres", dbURL)
 	defer db.Close()
-	bus, err := natsbus.NewNatsBus(natsURL)
+	bus, err := eventbus.NewBus(natsURL)
 	if err != nil {
 		t.Fatalf("nats: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestNATSRestartDurability(t *testing.T) {
 		t.Skip("chaos env not set (TEST_NATS_URL, CHAOS_NATS_CONTAINER)")
 	}
 
-	bus, err := natsbus.NewNatsBus(natsURL)
+	bus, err := eventbus.NewBus(natsURL)
 	if err != nil {
 		t.Fatalf("nats: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestNATSRestartDurability(t *testing.T) {
 	waitForNATS(t, natsURL, 30*time.Second)
 
 	// A fresh consumer must still receive every event.
-	bus2, err := natsbus.NewNatsBus(natsURL)
+	bus2, err := eventbus.NewBus(natsURL)
 	if err != nil {
 		t.Fatalf("reconnect: %v", err)
 	}
