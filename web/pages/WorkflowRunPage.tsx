@@ -157,6 +157,7 @@ const WorkflowRunPage = () => {
     const wt = job?.workflow_template_id;
     if (!wt) return;
     const res = await api.launchWorkflow(wt, options, signal);
+    setShowRelaunch(false);
     navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
 
