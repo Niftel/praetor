@@ -5,16 +5,16 @@ import { api } from '../services/api';
 import { WorkflowApproval } from '../types';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
-const elapsed = (iso: string) => {
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+const elapsed = (iso: string, now: number) => {
+  const seconds = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000));
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
 };
 
-const remaining = (iso: string) => {
-  const seconds = Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 1000));
+const remaining = (iso: string, now: number) => {
+  const seconds = Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 1000));
   if (seconds < 60) return `${seconds}s left`;
   if (seconds < 3600) return `${Math.ceil(seconds / 60)}m left`;
   if (seconds < 86400) return `${Math.ceil(seconds / 3600)}h left`;
@@ -27,6 +27,7 @@ const ApprovalsPage = () => {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true);
@@ -51,6 +52,11 @@ const ApprovalsPage = () => {
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [load]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const decide = async (item: WorkflowApproval, approve: boolean) => {
     setActing(item.id);
@@ -99,8 +105,8 @@ const ApprovalsPage = () => {
             </div>
             <span className="truncate pr-3 font-mono text-[11px] text-mut max-[920px]:hidden">{item.requested_by || 'automation'}</span>
             <span className="font-mono text-[11px] tabular-nums text-mut" title={`Waiting since ${new Date(item.awaiting_since).toLocaleString()}`}>
-              <span className="block">{elapsed(item.awaiting_since)}</span>
-              <span className={item.deadline ? 'text-changed' : 'text-dim'}>{item.deadline ? remaining(item.deadline) : 'no timeout'}</span>
+              <span className="block">{elapsed(item.awaiting_since, now)}</span>
+              <span className={item.deadline ? 'text-changed' : 'text-dim'}>{item.deadline ? remaining(item.deadline, now) : 'no timeout'}</span>
             </span>
             <div className="flex justify-end gap-2 max-[920px]:col-span-2 max-[920px]:mt-2 max-[920px]:pb-3">
               <button onClick={() => navigate(`/workflows/runs/${item.workflow_job_id}`)} className="grid h-8 w-8 place-items-center rounded-md border border-line2 text-mut hover:border-white/25 hover:text-ink" title="Open workflow run"><ExternalLink size={13} /></button>
