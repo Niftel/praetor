@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # No gofmt gate: this repo's house style is `goimports -local` (external
+      # praetordev/* imports first, praetordev/praetor/* internal last), which
+      # plain `gofmt -l` reports as "unformatted" by design. vet + build + test
+      # are the real gates. go.work is gitignored, so CI resolves the extracted
+      # service/lib modules from their published tags via the proxy.
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test ./...
