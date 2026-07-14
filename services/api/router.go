@@ -25,6 +25,15 @@ type Config struct {
 	InternalToken string
 	// LDAPConfigPath is the path to the LDAP config file mounted into the API.
 	LDAPConfigPath string
+	// RBACPolicyPath optionally selects a mounted RBAC v4 policy file. Empty uses
+	// the versioned policy embedded in the API binary.
+	RBACPolicyPath string
+	// RBACPolicySHA256 optionally pins the exact mounted policy bytes.
+	RBACPolicySHA256 string
+	// RBACPolicyRefreshInterval periodically checks a configured file source.
+	RBACPolicyRefreshInterval time.Duration
+	// RBACDecisionAudit emits one structured event for every v4 evaluation.
+	RBACDecisionAudit bool
 }
 
 // NewRouter instantiates the chi Router and wires middleware.
@@ -35,7 +44,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	// every resource that enforces access. It wraps the capability store (PDP)
 	// with the legacy is_superuser decorator — the single place that bypass
 	// lives, so removing it later is one edit here, not a sweep of handlers.
-	authz := handlers.NewAuthorizer(db)
+	authz := handlers.NewAuthorizerWithPolicy(db, cfg.RBACPolicyPath, cfg.RBACPolicySHA256, cfg.RBACPolicyRefreshInterval, cfg.RBACDecisionAudit)
 
 	// Base Middleware
 	r.Use(middleware.RequestID)
@@ -100,6 +109,10 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware(db))
 		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
+
+		// Active RBAC v4 policy provenance and an operator-triggered refresh.
+		r.Get("/rbac/policy", authz.PolicyStatus)
+		r.Post("/rbac/policy/refresh", authz.RefreshPolicy)
 
 		// Execution Packs registry (the self-contained runtimes pushed to hosts).
 		r.Mount("/execution-packs", handlers.NewExecutionPacksResource(db, authz).Routes())

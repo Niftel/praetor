@@ -65,6 +65,7 @@ GET     /api/v1/organizations/{id}/teams
 GET     /api/v1/organizations/{id}/users
 GET     /api/v1/ping
 GET     /api/v1/projects
+GET     /api/v1/rbac/policy
 GET     /api/v1/role-definitions
 GET     /api/v1/schedules/
 GET     /api/v1/schedules/{id}/
@@ -119,6 +120,7 @@ POST    /api/v1/organizations/{id}/galaxy-credentials
 POST    /api/v1/organizations/{id}/users
 POST    /api/v1/projects
 POST    /api/v1/projects/{id}/sync
+POST    /api/v1/rbac/policy/refresh
 POST    /api/v1/schedules/
 POST    /api/v1/teams/
 POST    /api/v1/teams/{id}/members

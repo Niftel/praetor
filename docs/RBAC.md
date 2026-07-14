@@ -85,3 +85,34 @@ PostgreSQL instance:
 ```sh
 make test-db
 ```
+
+## Policy operations
+
+The API binary embeds `pkg/authorization/policy.json` as its safe default. Set
+`PRAETOR_RBAC_POLICY` to load a mounted policy file instead. A configured file
+must exist and parse successfully at startup; otherwise the API fails to start.
+
+`PRAETOR_RBAC_POLICY_REFRESH_INTERVAL` controls how often the source is checked
+(default `30s`). A missing, malformed, or oversized update is reported while
+RBAC v4 continues serving the last-known-good immutable snapshot. A later valid
+update is parsed once and installed atomically.
+
+Set `PRAETOR_RBAC_POLICY_SHA256` to the lowercase or uppercase hexadecimal
+SHA-256 digest of the mounted file to require verify-before-parse on startup and
+every refresh. A mismatched update is rejected and the last-known-good snapshot
+continues serving. Leaving it empty uses the file source's pass-through verifier;
+remote policy sources must not be enabled without an authenticity verifier.
+
+System administrators can inspect and refresh policy provenance through:
+
+- `GET /api/v1/rbac/policy` — source, active version, load state, last refresh
+  attempt, last successful refresh, and the latest error;
+- `POST /api/v1/rbac/policy/refresh` — request an immediate refresh.
+
+Both routes require authentication and the global `manage_user` capability.
+
+Set `PRAETOR_RBAC_DECISION_AUDIT=true` to emit a structured log event for every
+v4 evaluation. Each event records the authenticated user id, requested
+capability and scope, allow/deny result, immutable policy snapshot, reason, and
+the stable deciding rule id/name/effect. A default deny has no rule id. This is
+disabled by default because list visibility checks can evaluate several scopes.

@@ -4,10 +4,13 @@ package authorization
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/praetordev/praetor/pkg/accesscontrol"
 	engine "github.com/praetordev/rbac/v4"
@@ -24,48 +27,120 @@ type Resolver interface {
 }
 
 type Authorizer struct {
-	grants Resolver
-	policy *engine.Loader
+	grants      Resolver
+	policy      *engine.Loader
+	source      string
+	integrity   string
+	mu          sync.RWMutex
+	lastAttempt time.Time
+	lastSuccess time.Time
+	lastError   string
+	observer    func(DecisionEvent)
 }
 
 var _ accesscontrol.DecisionPoint = (*Authorizer)(nil)
 
-const policy = `[
-  {"name":"allow-exact-global","effect":"allow","when":{"all":[
-    {"eq":[{"attr":"grant.effect"},{"lit":"allow"}]},
-    {"eq":[{"attr":"grant.cap"},{"attr":"need"}]},
-    {"eq":[{"attr":"grant.scope"},{"lit":""}]}
-  ]}},
-  {"name":"allow-exact-scoped","effect":"allow","when":{"all":[
-    {"ne":[{"attr":"scope"},{"lit":""}]},
-    {"eq":[{"attr":"grant.effect"},{"lit":"allow"}]},
-    {"eq":[{"attr":"grant.cap"},{"attr":"need"}]},
-    {"eq":[{"attr":"grant.scope"},{"attr":"scope"}]}
-  ]}},
-  {"name":"deny-exact","effect":"deny","when":{"all":[
-    {"eq":[{"attr":"grant.effect"},{"lit":"deny"}]},
-    {"eq":[{"attr":"grant.cap"},{"attr":"need"}]},
-    {"any":[
-      {"eq":[{"attr":"grant.scope"},{"lit":""}]},
-      {"eq":[{"attr":"grant.scope"},{"attr":"scope"}]}
-    ]}
-  ]}}
-]`
+//go:embed policy.json
+var defaultPolicy []byte
 
 func New(resolver Resolver) (*Authorizer, error) {
-	loader := engine.NewLoader(engine.NewMemorySource([]byte(policy)), engine.DenyOverrides)
-	if err := loader.Refresh(context.Background()); err != nil {
+	return newWithSource(context.Background(), resolver, engine.NewMemorySource(defaultPolicy), "embedded", "embedded", nil)
+}
+
+func NewFile(ctx context.Context, resolver Resolver, path string) (*Authorizer, error) {
+	return NewWithSource(ctx, resolver, engine.NewFileSource(path), path)
+}
+
+func NewWithSource(ctx context.Context, resolver Resolver, source engine.Source, description string) (*Authorizer, error) {
+	return newWithSource(ctx, resolver, source, description, "passthrough", nil)
+}
+
+func newWithSource(ctx context.Context, resolver Resolver, source engine.Source, description, integrity string, verifier engine.Verifier) (*Authorizer, error) {
+	options := []engine.LoaderOption{}
+	if verifier != nil {
+		options = append(options, engine.WithVerifier(verifier))
+	}
+	loader := engine.NewLoader(source, engine.DenyOverrides, options...)
+	if err := loader.Refresh(ctx); err != nil {
 		return nil, fmt.Errorf("load Praetor RBAC policy: %w", err)
 	}
-	return &Authorizer{grants: resolver, policy: loader}, nil
+	now := time.Now().UTC()
+	return &Authorizer{grants: resolver, policy: loader, source: description, integrity: integrity, lastAttempt: now, lastSuccess: now}, nil
+}
+
+type PolicyStatus struct {
+	Version            string    `json:"version"`
+	Source             string    `json:"source"`
+	Integrity          string    `json:"integrity"`
+	Loaded             bool      `json:"loaded"`
+	LastRefreshAttempt time.Time `json:"last_refresh_attempt"`
+	LastRefreshSuccess time.Time `json:"last_refresh_success"`
+	LastRefreshError   string    `json:"last_refresh_error,omitempty"`
+}
+
+// DecisionEvent is the stable, security-audit view of an RBAC v4 decision.
+// RuleID is nil when the engine default-denied because no rule matched.
+type DecisionEvent struct {
+	UserID     int64  `json:"user_id"`
+	Capability string `json:"capability"`
+	Scope      string `json:"scope"`
+	Allow      bool   `json:"allow"`
+	Snapshot   string `json:"snapshot"`
+	Reason     string `json:"reason"`
+	RuleID     *int   `json:"rule_id,omitempty"`
+	RuleName   string `json:"rule_name,omitempty"`
+	RuleEffect string `json:"rule_effect,omitempty"`
+}
+
+// SetDecisionObserver installs an optional observer called synchronously after
+// every policy evaluation. Observers must return quickly and must not panic.
+func (a *Authorizer) SetDecisionObserver(observer func(DecisionEvent)) {
+	a.mu.Lock()
+	a.observer = observer
+	a.mu.Unlock()
+}
+
+func (a *Authorizer) PolicyStatus() PolicyStatus {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return PolicyStatus{Version: a.policy.Version(), Source: a.source, Integrity: a.integrity, Loaded: a.policy.Current() != nil,
+		LastRefreshAttempt: a.lastAttempt, LastRefreshSuccess: a.lastSuccess, LastRefreshError: a.lastError}
+}
+
+func (a *Authorizer) RefreshPolicy(ctx context.Context) error {
+	now := time.Now().UTC()
+	err := a.policy.Refresh(ctx)
+	a.mu.Lock()
+	a.lastAttempt = now
+	if err != nil {
+		a.lastError = err.Error()
+	} else {
+		a.lastSuccess = now
+		a.lastError = ""
+	}
+	a.mu.Unlock()
+	return err
 }
 
 func scope(contentType accesscontrol.ResourceKind, objectID int64) string {
 	return fmt.Sprintf("%s:%d", contentType, objectID)
 }
 
-func (a *Authorizer) decide(grants []engine.Grant, need, target string) bool {
-	return a.policy.Decide(engine.Query{Grants: grants, Need: need, Scope: target}).Allow
+func (a *Authorizer) decide(userID int64, grants []engine.Grant, need, target string) bool {
+	decision := a.policy.Decide(engine.Query{Grants: grants, Need: need, Scope: target})
+	a.mu.RLock()
+	observer := a.observer
+	a.mu.RUnlock()
+	if observer != nil {
+		event := DecisionEvent{UserID: userID, Capability: need, Scope: target, Allow: decision.Allow, Snapshot: decision.Snapshot, Reason: decision.Reason}
+		if rule, ok := decision.Decider(); ok {
+			event.RuleID = &rule.ID
+			event.RuleName = rule.Name
+			event.RuleEffect = rule.Effect.String()
+		}
+		observer(event)
+	}
+	return decision.Allow
 }
 
 func (a *Authorizer) Can(ctx context.Context, sub accesscontrol.Principal, action accesscontrol.Verb, obj accesscontrol.Resource) (bool, error) {
@@ -80,7 +155,7 @@ func (a *Authorizer) CanCapability(ctx context.Context, sub accesscontrol.Princi
 	if err != nil {
 		return false, fmt.Errorf("resolve object grants: %w", err)
 	}
-	return a.decide(grants, codename, scope(obj.Kind, obj.ID)), nil
+	return a.decide(sub.UserID, grants, codename, scope(obj.Kind, obj.ID)), nil
 }
 
 func (a *Authorizer) CanGlobal(ctx context.Context, sub accesscontrol.Principal, codename string) (bool, error) {
@@ -88,7 +163,7 @@ func (a *Authorizer) CanGlobal(ctx context.Context, sub accesscontrol.Principal,
 	if err != nil {
 		return false, fmt.Errorf("resolve global grants: %w", err)
 	}
-	return a.decide(grants, codename, ""), nil
+	return a.decide(sub.UserID, grants, codename, ""), nil
 }
 
 func (a *Authorizer) VisibleIDs(ctx context.Context, sub accesscontrol.Principal, action accesscontrol.Verb, contentType accesscontrol.ResourceKind) ([]int64, error) {
@@ -100,7 +175,7 @@ func (a *Authorizer) VisibleIDs(ctx context.Context, sub accesscontrol.Principal
 	if err != nil {
 		return nil, fmt.Errorf("resolve global grants: %w", err)
 	}
-	if a.decide(global, codename, "") {
+	if a.decide(sub.UserID, global, codename, "") {
 		return a.grants.AllIDsOfType(ctx, contentType)
 	}
 
@@ -111,7 +186,7 @@ func (a *Authorizer) VisibleIDs(ctx context.Context, sub accesscontrol.Principal
 	seen := make(map[string]struct{}, len(grants))
 	ids := make([]int64, 0, len(grants))
 	for _, grant := range grants {
-		if _, ok := seen[grant.Scope]; ok || !a.decide(grants, codename, grant.Scope) {
+		if _, ok := seen[grant.Scope]; ok || !a.decide(sub.UserID, grants, codename, grant.Scope) {
 			continue
 		}
 		ct, rawID, ok := strings.Cut(grant.Scope, ":")
