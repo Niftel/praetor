@@ -4,6 +4,15 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_status:
+        description: Release status to verify
+        required: true
+        default: stable
+        type: choice
+        options:
+          - development
+          - stable
 
 permissions:
   contents: read
@@ -20,15 +29,26 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Verify stable release manifest
-        run: go run ./cmd/compatcheck -release
+      - name: Verify release manifest
+        env:
+          REQUESTED_STATUS: ${{ inputs.release_status }}
+        run: |
+          if [[ "${{ github.event_name }}" == workflow_dispatch && "$REQUESTED_STATUS" == stable ]]; then
+            go run ./cmd/compatcheck -release
+          else
+            summary=$(go run ./cmd/compatcheck -output summary)
+            printf '%s\n' "$summary"
+            if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then
+              [[ "$summary" == *"($REQUESTED_STATUS):"* ]]
+            fi
+          fi
 
       - name: Verify release tag matches manifest
         if: github.event_name == 'push'
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          manifest_version=$(go run ./cmd/compatcheck -release -output summary | sed -E 's/^Praetor ([^ ]+).*/\1/')
+          manifest_version=$(go run ./cmd/compatcheck -output summary | sed -E 's/^Praetor ([^ ]+).*/\1/')
           test "$RELEASE_TAG" = "v$manifest_version"
 
       - name: Log in to GHCR for artifact verification
@@ -39,6 +59,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify published artifacts
-        if: github.event_name == 'workflow_dispatch'
+      - name: Verify stable published artifacts
+        if: github.event_name == 'workflow_dispatch' && inputs.release_status == 'stable'
         run: ./scripts/release-preflight.sh --remote
+
+      - name: Verify development published artifacts
+        if: github.event_name == 'workflow_dispatch' && inputs.release_status == 'development'
+        run: ./scripts/release-preflight.sh --development --remote

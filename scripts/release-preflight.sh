@@ -7,19 +7,34 @@ set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cache_root=${PRAETOR_RELEASE_CACHE:-${TMPDIR:-/tmp}/praetor-release-preflight}
 remote=false
+development=false
 
-case ${1:-} in
-    "") ;;
-    --remote) remote=true ;;
-    *) printf 'usage: %s [--remote]\n' "$0" >&2; exit 2 ;;
-esac
+for arg in "$@"; do
+    case $arg in
+        --remote) remote=true ;;
+        --development) development=true ;;
+        *) printf 'usage: %s [--development] [--remote]\n' "$0" >&2; exit 2 ;;
+    esac
+done
 
 cd "$root_dir"
 export GOWORK=off
 export GOCACHE="$cache_root/go-build"
 
-printf 'Checking stable-release invariants...\n'
-go run ./cmd/compatcheck -release
+compat_args=()
+release_kind=development
+if [[ $development != true ]]; then
+    compat_args=(-release)
+    release_kind=stable
+fi
+
+printf 'Checking %s-release invariants...\n' "$release_kind"
+summary=$(go run ./cmd/compatcheck "${compat_args[@]}" -output summary)
+printf '%s\n' "$summary"
+if [[ $development == true && $summary != *"(development):"* ]]; then
+    printf 'development preflight requires releaseStatus: development\n' >&2
+    exit 1
+fi
 
 if [[ $remote != true ]]; then
     printf 'Local release preflight passed. Use --remote to verify published artifacts.\n'
@@ -35,7 +50,7 @@ printf '\nChecking published container images...\n'
 while IFS= read -r image; do
     printf '  %s\n' "$image"
     docker manifest inspect "$image" >/dev/null
-done < <(go run ./cmd/compatcheck -release -output images)
+done < <(go run ./cmd/compatcheck "${compat_args[@]}" -output images)
 
 printf '\nChecking component repository tags...\n'
 while IFS=@ read -r repository version; do
@@ -44,12 +59,12 @@ while IFS=@ read -r repository version; do
         printf 'missing component tag: %s@%s\n' "$repository" "$version" >&2
         exit 1
     fi
-done < <(go run ./cmd/compatcheck -release -output repositories)
+done < <(go run ./cmd/compatcheck "${compat_args[@]}" -output repositories)
 
 printf '\nChecking published Go component and contract modules...\n'
 while IFS= read -r module; do
     printf '  %s\n' "$module"
     GOMODCACHE="$cache_root/go-mod" go mod download "$module"
-done < <(go run ./cmd/compatcheck -release -output modules)
+done < <(go run ./cmd/compatcheck "${compat_args[@]}" -output modules)
 
 printf '\nRemote release preflight passed.\n'

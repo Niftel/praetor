@@ -30,10 +30,12 @@ release preflight is the gate that verifies it.
 8. Dispatch **Promote platform release** with the exact platform version. The
    protected `platform-release` environment is the approval boundary. The
    coordinator creates only missing declared tags, waits for images and modules,
-   runs remote preflight, and creates the GitHub platform release last.
+   runs remote preflight, and creates the GitHub platform release last. A
+   `development` manifest produces a hidden draft release; a `stable` manifest
+   publishes the release.
 
-The tag workflow rejects a Git tag that differs from the stable manifest
-version. Component tags initiate publication; they are idempotent and are never
+The tag workflow rejects a Git tag that differs from the manifest version in
+either release mode. Component tags initiate publication; they are idempotent and are never
 moved when they already exist. The GitHub platform release is created only after
 the remote gate confirms that the declared component set has converged. The
 release-preflight workflow can also be dispatched manually to repeat verification.
@@ -54,10 +56,12 @@ those repositories and explicitly narrows it to contents write.
 
 ## Development manifests
 
-While `releaseStatus` is `development`, ordinary `make compat-check` succeeds so
-the component set can be developed and tested. `make release-preflight` fails by
-design. This prevents an incomplete candidate from being promoted merely because
-its YAML is structurally valid.
+While `releaseStatus` is `development`, ordinary `make compat-check` succeeds and
+the protected coordinator may publish private versioned artifacts into a hidden
+draft release. `make release-preflight` remains the stable-release gate and fails
+by design; use `./scripts/release-preflight.sh --development` to validate a
+development candidate locally. Changing the manifest to `stable` is the explicit
+act that allows the coordinator to publish the draft.
 
 ## What the gate proves
 
