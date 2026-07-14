@@ -2,7 +2,7 @@ name: Image
 
 # Build praetor's own images (api, migrator, ui) and push them to GHCR on merge
 # to main and on version tags. PRs build without pushing to catch Dockerfile
-# breakage. The Helm chart pulls ghcr.io/praetordev/praetor-<name> (see the
+# breakage. The Helm chart pulls ghcr.io/niftel/praetor-<name> (see the
 # chart's image.registry). The five service images live in their own repos.
 on:
   push:
@@ -52,7 +52,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/praetordev/praetor-${{ matrix.name }}
+          images: ghcr.io/niftel/praetor-${{ matrix.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,format=short
