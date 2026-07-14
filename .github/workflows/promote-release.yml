@@ -1,0 +1,58 @@
+name: Promote platform release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact platformVersion from platform-compatibility.yaml
+        required: true
+        type: string
+
+concurrency:
+  group: platform-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: platform-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Create scoped release token
+        id: release-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PRAETOR_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PRAETOR_RELEASE_APP_PRIVATE_KEY }}
+          owner: praetordev
+          repositories: |
+            praetor
+            scheduler
+            reconciler
+            executor
+            ingestion
+            consumer
+          permission-contents: write
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote declared component set
+        env:
+          PRAETOR_RELEASE_TOKEN: ${{ steps.release-token.outputs.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: ./scripts/promote-platform-release.sh "$RELEASE_VERSION"

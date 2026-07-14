@@ -20,21 +20,37 @@ release preflight is the gate that verifies it.
 5. Update contract versions and database migration bounds when required.
 6. Set `releaseStatus: stable` only after the candidate has passed platform and
    resilience testing.
-7. Run:
+7. Preview the exact repository-tag plan:
 
    ```bash
    make compat-check
-   make release-preflight-remote
+   make release-plan VERSION=<platformVersion>
    ```
 
-8. Tag this repository with `v<platformVersion>` only after remote preflight
-   succeeds.
+8. Dispatch **Promote platform release** with the exact platform version. The
+   protected `platform-release` environment is the approval boundary. The
+   coordinator creates only missing declared tags, waits for images and modules,
+   runs remote preflight, and creates the GitHub platform release last.
 
 The tag workflow rejects a Git tag that differs from the stable manifest
-version. Remote verification deliberately happens before tagging: image build
-workflows may also react to a tag, so attempting artifact verification on the
-same event would introduce a race with publication. The release-preflight
-workflow can also be dispatched manually to repeat remote verification.
+version. Component tags initiate publication; they are idempotent and are never
+moved when they already exist. The GitHub platform release is created only after
+the remote gate confirms that the declared component set has converged. The
+release-preflight workflow can also be dispatched manually to repeat verification.
+
+## Coordinator credentials
+
+Create an organization-owned GitHub App installed only on `praetor`,
+`scheduler`, `reconciler`, `executor`, `ingestion`, and `consumer`. Grant only
+repository **Contents: write**; tag creation automatically triggers the existing
+image workflows. Configure:
+
+- repository/environment variable `PRAETOR_RELEASE_APP_CLIENT_ID`;
+- protected environment secret `PRAETOR_RELEASE_APP_PRIVATE_KEY`;
+- required reviewers on the `platform-release` environment.
+
+The workflow requests a one-hour installation token scoped again to exactly
+those repositories and explicitly narrows it to contents write.
 
 ## Development manifests
 
