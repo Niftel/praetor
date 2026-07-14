@@ -25,7 +25,7 @@ type Resolver interface {
 
 type Authorizer struct {
 	grants Resolver
-	policy *engine.Snapshot
+	policy *engine.Loader
 }
 
 var _ legacy.Authorizer = (*Authorizer)(nil)
@@ -53,11 +53,11 @@ const policy = `[
 ]`
 
 func New(resolver Resolver) (*Authorizer, error) {
-	snapshot, err := engine.NewSnapshot("praetor-capabilities-v1", []byte(policy), engine.DenyOverrides)
-	if err != nil {
-		return nil, fmt.Errorf("build Praetor RBAC policy: %w", err)
+	loader := engine.NewLoader(engine.NewMemorySource([]byte(policy)), engine.DenyOverrides)
+	if err := loader.Refresh(context.Background()); err != nil {
+		return nil, fmt.Errorf("load Praetor RBAC policy: %w", err)
 	}
-	return &Authorizer{grants: resolver, policy: snapshot}, nil
+	return &Authorizer{grants: resolver, policy: loader}, nil
 }
 
 func scope(contentType legacy.ContentType, objectID int64) string {
@@ -65,7 +65,7 @@ func scope(contentType legacy.ContentType, objectID int64) string {
 }
 
 func (a *Authorizer) decide(grants []engine.Grant, need, target string) bool {
-	return engine.Decide(a.policy, engine.Query{Grants: grants, Need: need, Scope: target}).Allow
+	return a.policy.Decide(engine.Query{Grants: grants, Need: need, Scope: target}).Allow
 }
 
 func (a *Authorizer) Can(ctx context.Context, sub legacy.Subject, action legacy.Action, obj legacy.Object) (bool, error) {

@@ -37,6 +37,9 @@ func TestObjectDecisionUsesV4Policy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if a.policy.Version() == "" || a.policy.Current() == nil {
+		t.Fatal("RBAC v4 loader did not install an immutable policy snapshot")
+	}
 
 	allowed, err := a.Can(context.Background(), legacy.NewSubject(userID, false, false), legacy.ActionView, obj)
 	if err != nil || !allowed {
