@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -24,14 +24,14 @@ func TestDelegatedOrgAdminRoles(t *testing.T) {
 
 	h := handlers.NewProjectsResource(db, handlers.NewAuthorizer(db))
 	invRes := handlers.NewInventoriesResource(db, handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
 	org := createOrg(t, db, fmt.Sprintf("rbac-deleg-org-%d", uniq))
 	projAdmin := createUser(t, db, fmt.Sprintf("rbac-deleg-projadmin-%d", uniq))
 	invAdmin := createUser(t, db, fmt.Sprintf("rbac-deleg-invadmin-%d", uniq))
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldProjectAdmin, projAdmin)
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldInventoryAdmin, invAdmin)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.ProjectAdminRole, projAdmin)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.InventoryAdminRole, invAdmin)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, org)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, projAdmin, invAdmin)
@@ -71,7 +71,7 @@ func TestDelegatedOrgAdminRoles(t *testing.T) {
 func TestOrgExecuteRunsJobTemplates(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 	ctx := context.Background()
 
 	uniq := time.Now().UnixNano()
@@ -101,18 +101,18 @@ func TestOrgExecuteRunsJobTemplates(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, runner, nobody)
 	})
 
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldExecute, runner)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.ExecuteRole, runner)
 
-	if ok, err := capCheck(access, runner, rbac.ContentTypeJobTemplate, jtID, rbac.ActionExecute); err != nil || !ok {
+	if ok, err := capCheck(access, runner, rbac.JobTemplate, jtID, rbac.Execute); err != nil || !ok {
 		t.Fatalf("org-execute holder should execute org JT: ok=%v err=%v", ok, err)
 	}
-	if ok, err := capCheck(access, runner, rbac.ContentTypeJobTemplate, jtID, rbac.ActionView); err != nil || !ok {
+	if ok, err := capCheck(access, runner, rbac.JobTemplate, jtID, rbac.View); err != nil || !ok {
 		t.Fatalf("org-execute holder should read org JT: ok=%v err=%v", ok, err)
 	}
-	if ok, _ := capCheck(access, runner, rbac.ContentTypeJobTemplate, jtID, rbac.ActionManage); ok {
+	if ok, _ := capCheck(access, runner, rbac.JobTemplate, jtID, rbac.Manage); ok {
 		t.Fatalf("org-execute holder must NOT administer the JT")
 	}
-	if ok, _ := capCheck(access, nobody, rbac.ContentTypeJobTemplate, jtID, rbac.ActionExecute); ok {
+	if ok, _ := capCheck(access, nobody, rbac.JobTemplate, jtID, rbac.Execute); ok {
 		t.Fatalf("unrelated user must not execute the JT")
 	}
 }
@@ -126,14 +126,14 @@ func TestUpdateRoleSyncsWithoutAdmin(t *testing.T) {
 	defer db.Close()
 
 	h := handlers.NewProjectsResource(db, handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
 	org := createOrg(t, db, fmt.Sprintf("rbac-upd-org-%d", uniq))
 	owner := createUser(t, db, fmt.Sprintf("rbac-upd-owner-%d", uniq))     // creates the project
 	updater := createUser(t, db, fmt.Sprintf("rbac-upd-updater-%d", uniq)) // update_role only
 	reader := createUser(t, db, fmt.Sprintf("rbac-upd-reader-%d", uniq))   // read_role only
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldAdmin, owner)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.AdminRole, owner)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, org)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`, owner, updater, reader)
@@ -147,8 +147,8 @@ func TestUpdateRoleSyncsWithoutAdmin(t *testing.T) {
 	}
 	projID := extractID(t, rec.Body.String())
 
-	grantObjectRole(t, access, rbac.ContentTypeProject, projID, rbac.RoleFieldUpdate, updater)
-	grantObjectRole(t, access, rbac.ContentTypeProject, projID, rbac.RoleFieldRead, reader)
+	grantObjectRole(t, access, rbac.Project, projID, rbac.UpdateRole, updater)
+	grantObjectRole(t, access, rbac.Project, projID, rbac.ReadRole, reader)
 
 	idParam := map[string]string{"id": fmt.Sprint(projID)}
 

@@ -18,7 +18,7 @@ import (
 	"github.com/hyperjumptech/grule-rule-engine/pkg"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/launch"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )
@@ -287,7 +287,7 @@ func (rs *EventsResource) ListSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) CreateSource(w http.ResponseWriter, r *http.Request) {
-	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
+	if !rs.requireGlobal(w, r, rbac.ManageEventSources) {
 		return
 	}
 	var in eventSource
@@ -307,7 +307,7 @@ func (rs *EventsResource) CreateSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) DeleteSource(w http.ResponseWriter, r *http.Request) {
-	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
+	if !rs.requireGlobal(w, r, rbac.ManageEventSources) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -334,7 +334,7 @@ func (rs *EventsResource) ListRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) CreateRule(w http.ResponseWriter, r *http.Request) {
-	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
+	if !rs.requireGlobal(w, r, rbac.ManageEventSources) {
 		return
 	}
 	var in eventRule
@@ -365,7 +365,7 @@ func (rs *EventsResource) CreateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rs *EventsResource) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	if !rs.requireGlobal(w, r, rbac.CapManageEventSource) {
+	if !rs.requireGlobal(w, r, rbac.ManageEventSources) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

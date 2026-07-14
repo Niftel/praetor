@@ -6,14 +6,14 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 )
 
 // ListOrgGalaxyCredentials GET /api/v1/organizations/{id}/galaxy-credentials
 func (h *OrgsResource) ListOrgGalaxyCredentials(w http.ResponseWriter, r *http.Request) {
 	orgID := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actRead) {
+	if !h.authorize(w, r, rbac.Organization, orgID, actRead) {
 		return
 	}
 
@@ -28,7 +28,7 @@ func (h *OrgsResource) ListOrgGalaxyCredentials(w http.ResponseWriter, r *http.R
 // AddOrgGalaxyCredential POST /api/v1/organizations/{id}/galaxy-credentials
 func (h *OrgsResource) AddOrgGalaxyCredential(w http.ResponseWriter, r *http.Request) {
 	orgID := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
+	if !h.authorize(w, r, rbac.Organization, orgID, actAdmin) {
 		return
 	}
 
@@ -51,7 +51,7 @@ func (h *OrgsResource) AddOrgGalaxyCredential(w http.ResponseWriter, r *http.Req
 // RemoveOrgGalaxyCredential DELETE /api/v1/organizations/{id}/galaxy-credentials/{credId}
 func (h *OrgsResource) RemoveOrgGalaxyCredential(w http.ResponseWriter, r *http.Request) {
 	orgID := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
+	if !h.authorize(w, r, rbac.Organization, orgID, actAdmin) {
 		return
 	}
 	credID, err := strconv.ParseInt(chi.URLParam(r, "credId"), 10, 64)

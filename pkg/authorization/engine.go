@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	legacy "github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 	engine "github.com/praetordev/rbac/v4"
 )
 
@@ -17,10 +17,10 @@ import (
 // from server-controlled state using the authenticated subject id; request data
 // must never be accepted as a grant source.
 type Resolver interface {
-	ObjectGrants(context.Context, int64, legacy.ContentType, int64) ([]engine.Grant, error)
+	ObjectGrants(context.Context, int64, accesscontrol.ResourceKind, int64) ([]engine.Grant, error)
 	GlobalGrants(context.Context, int64) ([]engine.Grant, error)
-	ScopedGrants(context.Context, int64, legacy.ContentType) ([]engine.Grant, error)
-	AllIDsOfType(context.Context, legacy.ContentType) ([]int64, error)
+	ScopedGrants(context.Context, int64, accesscontrol.ResourceKind) ([]engine.Grant, error)
+	AllIDsOfType(context.Context, accesscontrol.ResourceKind) ([]int64, error)
 }
 
 type Authorizer struct {
@@ -28,7 +28,7 @@ type Authorizer struct {
 	policy *engine.Loader
 }
 
-var _ legacy.Authorizer = (*Authorizer)(nil)
+var _ accesscontrol.DecisionPoint = (*Authorizer)(nil)
 
 const policy = `[
   {"name":"allow-exact-global","effect":"allow","when":{"all":[
@@ -60,7 +60,7 @@ func New(resolver Resolver) (*Authorizer, error) {
 	return &Authorizer{grants: resolver, policy: loader}, nil
 }
 
-func scope(contentType legacy.ContentType, objectID int64) string {
+func scope(contentType accesscontrol.ResourceKind, objectID int64) string {
 	return fmt.Sprintf("%s:%d", contentType, objectID)
 }
 
@@ -68,22 +68,22 @@ func (a *Authorizer) decide(grants []engine.Grant, need, target string) bool {
 	return a.policy.Decide(engine.Query{Grants: grants, Need: need, Scope: target}).Allow
 }
 
-func (a *Authorizer) Can(ctx context.Context, sub legacy.Subject, action legacy.Action, obj legacy.Object) (bool, error) {
-	if !legacy.IsValidCapability(obj.Type, action) {
-		return false, fmt.Errorf("capability %q is not defined for content type %q", action, obj.Type)
+func (a *Authorizer) Can(ctx context.Context, sub accesscontrol.Principal, action accesscontrol.Verb, obj accesscontrol.Resource) (bool, error) {
+	if !accesscontrol.IsCapability(obj.Kind, action) {
+		return false, fmt.Errorf("capability %q is not defined for content type %q", action, obj.Kind)
 	}
-	return a.CanCodename(ctx, sub, legacy.Codename(obj.Type, action), obj)
+	return a.CanCapability(ctx, sub, accesscontrol.Capability(obj.Kind, action), obj)
 }
 
-func (a *Authorizer) CanCodename(ctx context.Context, sub legacy.Subject, codename string, obj legacy.Object) (bool, error) {
-	grants, err := a.grants.ObjectGrants(ctx, sub.UserID, obj.Type, obj.ID)
+func (a *Authorizer) CanCapability(ctx context.Context, sub accesscontrol.Principal, codename string, obj accesscontrol.Resource) (bool, error) {
+	grants, err := a.grants.ObjectGrants(ctx, sub.UserID, obj.Kind, obj.ID)
 	if err != nil {
 		return false, fmt.Errorf("resolve object grants: %w", err)
 	}
-	return a.decide(grants, codename, scope(obj.Type, obj.ID)), nil
+	return a.decide(grants, codename, scope(obj.Kind, obj.ID)), nil
 }
 
-func (a *Authorizer) CanGlobal(ctx context.Context, sub legacy.Subject, codename string) (bool, error) {
+func (a *Authorizer) CanGlobal(ctx context.Context, sub accesscontrol.Principal, codename string) (bool, error) {
 	grants, err := a.grants.GlobalGrants(ctx, sub.UserID)
 	if err != nil {
 		return false, fmt.Errorf("resolve global grants: %w", err)
@@ -91,11 +91,11 @@ func (a *Authorizer) CanGlobal(ctx context.Context, sub legacy.Subject, codename
 	return a.decide(grants, codename, ""), nil
 }
 
-func (a *Authorizer) VisibleIDs(ctx context.Context, sub legacy.Subject, action legacy.Action, contentType legacy.ContentType) ([]int64, error) {
-	if !legacy.IsValidCapability(contentType, action) {
+func (a *Authorizer) VisibleIDs(ctx context.Context, sub accesscontrol.Principal, action accesscontrol.Verb, contentType accesscontrol.ResourceKind) ([]int64, error) {
+	if !accesscontrol.IsCapability(contentType, action) {
 		return nil, fmt.Errorf("capability %q is not defined for content type %q", action, contentType)
 	}
-	codename := legacy.Codename(contentType, action)
+	codename := accesscontrol.Capability(contentType, action)
 	global, err := a.grants.GlobalGrants(ctx, sub.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve global grants: %w", err)
@@ -126,6 +126,6 @@ func (a *Authorizer) VisibleIDs(ctx context.Context, sub legacy.Subject, action 
 	return ids, nil
 }
 
-func (a *Authorizer) AllIDsOfType(ctx context.Context, contentType legacy.ContentType) ([]int64, error) {
+func (a *Authorizer) AllIDsOfType(ctx context.Context, contentType accesscontrol.ResourceKind) ([]int64, error) {
 	return a.grants.AllIDsOfType(ctx, contentType)
 }

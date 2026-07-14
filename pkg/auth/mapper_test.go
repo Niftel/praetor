@@ -10,7 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 )
 
 // fakeResolver returns a canned identity so the mapper is testable without a live
@@ -38,11 +38,10 @@ func mapperTestDB(t *testing.T) *sqlx.DB {
 	return db
 }
 
-// objRoleMemberCount counts a user's capability assignment of the managed RoleDefinition
-// mirroring a legacy (content_type, role_field) on an object.
+// objRoleMemberCount counts a user's built-in role assignment on an object.
 func objRoleMemberCount(t *testing.T, db *sqlx.DB, ct string, objID, userID int64, field string) int {
 	t.Helper()
-	name, ok := rbac.ManagedNameForLegacy(rbac.ContentType(ct), rbac.RoleField(field))
+	name, ok := accesscontrol.BuiltinRoleName(accesscontrol.ResourceKind(ct), accesscontrol.RoleKind(field))
 	if !ok {
 		t.Fatalf("no managed role for %s/%s", ct, field)
 	}

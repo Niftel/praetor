@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -59,7 +59,7 @@ func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request)
 
 	// Superusers and system auditors (global view) see all; everyone else is
 	// filtered to the organizations they can read.
-	viewAll, verr := h.canViewAll(r, rbac.ContentTypeOrganization)
+	viewAll, verr := h.canViewAll(r, accesscontrol.Organization)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -73,7 +73,7 @@ func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request)
 		total, _ = h.store.CountAll(r.Context())
 	} else {
 		// Filter by accessible organizations
-		accessibleIDs, err := h.readableIDs(r, rbac.ContentTypeOrganization)
+		accessibleIDs, err := h.readableIDs(r, accesscontrol.Organization)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
@@ -103,7 +103,7 @@ func (h *OrgsResource) CreateOrganization(w http.ResponseWriter, r *http.Request
 
 	// Creating an organization is a global add_organization capability (held by
 	// System Administrator / break-glass superuser).
-	if !h.requireGlobal(w, r, rbac.Codename(rbac.ContentTypeOrganization, rbac.ActionAdd)) {
+	if !h.requireGlobal(w, r, accesscontrol.Capability(accesscontrol.Organization, accesscontrol.Add)) {
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *OrgsResource) GetOrganization(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
 
 	// Check read permission
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actRead) {
 		return
 	}
 
@@ -144,7 +144,7 @@ func (h *OrgsResource) UpdateOrganization(w http.ResponseWriter, r *http.Request
 	id := render.GetIDParam(r)
 
 	// Check admin permission
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actAdmin) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actAdmin) {
 		return
 	}
 
@@ -173,7 +173,7 @@ func (h *OrgsResource) DeleteOrganization(w http.ResponseWriter, r *http.Request
 	id := render.GetIDParam(r)
 
 	// Deleting an organization is a global delete_organization capability.
-	if !h.requireGlobal(w, r, rbac.Codename(rbac.ContentTypeOrganization, rbac.ActionDelete)) {
+	if !h.requireGlobal(w, r, accesscontrol.Capability(accesscontrol.Organization, accesscontrol.Delete)) {
 		return
 	}
 
@@ -195,7 +195,7 @@ func (h *OrgsResource) ListOrganizationUsers(w http.ResponseWriter, r *http.Requ
 	id := getOrgIDFromPath(r)
 
 	// Check read permission
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actRead) {
 		return
 	}
 
@@ -214,7 +214,7 @@ func (h *OrgsResource) AddOrganizationUser(w http.ResponseWriter, r *http.Reques
 	orgID := getOrgIDFromPath(r)
 
 	// Check admin permission
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
+	if !h.authorize(w, r, accesscontrol.Organization, orgID, actAdmin) {
 		return
 	}
 
@@ -227,7 +227,7 @@ func (h *OrgsResource) AddOrganizationUser(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.setOrgRole(r.Context(), orgID, rbac.RoleFieldMember, req.UserID, true); err != nil {
+	if err := h.setOrgRole(r.Context(), orgID, accesscontrol.MemberRole, req.UserID, true); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -245,11 +245,11 @@ func (h *OrgsResource) RemoveOrganizationUser(w http.ResponseWriter, r *http.Req
 	}
 
 	// Check admin permission
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
+	if !h.authorize(w, r, accesscontrol.Organization, orgID, actAdmin) {
 		return
 	}
 
-	if err := h.setOrgRole(r.Context(), orgID, rbac.RoleFieldMember, userID, false); err != nil {
+	if err := h.setOrgRole(r.Context(), orgID, accesscontrol.MemberRole, userID, false); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -262,7 +262,7 @@ func (h *OrgsResource) ListOrganizationAdmins(w http.ResponseWriter, r *http.Req
 	id := getOrgIDFromPath(r)
 
 	// Check read permission
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actRead) {
 		return
 	}
 
@@ -279,7 +279,7 @@ func (h *OrgsResource) AddOrganizationAdmin(w http.ResponseWriter, r *http.Reque
 	orgID := getOrgIDFromPath(r)
 
 	// Only superusers or existing org admins can add admins
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actAdmin) {
+	if !h.authorize(w, r, accesscontrol.Organization, orgID, actAdmin) {
 		return
 	}
 
@@ -292,7 +292,7 @@ func (h *OrgsResource) AddOrganizationAdmin(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.setOrgRole(r.Context(), orgID, rbac.RoleFieldAdmin, req.UserID, true); err != nil {
+	if err := h.setOrgRole(r.Context(), orgID, accesscontrol.AdminRole, req.UserID, true); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -301,27 +301,27 @@ func (h *OrgsResource) AddOrganizationAdmin(w http.ResponseWriter, r *http.Reque
 
 // setOrgRole grants or revokes the managed RoleDefinition mirroring an org role_field
 // (member/admin) for a user, scoped to the organization.
-func (h *OrgsResource) setOrgRole(ctx context.Context, orgID int64, rf rbac.RoleField, userID int64, grant bool) error {
-	name, ok := rbac.ManagedNameForLegacy(rbac.ContentTypeOrganization, rf)
+func (h *OrgsResource) setOrgRole(ctx context.Context, orgID int64, rf accesscontrol.RoleKind, userID int64, grant bool) error {
+	name, ok := accesscontrol.BuiltinRoleName(accesscontrol.Organization, rf)
 	if !ok {
 		return fmt.Errorf("no managed role definition for %s", rf)
 	}
-	def, err := h.caps.GetRoleDefinitionByName(ctx, name)
+	def, err := h.caps.RoleByName(ctx, name)
 	if err != nil {
 		return err
 	}
-	ct := string(rbac.ContentTypeOrganization)
+	resource := accesscontrol.Object(accesscontrol.Organization, orgID)
 	if grant {
-		return h.caps.GiveUserPermission(ctx, def.ID, &ct, &orgID, userID)
+		return h.caps.Assign(ctx, accesscontrol.Assignment{RoleDefinitionID: def.ID, Resource: &resource, PrincipalKind: accesscontrol.UserPrincipal, PrincipalID: userID})
 	}
-	return h.caps.RevokeUserPermission(ctx, def.ID, ct, orgID, userID)
+	return h.caps.Revoke(ctx, accesscontrol.Assignment{RoleDefinitionID: def.ID, Resource: &resource, PrincipalKind: accesscontrol.UserPrincipal, PrincipalID: userID})
 }
 
 // ListOrganizationTeams GET /api/v1/organizations/{id}/teams
 func (h *OrgsResource) ListOrganizationTeams(w http.ResponseWriter, r *http.Request) {
 	id := getOrgIDFromPath(r)
 
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actRead) {
 		return
 	}
 
@@ -338,11 +338,11 @@ func (h *OrgsResource) ListOrganizationTeams(w http.ResponseWriter, r *http.Requ
 func (h *OrgsResource) ListOrganizationRoles(w http.ResponseWriter, r *http.Request) {
 	id := getOrgIDFromPath(r)
 
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actRead) {
 		return
 	}
 
-	roles, err := h.caps.AssignableRoles(r.Context(), string(rbac.ContentTypeOrganization))
+	roles, err := h.caps.AssignableRoles(r.Context(), accesscontrol.Organization)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -354,7 +354,7 @@ func (h *OrgsResource) ListOrganizationRoles(w http.ResponseWriter, r *http.Requ
 func (h *OrgsResource) ListOrganizationProjects(w http.ResponseWriter, r *http.Request) {
 	id := getOrgIDFromPath(r)
 
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actRead) {
 		return
 	}
 
@@ -370,7 +370,7 @@ func (h *OrgsResource) ListOrganizationProjects(w http.ResponseWriter, r *http.R
 func (h *OrgsResource) ListOrganizationInventories(w http.ResponseWriter, r *http.Request) {
 	id := getOrgIDFromPath(r)
 
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, id, actRead) {
+	if !h.authorize(w, r, accesscontrol.Organization, id, actRead) {
 		return
 	}
 

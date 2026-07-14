@@ -8,7 +8,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -68,7 +68,7 @@ func (h *UsersResource) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser POST /api/v1/users
 func (h *UsersResource) CreateUser(w http.ResponseWriter, r *http.Request) {
-	if !h.requireGlobal(w, r, rbac.CapManageUser) {
+	if !h.requireGlobal(w, r, rbac.ManageUsers) {
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *UsersResource) GetUser(w http.ResponseWriter, r *http.Request) {
 func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// This endpoint can set is_superuser/is_active, so it is superuser-only.
 	// Self-service profile editing belongs in a separate, field-restricted route.
-	if !h.requireGlobal(w, r, rbac.CapManageUser) {
+	if !h.requireGlobal(w, r, rbac.ManageUsers) {
 		return
 	}
 
@@ -151,7 +151,7 @@ func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 // DeleteUser DELETE /api/v1/users/{id}
 func (h *UsersResource) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	if !h.requireGlobal(w, r, rbac.CapManageUser) {
+	if !h.requireGlobal(w, r, rbac.ManageUsers) {
 		return
 	}
 

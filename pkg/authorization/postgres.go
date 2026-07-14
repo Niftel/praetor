@@ -5,16 +5,16 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
-	legacy "github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 	engine "github.com/praetordev/rbac/v4"
 )
 
 type PostgresResolver struct {
 	db     *sqlx.DB
-	tables map[legacy.ContentType]string
+	tables map[accesscontrol.ResourceKind]string
 }
 
-func NewPostgres(db *sqlx.DB, tables map[legacy.ContentType]string) (*Authorizer, error) {
+func NewPostgres(db *sqlx.DB, tables map[accesscontrol.ResourceKind]string) (*Authorizer, error) {
 	return New(&PostgresResolver{db: db, tables: tables})
 }
 
@@ -49,7 +49,7 @@ func (r *PostgresResolver) GlobalGrants(ctx context.Context, userID int64) ([]en
 	return toGrants(rows), err
 }
 
-func (r *PostgresResolver) ObjectGrants(ctx context.Context, userID int64, contentType legacy.ContentType, objectID int64) ([]engine.Grant, error) {
+func (r *PostgresResolver) ObjectGrants(ctx context.Context, userID int64, contentType accesscontrol.ResourceKind, objectID int64) ([]engine.Grant, error) {
 	rows := []grantRow{}
 	err := r.db.SelectContext(ctx, &rows, `
 		SELECT DISTINCT p.codename AS capability, '' AS scope
@@ -66,7 +66,7 @@ func (r *PostgresResolver) ObjectGrants(ctx context.Context, userID int64, conte
 	return toGrants(rows), err
 }
 
-func (r *PostgresResolver) ScopedGrants(ctx context.Context, userID int64, contentType legacy.ContentType) ([]engine.Grant, error) {
+func (r *PostgresResolver) ScopedGrants(ctx context.Context, userID int64, contentType accesscontrol.ResourceKind) ([]engine.Grant, error) {
 	rows := []grantRow{}
 	err := r.db.SelectContext(ctx, &rows, `
 		SELECT DISTINCT e.codename AS capability, e.content_type || ':' || e.object_id AS scope
@@ -77,7 +77,7 @@ func (r *PostgresResolver) ScopedGrants(ctx context.Context, userID int64, conte
 	return toGrants(rows), err
 }
 
-func (r *PostgresResolver) AllIDsOfType(ctx context.Context, contentType legacy.ContentType) ([]int64, error) {
+func (r *PostgresResolver) AllIDsOfType(ctx context.Context, contentType accesscontrol.ResourceKind) ([]int64, error) {
 	table, ok := r.tables[contentType]
 	if !ok {
 		return nil, fmt.Errorf("no table registered for content type %q", contentType)

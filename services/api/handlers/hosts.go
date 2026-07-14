@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -51,7 +51,7 @@ func (rs *HostsResource) authorizeHost(w http.ResponseWriter, r *http.Request, h
 		render.ErrNotFound(nil).Render(w, r)
 		return false
 	}
-	return rs.authorize(w, r, rbac.ContentTypeInventory, invID, action)
+	return rs.authorize(w, r, rbac.Inventory, invID, action)
 }
 
 // Routes creates a REST router for hosts
@@ -97,7 +97,7 @@ func (rs *HostsResource) ListHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actRead) {
+	if !rs.authorize(w, r, rbac.Inventory, inventoryId, actRead) {
 		return
 	}
 
@@ -119,7 +119,7 @@ func (rs *HostsResource) CreateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actAdmin) {
+	if !rs.authorize(w, r, rbac.Inventory, inventoryId, actAdmin) {
 		return
 	}
 

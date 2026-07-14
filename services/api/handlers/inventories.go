@@ -10,7 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -58,7 +58,7 @@ func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Re
 	var inventories []models.Inventory
 	var total int64
 
-	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeInventory)
+	viewAll, verr := rs.canViewAll(r, rbac.Inventory)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -71,7 +71,7 @@ func (rs *InventoriesResource) ListInventories(w http.ResponseWriter, r *http.Re
 		}
 		total, _ = rs.store.CountAll(r.Context())
 	} else {
-		ids, err := rs.readableIDs(r, rbac.ContentTypeInventory)
+		ids, err := rs.readableIDs(r, rbac.Inventory)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
@@ -118,7 +118,7 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 
 	// Creating an inventory requires the org's inventory_admin_role (org admins
 	// and superusers inherit it through the role hierarchy).
-	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldInventoryAdmin) {
+	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.InventoryAdminRole) {
 		return
 	}
 
@@ -133,7 +133,7 @@ func (rs *InventoriesResource) CreateInventory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeInventory, created.ID, currentUser(r))
+	rs.grantCreatorAdmin(r.Context(), rbac.Inventory, created.ID, currentUser(r))
 	render.Created(w, r, dto.FromInventory(created))
 }
 
@@ -146,7 +146,7 @@ func (rs *InventoriesResource) GetInventoryByParam(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actRead) {
+	if !rs.authorize(w, r, rbac.Inventory, id, actRead) {
 		return
 	}
 
@@ -168,7 +168,7 @@ func (rs *InventoriesResource) UpdateInventoryByParam(w http.ResponseWriter, r *
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.Inventory, id, actAdmin) {
 		return
 	}
 
@@ -196,7 +196,7 @@ func (rs *InventoriesResource) DeleteInventoryByParam(w http.ResponseWriter, r *
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.Inventory, id, actAdmin) {
 		return
 	}
 

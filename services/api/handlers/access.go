@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )
@@ -49,7 +49,8 @@ func (h *AccessResource) ResourceAccess(w http.ResponseWriter, r *http.Request) 
 
 	// You may view an object's access list if you can view the object — break-glass
 	// superusers (via the decorator) and global-view system roles (auditor) pass.
-	canRead, err := h.authz.CanCodename(r.Context(), h.subject(r), rbac.Codename(rbac.ContentType(ct), rbac.ActionView), rbac.Obj(rbac.ContentType(ct), oid))
+	kind := accesscontrol.ResourceKind(ct)
+	canRead, err := h.authz.CanCapability(r.Context(), h.subject(r), accesscontrol.Capability(kind, accesscontrol.View), accesscontrol.Object(kind, oid))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -87,7 +88,7 @@ func (h *AccessResource) AssignableRoles(w http.ResponseWriter, r *http.Request)
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	defs, err := h.caps.AssignableRoles(r.Context(), ct)
+	defs, err := h.caps.AssignableRoles(r.Context(), accesscontrol.ResourceKind(ct))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -107,7 +108,8 @@ type accessGrantRequest struct {
 func (h *AccessResource) gateManage(w http.ResponseWriter, r *http.Request, ct string, oid int64) bool {
 	// Administering an object's grants requires manage on it — superusers pass via
 	// the decorator inside the injected Authorizer.
-	ok, err := h.authz.CanCodename(r.Context(), h.subject(r), rbac.Codename(rbac.ContentType(ct), rbac.ActionManage), rbac.Obj(rbac.ContentType(ct), oid))
+	kind := accesscontrol.ResourceKind(ct)
+	ok, err := h.authz.CanCapability(r.Context(), h.subject(r), accesscontrol.Capability(kind, accesscontrol.Manage), accesscontrol.Object(kind, oid))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return false
@@ -123,22 +125,22 @@ func (h *AccessResource) gateManage(w http.ResponseWriter, r *http.Request, ct s
 // fence — the target user/team must belong to the resource's organization. Returns the
 // message to surface when it does.
 func (h *AccessResource) orgFenceViolated(r *http.Request, req accessGrantRequest) (bool, string) {
-	if rbac.ContentType(req.ContentType) == rbac.ContentTypeOrganization {
+	if accesscontrol.ResourceKind(req.ContentType) == accesscontrol.Organization {
 		return false, "" // granting an org role IS the membership
 	}
-	orgID, ok := h.Access.OrgForContent(r.Context(), rbac.ContentType(req.ContentType), req.ObjectID)
+	orgID, ok := h.Access.OrganizationFor(r.Context(), accesscontrol.Object(accesscontrol.ResourceKind(req.ContentType), req.ObjectID))
 	if !ok {
 		return false, ""
 	}
-	orgView := rbac.Codename(rbac.ContentTypeOrganization, rbac.ActionView)
+	orgView := accesscontrol.Capability(accesscontrol.Organization, accesscontrol.View)
 	switch {
 	case req.UserID != nil:
-		member, _ := h.caps.HasCapability(r.Context(), *req.UserID, rbac.ContentTypeOrganization, orgID, orgView)
+		member, _ := h.authz.CanCapability(r.Context(), accesscontrol.Principal{UserID: *req.UserID}, orgView, accesscontrol.Object(accesscontrol.Organization, orgID))
 		if !member {
 			return true, "user must be a member of the resource's organization before being granted a role on it"
 		}
 	case req.TeamID != nil:
-		if teamOrg, ok := h.Access.OrgForContent(r.Context(), rbac.ContentTypeTeam, *req.TeamID); !ok || teamOrg != orgID {
+		if teamOrg, ok := h.Access.OrganizationFor(r.Context(), accesscontrol.Object(accesscontrol.Team, *req.TeamID)); !ok || teamOrg != orgID {
 			return true, "team must belong to the resource's organization"
 		}
 	}
@@ -166,11 +168,12 @@ func (h *AccessResource) GrantAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var err error
+	resource := accesscontrol.Object(accesscontrol.ResourceKind(req.ContentType), req.ObjectID)
 	switch {
 	case req.UserID != nil:
-		err = h.caps.GiveUserPermission(r.Context(), req.RoleDefinitionID, &req.ContentType, &req.ObjectID, *req.UserID)
+		err = h.caps.Assign(r.Context(), accesscontrol.Assignment{RoleDefinitionID: req.RoleDefinitionID, Resource: &resource, PrincipalKind: accesscontrol.UserPrincipal, PrincipalID: *req.UserID})
 	case req.TeamID != nil:
-		err = h.caps.GiveTeamPermission(r.Context(), req.RoleDefinitionID, &req.ContentType, &req.ObjectID, *req.TeamID)
+		err = h.caps.Assign(r.Context(), accesscontrol.Assignment{RoleDefinitionID: req.RoleDefinitionID, Resource: &resource, PrincipalKind: accesscontrol.TeamPrincipal, PrincipalID: *req.TeamID})
 	default:
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
@@ -197,11 +200,12 @@ func (h *AccessResource) RevokeAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var err error
+	resource := accesscontrol.Object(accesscontrol.ResourceKind(req.ContentType), req.ObjectID)
 	switch {
 	case req.UserID != nil:
-		err = h.caps.RevokeUserPermission(r.Context(), req.RoleDefinitionID, req.ContentType, req.ObjectID, *req.UserID)
+		err = h.caps.Revoke(r.Context(), accesscontrol.Assignment{RoleDefinitionID: req.RoleDefinitionID, Resource: &resource, PrincipalKind: accesscontrol.UserPrincipal, PrincipalID: *req.UserID})
 	case req.TeamID != nil:
-		err = h.caps.RevokeTeamPermission(r.Context(), req.RoleDefinitionID, req.ContentType, req.ObjectID, *req.TeamID)
+		err = h.caps.Revoke(r.Context(), accesscontrol.Assignment{RoleDefinitionID: req.RoleDefinitionID, Resource: &resource, PrincipalKind: accesscontrol.TeamPrincipal, PrincipalID: *req.TeamID})
 	default:
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return

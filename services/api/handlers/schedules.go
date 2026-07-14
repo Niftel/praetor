@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/render"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/store"
 	"github.com/teambition/rrule-go"
@@ -56,7 +56,7 @@ func (rs *SchedulesResource) Routes() chi.Router {
 func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Request) {
 	var schedules []models.Schedule
 	var err error
-	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeOrganization)
+	viewAll, verr := rs.canViewAll(r, rbac.Organization)
 	if verr != nil {
 		render.Render(w, r, ErrInternal(verr))
 		return
@@ -70,7 +70,7 @@ func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Scope to schedules whose target lives in an organization the user can read.
-	ids, err := rs.readableIDs(r, rbac.ContentTypeOrganization)
+	ids, err := rs.readableIDs(r, rbac.Organization)
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
@@ -88,7 +88,7 @@ func (rs *SchedulesResource) GetSchedule(w http.ResponseWriter, r *http.Request)
 	if org, ok := rs.store.ScheduleOrg(r.Context(), id); !ok {
 		render.Render(w, r, ErrNotFound)
 		return
-	} else if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actRead) {
+	} else if !rs.authorize(w, r, rbac.Organization, org, actRead) {
 		return
 	}
 	sched, err := rs.store.Get(r.Context(), id)
@@ -125,7 +125,7 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 		render.Render(w, r, ErrInvalidRequest(nil))
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	if !rs.authorize(w, r, rbac.Organization, org, actAdmin) {
 		return
 	}
 
@@ -170,7 +170,7 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 		render.Render(w, r, ErrNotFound)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, curOrg, actAdmin) {
+	if !rs.authorize(w, r, rbac.Organization, curOrg, actAdmin) {
 		return
 	}
 
@@ -183,7 +183,7 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 	sched.ID = id
 	// If the target changed, the caller must also admin the new target's org.
 	if newOrg, ok := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); ok && newOrg != curOrg {
-		if !rs.authorize(w, r, rbac.ContentTypeOrganization, newOrg, actAdmin) {
+		if !rs.authorize(w, r, rbac.Organization, newOrg, actAdmin) {
 			return
 		}
 	}
@@ -217,7 +217,7 @@ func (rs *SchedulesResource) DeleteSchedule(w http.ResponseWriter, r *http.Reque
 		render.Render(w, r, ErrNotFound)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	if !rs.authorize(w, r, rbac.Organization, org, actAdmin) {
 		return
 	}
 	if err := rs.store.Delete(r.Context(), id); err != nil {

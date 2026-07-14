@@ -10,7 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/db"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -99,7 +99,7 @@ func main() {
 }
 
 // seedRBACPermissions upserts the DAB capability catalog (dab_permissions) from the
-// canonical list in pkg/rbac (Gitea #94). Idempotent: run on every migrate, it inserts
+// canonical list in pkg/accesscontrol. Idempotent: run on every migrate, it inserts
 // new capabilities and refreshes labels without disturbing existing rows or their ids
 // (so role_definition_permissions references stay valid). No-ops cleanly if the table
 // isn't present yet (e.g. a DB predating migration 000055).
@@ -107,7 +107,7 @@ func seedRBACPermissions(database *sqlx.DB) {
 	if !tableExists(database, "dab_permissions") {
 		return
 	}
-	catalog := append(rbac.PermissionCatalog(), rbac.SystemPermissionCatalog()...)
+	catalog := accesscontrol.Catalog()
 	for _, p := range catalog {
 		if _, err := database.Exec(`
 			INSERT INTO dab_permissions (codename, content_type, action, name)
@@ -116,16 +116,15 @@ func seedRBACPermissions(database *sqlx.DB) {
 				content_type = EXCLUDED.content_type,
 				action = EXCLUDED.action,
 				name = EXCLUDED.name`,
-			p.Codename, p.ContentType, p.Action, p.Name); err != nil {
+			p.Codename, string(p.ResourceKind), string(p.Verb), p.Label); err != nil {
 			log.Printf("Failed to seed capability %s: %v", p.Codename, err)
 		}
 	}
 	log.Printf("Seeded %d RBAC capabilities", len(catalog))
 }
 
-// seedManagedRoleDefinitions upserts the managed-mirror RoleDefinitions (Gitea #95) from
-// pkg/rbac.ManagedRoles: one managed=true definition per legacy role, with the capability
-// set that reproduces what the legacy role grants. Idempotent and id-stable (upsert by
+// seedManagedRoleDefinitions upserts Praetor's built-in RoleDefinitions from
+// pkg/accesscontrol. Idempotent and id-stable (upsert by
 // unique name keeps the row's id so role_definition_permissions references survive), and
 // it refreshes each definition's permission set to exactly the declaration. Depends on
 // dab_permissions being seeded first; no-ops if the tables are absent.
@@ -133,11 +132,11 @@ func seedManagedRoleDefinitions(database *sqlx.DB) {
 	if !tableExists(database, "role_definitions") {
 		return
 	}
-	roles := rbac.ManagedRoles()
+	roles := accesscontrol.BuiltinRoles()
 	for _, mr := range roles {
 		var ct interface{}
-		if mr.ContentType != "" {
-			ct = string(mr.ContentType)
+		if mr.ResourceKind != nil {
+			ct = string(*mr.ResourceKind)
 		}
 		var defID int64
 		if err := database.Get(&defID, `
@@ -158,7 +157,7 @@ func seedManagedRoleDefinitions(database *sqlx.DB) {
 			log.Printf("Managed role %q: clearing permissions failed: %v", mr.Name, err)
 			continue
 		}
-		for _, cn := range mr.Codenames {
+		for _, cn := range mr.Capabilities {
 			if _, err := database.Exec(`
 				INSERT INTO role_definition_permissions (role_definition_id, permission_id)
 				SELECT $1, p.id FROM dab_permissions p WHERE p.codename = $2
@@ -193,7 +192,7 @@ func syncSystemRole(ctx context.Context, database *sqlx.DB, defName, predicate s
 		return
 	}
 	for _, uid := range ids {
-		if err := rbac.EnsureGlobalRole(ctx, database, defName, uid); err != nil {
+		if err := accesscontrol.SetGlobalUserRole(ctx, database, defName, uid, true); err != nil {
 			log.Printf("system role %q: assign user %d: %v", defName, uid, err)
 		}
 	}

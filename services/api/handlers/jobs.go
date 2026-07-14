@@ -20,7 +20,7 @@ import (
 	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
 	"github.com/praetordev/plog"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/store"
 )
@@ -82,9 +82,9 @@ func (rs *JobsResource) authorizeRunRead(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 	if ok {
-		return rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actRead)
+		return rs.authorize(w, r, rbac.JobTemplate, jtID, actRead)
 	}
-	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	viewAll, verr := rs.canViewAll(r, rbac.JobTemplate)
 	if verr != nil {
 		render.Render(w, r, ErrInternal(verr))
 		return false
@@ -111,7 +111,7 @@ func (rs *JobsResource) Routes() chi.Router {
 
 // ListUnifiedJobs returns a list of unified jobs
 func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) {
-	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	viewAll, verr := rs.canViewAll(r, rbac.JobTemplate)
 	if verr != nil {
 		render.Render(w, r, ErrInternal(verr))
 		return
@@ -127,7 +127,7 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Regular users see only jobs whose governing template they can read.
-	ids, err := rs.readableIDs(r, rbac.ContentTypeJobTemplate)
+	ids, err := rs.readableIDs(r, rbac.JobTemplate)
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
@@ -165,7 +165,7 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown job template")))
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jt.ID, actExecute) {
+	if !rs.authorize(w, r, rbac.JobTemplate, jt.ID, actExecute) {
 		return
 	}
 
@@ -402,7 +402,7 @@ func (rs *JobsResource) CancelJob(w http.ResponseWriter, r *http.Request) {
 	// Cancelling requires execute access on the governing template.
 	if job.UnifiedJobTemplateID != nil {
 		if jtID, ok, err := rs.store.JobTemplateIDByUnified(r.Context(), *job.UnifiedJobTemplateID); err == nil && ok {
-			if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actExecute) {
+			if !rs.authorize(w, r, rbac.JobTemplate, jtID, actExecute) {
 				return
 			}
 		}

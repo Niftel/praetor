@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	legacy "github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 	engine "github.com/praetordev/rbac/v4"
 )
 
@@ -16,22 +16,22 @@ type fakeResolver struct {
 	all    []int64
 }
 
-func (f fakeResolver) ObjectGrants(context.Context, int64, legacy.ContentType, int64) ([]engine.Grant, error) {
+func (f fakeResolver) ObjectGrants(context.Context, int64, accesscontrol.ResourceKind, int64) ([]engine.Grant, error) {
 	return f.object, nil
 }
 func (f fakeResolver) GlobalGrants(context.Context, int64) ([]engine.Grant, error) {
 	return f.global, nil
 }
-func (f fakeResolver) ScopedGrants(context.Context, int64, legacy.ContentType) ([]engine.Grant, error) {
+func (f fakeResolver) ScopedGrants(context.Context, int64, accesscontrol.ResourceKind) ([]engine.Grant, error) {
 	return f.scoped, nil
 }
-func (f fakeResolver) AllIDsOfType(context.Context, legacy.ContentType) ([]int64, error) {
+func (f fakeResolver) AllIDsOfType(context.Context, accesscontrol.ResourceKind) ([]int64, error) {
 	return f.all, nil
 }
 
 func TestObjectDecisionUsesV4Policy(t *testing.T) {
 	const userID int64 = 7
-	obj := legacy.Obj(legacy.ContentTypeInventory, 42)
+	obj := accesscontrol.Object(accesscontrol.Inventory, 42)
 	grant := engine.Grant{Capability: "view_inventory", Scope: "inventory:42", Effect: engine.Allow}
 	a, err := New(fakeResolver{object: []engine.Grant{grant}})
 	if err != nil {
@@ -41,11 +41,11 @@ func TestObjectDecisionUsesV4Policy(t *testing.T) {
 		t.Fatal("RBAC v4 loader did not install an immutable policy snapshot")
 	}
 
-	allowed, err := a.Can(context.Background(), legacy.NewSubject(userID, false, false), legacy.ActionView, obj)
+	allowed, err := a.Can(context.Background(), accesscontrol.Principal{UserID: userID}, accesscontrol.View, obj)
 	if err != nil || !allowed {
 		t.Fatalf("matching grant: allowed=%v err=%v", allowed, err)
 	}
-	allowed, err = a.Can(context.Background(), legacy.NewSubject(userID, false, false), legacy.ActionManage, obj)
+	allowed, err = a.Can(context.Background(), accesscontrol.Principal{UserID: userID}, accesscontrol.Manage, obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,13 +55,13 @@ func TestObjectDecisionUsesV4Policy(t *testing.T) {
 }
 
 func TestGlobalAndVisibleDecisions(t *testing.T) {
-	sub := legacy.NewSubject(7, false, false)
+	sub := accesscontrol.Principal{UserID: 7}
 	global := engine.Grant{Capability: "view_inventory", Scope: "", Effect: engine.Allow}
 	a, err := New(fakeResolver{global: []engine.Grant{global}, all: []int64{2, 5}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids, err := a.VisibleIDs(context.Background(), sub, legacy.ActionView, legacy.ContentTypeInventory)
+	ids, err := a.VisibleIDs(context.Background(), sub, accesscontrol.View, accesscontrol.Inventory)
 	if err != nil || !reflect.DeepEqual(ids, []int64{2, 5}) {
 		t.Fatalf("global visible ids: ids=%v err=%v", ids, err)
 	}
@@ -73,7 +73,7 @@ func TestGlobalAndVisibleDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids, err = a.VisibleIDs(context.Background(), sub, legacy.ActionView, legacy.ContentTypeInventory)
+	ids, err = a.VisibleIDs(context.Background(), sub, accesscontrol.View, accesscontrol.Inventory)
 	if err != nil || !reflect.DeepEqual(ids, []int64{3}) {
 		t.Fatalf("scoped visible ids: ids=%v err=%v", ids, err)
 	}
@@ -87,7 +87,7 @@ func TestDenyOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed, err := a.Can(context.Background(), legacy.NewSubject(7, false, false), legacy.ActionView, legacy.Obj(legacy.ContentTypeInventory, 42))
+	allowed, err := a.Can(context.Background(), accesscontrol.Principal{UserID: 7}, accesscontrol.View, accesscontrol.Object(accesscontrol.Inventory, 42))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -48,7 +48,7 @@ func (h *TeamsResource) ListTeams(w http.ResponseWriter, r *http.Request) {
 	var teams []models.Team
 	var total int64
 
-	viewAll, verr := h.canViewAll(r, rbac.ContentTypeTeam)
+	viewAll, verr := h.canViewAll(r, rbac.Team)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -61,7 +61,7 @@ func (h *TeamsResource) ListTeams(w http.ResponseWriter, r *http.Request) {
 		}
 		total, _ = h.store.CountAll(r.Context())
 	} else {
-		ids, err := h.readableIDs(r, rbac.ContentTypeTeam)
+		ids, err := h.readableIDs(r, rbac.Team)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
@@ -98,7 +98,7 @@ func (h *TeamsResource) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Creating a team requires admin on its parent organization.
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, input.OrganizationID, actAdmin) {
+	if !h.authorize(w, r, rbac.Organization, input.OrganizationID, actAdmin) {
 		return
 	}
 
@@ -107,14 +107,14 @@ func (h *TeamsResource) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	h.grantCreatorAdmin(r.Context(), rbac.ContentTypeTeam, created.ID, currentUser(r))
+	h.grantCreatorAdmin(r.Context(), rbac.Team, created.ID, currentUser(r))
 	render.Created(w, r, dto.FromTeam(created))
 }
 
 // GetTeam GET /api/v1/teams/{id}
 func (h *TeamsResource) GetTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actRead) {
+	if !h.authorize(w, r, rbac.Team, id, actRead) {
 		return
 	}
 	team, err := h.store.Get(r.Context(), id)
@@ -128,7 +128,7 @@ func (h *TeamsResource) GetTeam(w http.ResponseWriter, r *http.Request) {
 // UpdateTeam PUT /api/v1/teams/{id}
 func (h *TeamsResource) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actAdmin) {
+	if !h.authorize(w, r, rbac.Team, id, actAdmin) {
 		return
 	}
 	var body dto.Team
@@ -153,7 +153,7 @@ func (h *TeamsResource) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 // DeleteTeam DELETE /api/v1/teams/{id}
 func (h *TeamsResource) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 	id := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actAdmin) {
+	if !h.authorize(w, r, rbac.Team, id, actAdmin) {
 		return
 	}
 	count, err := h.store.Delete(r.Context(), id)
@@ -171,7 +171,7 @@ func (h *TeamsResource) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 // AddTeamMember POST /api/v1/teams/{id}/members
 func (h *TeamsResource) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actAdmin) {
+	if !h.authorize(w, r, rbac.Team, teamID, actAdmin) {
 		return
 	}
 
@@ -194,7 +194,7 @@ func (h *TeamsResource) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 // ListTeamMembers GET /api/v1/teams/{id}/members
 func (h *TeamsResource) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actRead) {
+	if !h.authorize(w, r, rbac.Team, teamID, actRead) {
 		return
 	}
 
@@ -209,7 +209,7 @@ func (h *TeamsResource) ListTeamMembers(w http.ResponseWriter, r *http.Request) 
 // RemoveTeamMember DELETE /api/v1/teams/{id}/members/{userID}
 func (h *TeamsResource) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := render.GetIDParam(r)
-	if !h.authorize(w, r, rbac.ContentTypeTeam, teamID, actAdmin) {
+	if !h.authorize(w, r, rbac.Team, teamID, actAdmin) {
 		return
 	}
 
