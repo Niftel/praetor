@@ -270,4 +270,17 @@ export interface WorkflowRunSummary {
   finished_at?: string | null;
 }
 
+export interface WorkflowApproval {
+  id: number;
+  workflow_job_id: number;
+  workflow_template_id: number;
+  organization_id: number;
+  workflow_name: string;
+  node_name: string;
+  node_key: string;
+  run_created_at: string;
+  awaiting_since: string;
+  requested_by?: string;
+}
+
 // Infrastructure models

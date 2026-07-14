@@ -4,6 +4,7 @@ import { api, unwrap } from '../services/api';
 import { Workflow, WorkflowRunSummary } from '../types';
 import { Plus, Trash2, Rocket, GitFork, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
 
 const runTone = (s: string): { text: string; dot: string } => {
   if (s === 'successful') return { text: 'text-ok', dot: 'bg-ok' };
@@ -21,6 +22,7 @@ const WorkflowsPage = () => {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
+  const [launching, setLaunching] = useState<Workflow | null>(null);
 
   // silent=true for background polls so the list stays live without flashing the
   // full-page spinner or disturbing scroll.
@@ -53,9 +55,10 @@ const WorkflowsPage = () => {
   }, [runs]);
   const toggleGroup = (id: number) => setCollapsed(c => ({ ...c, [id]: !c[id] }));
 
-  const launch = async (wf: Workflow) => {
-    try { const res = await api.launchWorkflow(wf.id); navigate(`/workflows/runs/${res.workflow_job_id}`); }
-    catch (e: any) { toast.error(e.message || 'Launch failed.'); }
+  const launch = async (options: WorkflowLaunchOptions) => {
+    if (!launching) return;
+    const res = await api.launchWorkflow(launching.id, options);
+    navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
   const remove = async (wf: Workflow) => {
     if (!(await confirmDialog(`Delete workflow "${wf.name}"?`, { destructive: true, confirmText: 'Delete' }))) return;
@@ -90,7 +93,7 @@ const WorkflowsPage = () => {
                 </div>
                 <div className="ml-auto flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                   <button onClick={() => edit(wf)} className="h-8 px-2.5 rounded-md text-[12px] font-medium flex items-center gap-1.5 text-ink2 hover:bg-white/5"><Pencil size={13} /> Edit</button>
-                  <button onClick={() => launch(wf)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>
+                  <button onClick={() => setLaunching(wf)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>
                   <button onClick={() => remove(wf)} className="w-8 h-8 grid place-items-center rounded-md text-faint hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={15} /></button>
                 </div>
               </div>
@@ -135,6 +138,7 @@ const WorkflowsPage = () => {
             );
           })}
         </div>
+        <WorkflowLaunchModal isOpen={!!launching} workflowName={launching?.name || 'Workflow'} onClose={() => setLaunching(null)} onLaunch={launch} />
       </div>
     </div>
   );

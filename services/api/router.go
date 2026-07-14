@@ -245,6 +245,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Post("/workflow-templates/{id}/launch", wf.LaunchWorkflow)
 		r.Get("/workflow-jobs", wf.ListWorkflowJobs)
 		r.Get("/workflow-jobs/{id}", wf.GetWorkflowJob)
+		r.Get("/workflow-approvals", wf.ListWorkflowApprovals)
 		r.Post("/workflow-job-nodes/{id}/approve", wf.ApproveNode)
 		r.Post("/workflow-job-nodes/{id}/deny", wf.DenyNode)
 		// Workflow-level notification attachments (success | error | approval).

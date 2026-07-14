@@ -6,6 +6,7 @@ import {
   ArrowLeft, RotateCcw, Play, Pause, ArrowDownToLine, ArrowUpFromLine,
   Check, X, Plus, Minus, Maximize2, ExternalLink, Copy,
 } from 'lucide-react';
+import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
 
 const TERMINAL = ['successful', 'failed', 'error', 'canceled'];
 const NODE_W = 158, NODE_H = 62, COL_GAP = 66, ROW_GAP = 26, MARGIN = 40;
@@ -90,6 +91,7 @@ const WorkflowRunPage = () => {
   const [error, setError] = useState('');
   const [acting, setActing] = useState<number | null>(null);
   const [selKey, setSelKey] = useState<string | null>(null);
+  const [showRelaunch, setShowRelaunch] = useState(false);
 
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
@@ -150,10 +152,11 @@ const WorkflowRunPage = () => {
   const selected = selKey ? nodes.find(n => n.node_key === selKey) || null : null;
   const badStatus = isTerminal && job?.status !== 'successful';
 
-  const relaunch = async () => {
+  const relaunch = async (options: WorkflowLaunchOptions) => {
     const wt = job?.workflow_template_id;
     if (!wt) return;
-    try { const res = await api.launchWorkflow(wt); navigate(`/workflows/runs/${res.workflow_job_id}`); } catch (e: any) { setError(e.message || 'Relaunch failed'); }
+    const res = await api.launchWorkflow(wt, options);
+    navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
 
   return (
@@ -174,7 +177,7 @@ const WorkflowRunPage = () => {
         </div>
         <div className="ml-auto flex items-center gap-2">
           {isTerminal && job?.workflow_template_id != null && (
-            <button onClick={relaunch} className="h-[30px] px-3 rounded-md text-xs font-semibold flex items-center gap-1.5 border border-line2 text-ink hover:border-white/25"><RotateCcw size={13} /> Relaunch</button>
+            <button onClick={() => setShowRelaunch(true)} className="h-[30px] px-3 rounded-md text-xs font-semibold flex items-center gap-1.5 border border-line2 text-ink hover:border-white/25"><RotateCcw size={13} /> Relaunch</button>
           )}
         </div>
       </div>
@@ -255,6 +258,12 @@ const WorkflowRunPage = () => {
         <span><b className="text-mut">click</b> inspect node</span><span><b className="text-mut">drag</b> pan</span><span><b className="text-mut">⌘+scroll</b> zoom</span>
         <span className="ml-auto">run #{id} · {nodes.length} nodes · {running} running{gateNode ? ' · 1 gate' : ''}</span>
       </div>
+      <WorkflowLaunchModal
+        isOpen={showRelaunch}
+        workflowName={job?.name || 'Workflow'}
+        onClose={() => setShowRelaunch(false)}
+        onLaunch={relaunch}
+      />
     </div>
   );
 };
