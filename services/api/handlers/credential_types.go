@@ -15,7 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -121,7 +121,7 @@ func validateCredentialTypeSpec(inputsRaw, injectorsRaw json.RawMessage) error {
 
 // CreateCredentialType POST /credential-types — define a new user credential type.
 func (rs *CredentialTypesResource) CreateCredentialType(w http.ResponseWriter, r *http.Request) {
-	if !rs.requireGlobal(w, r, rbac.CapManageCredentialType) {
+	if !rs.requireGlobal(w, r, rbac.ManageCredentialType) {
 		return
 	}
 	var in credentialTypeInput
@@ -150,7 +150,7 @@ func (rs *CredentialTypesResource) CreateCredentialType(w http.ResponseWriter, r
 
 // UpdateCredentialType PUT /credential-types/{id} — edit a user credential type.
 func (rs *CredentialTypesResource) UpdateCredentialType(w http.ResponseWriter, r *http.Request) {
-	if !rs.requireGlobal(w, r, rbac.CapManageCredentialType) {
+	if !rs.requireGlobal(w, r, rbac.ManageCredentialType) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -197,7 +197,7 @@ func (rs *CredentialTypesResource) UpdateCredentialType(w http.ResponseWriter, r
 
 // DeleteCredentialType DELETE /credential-types/{id} — remove a user credential type.
 func (rs *CredentialTypesResource) DeleteCredentialType(w http.ResponseWriter, r *http.Request) {
-	if !rs.requireGlobal(w, r, rbac.CapManageCredentialType) {
+	if !rs.requireGlobal(w, r, rbac.ManageCredentialType) {
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

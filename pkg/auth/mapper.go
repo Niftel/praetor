@@ -9,7 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 )
 
 // UserIdentity is what an LDAP bind + group resolution yields for one user.
@@ -150,10 +150,7 @@ func applyUserFlags(ctx context.Context, tx *sqlx.Tx, cfg *LDAPConfig, userID in
 
 // syncSystemRole grants or revokes a user's global system RoleDefinition to match a flag.
 func syncSystemRole(ctx context.Context, tx *sqlx.Tx, defName string, userID int64, on bool) error {
-	if on {
-		return rbac.EnsureGlobalRole(ctx, tx, defName, userID)
-	}
-	return rbac.RemoveGlobalRole(ctx, tx, defName, userID)
+	return accesscontrol.SetGlobalUserRole(ctx, tx, defName, userID, on)
 }
 
 // applyOrganizationMap grants/revokes org admin/member/auditor roles per the map.
@@ -337,17 +334,19 @@ func selectOrCreateTeam(ctx context.Context, tx *sqlx.Tx, orgID int64, name stri
 	return id, err
 }
 
-// grantRole grants a user the RoleDefinition mirroring a legacy org/team role_field,
-// scoped to the object, via the capability assignment tables.
+// grantRole resolves the directory mapping's stable role key and assigns its
+// built-in role definition on the object.
 func grantRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID int64, roleField string, userID int64) error {
-	_, err := rbac.GrantCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
-	return err
+	return accesscontrol.SetBuiltinAssignment(ctx, tx,
+		accesscontrol.Object(accesscontrol.ResourceKind(contentType), objectID),
+		accesscontrol.RoleKind(roleField), accesscontrol.UserPrincipal, userID, true)
 }
 
 // revokeRole is grantRole's inverse.
 func revokeRole(ctx context.Context, tx *sqlx.Tx, contentType string, objectID int64, roleField string, userID int64) error {
-	_, err := rbac.RevokeCapabilityForLegacyFields(ctx, tx, contentType, objectID, roleField, userID, true)
-	return err
+	return accesscontrol.SetBuiltinAssignment(ctx, tx,
+		accesscontrol.Object(accesscontrol.ResourceKind(contentType), objectID),
+		accesscontrol.RoleKind(roleField), accesscontrol.UserPrincipal, userID, false)
 }
 
 func nullBytes(b []byte) interface{} {

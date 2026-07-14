@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/launch"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )
@@ -55,7 +55,7 @@ type workflowEdge = store.WorkflowEdge
 func (rs *WorkflowsResource) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 	// Object-role model: a user sees only the workflows they can read.
 	// Superusers/auditors get everything via readableIDs.
-	ids, err := rs.readableIDs(r, rbac.ContentTypeWorkflowTemplate)
+	ids, err := rs.readableIDs(r, rbac.WorkflowTemplate)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -84,7 +84,7 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorizeOrgRole(w, r, body.OrganizationID, rbac.RoleFieldWorkflowAdmin) {
+	if !rs.authorizeOrgRole(w, r, body.OrganizationID, rbac.WorkflowAdminRole) {
 		return
 	}
 	id, err := rs.store.Create(r.Context(), store.WorkflowSpec{
@@ -103,7 +103,7 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 	}
 	// Creator becomes admin of the new workflow (AWX creator-admin), matching
 	// job templates — so a non-superuser can manage what they create.
-	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeWorkflowTemplate, id, currentUser(r))
+	rs.grantCreatorAdmin(r.Context(), rbac.WorkflowTemplate, id, currentUser(r))
 	render.Created(w, r, map[string]interface{}{"id": id})
 }
 
@@ -118,7 +118,7 @@ func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, id, actAdmin) {
 		return
 	}
 	var body struct {
@@ -157,7 +157,7 @@ func (rs *WorkflowsResource) GetWorkflow(w http.ResponseWriter, r *http.Request)
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actRead) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, id, actRead) {
 		return
 	}
 	nodes, _ := rs.store.TemplateNodes(r.Context(), id)
@@ -177,7 +177,7 @@ func (rs *WorkflowsResource) DeleteWorkflow(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, id, actAdmin) {
 		return
 	}
 	if err := rs.store.Delete(r.Context(), id); err != nil {
@@ -198,7 +198,7 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 	// Launching a workflow is an execute action on the workflow. The org
 	// execute_role is a parent of each workflow's execute_role (migration 000049),
 	// so org-execute holders may run any workflow in the org.
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, id, actExecute) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, id, actExecute) {
 		return
 	}
 
@@ -225,7 +225,7 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 
 // ListWorkflowJobs GET /api/v1/workflow-jobs — recent runs the user can see.
 func (rs *WorkflowsResource) ListWorkflowJobs(w http.ResponseWriter, r *http.Request) {
-	ids, err := rs.readableIDs(r, rbac.ContentTypeWorkflowTemplate)
+	ids, err := rs.readableIDs(r, rbac.WorkflowTemplate)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -248,7 +248,7 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, meta.TemplateID, actRead) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, meta.TemplateID, actRead) {
 		return
 	}
 	// run_id is the node's latest execution run, so the UI can show the engine
@@ -280,7 +280,7 @@ func (rs *WorkflowsResource) setNodeApproval(w http.ResponseWriter, r *http.Requ
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, tplID, actApprove) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, tplID, actApprove) {
 		return
 	}
 	if err := rs.store.SetNodeApproval(r.Context(), id, status); err != nil {

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 	"gopkg.in/yaml.v3"
 )
@@ -37,7 +37,7 @@ func (rs *InventoriesResource) ImportInventory(w http.ResponseWriter, r *http.Re
 	}
 
 	// Importing hosts/groups mutates the inventory.
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, inventoryId, actAdmin) {
+	if !rs.authorize(w, r, rbac.Inventory, inventoryId, actAdmin) {
 		return
 	}
 

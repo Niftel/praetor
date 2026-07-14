@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/middleware"
 	render "github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -98,7 +98,7 @@ func (rs *TokensResource) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	// Administering any user's tokens is the global manage_user capability;
 	// without it a user may only revoke their own.
-	isAdmin, err := rs.holdsGlobal(r, rbac.CapManageUser)
+	isAdmin, err := rs.holdsGlobal(r, rbac.ManageUsers)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

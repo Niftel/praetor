@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/notify"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )
@@ -51,7 +51,7 @@ func (h *NotificationsResource) ListNotificationTemplates(w http.ResponseWriter,
 		render.ErrInvalidRequest(fmt.Errorf("organization_id is required")).Render(w, r)
 		return
 	}
-	if !h.authorize(w, r, rbac.ContentTypeOrganization, orgID, actRead) {
+	if !h.authorize(w, r, rbac.Organization, orgID, actRead) {
 		return
 	}
 	nts, err := h.store.ListTemplates(r.Context(), orgID)
@@ -99,7 +99,7 @@ func (h *NotificationsResource) CreateNotificationTemplate(w http.ResponseWriter
 	if body.URL != "" {
 		body.Config["url"] = body.URL // back-compat
 	}
-	if !h.authorizeOrgRole(w, r, body.OrganizationID, rbac.RoleFieldNotificationAdmin) {
+	if !h.authorizeOrgRole(w, r, body.OrganizationID, rbac.NotificationAdminRole) {
 		return
 	}
 
@@ -134,7 +134,7 @@ func (h *NotificationsResource) DeleteNotificationTemplate(w http.ResponseWriter
 		render.ErrInvalidRequest(fmt.Errorf("unknown notification template")).Render(w, r)
 		return
 	}
-	if !h.authorizeOrgRole(w, r, orgID, rbac.RoleFieldNotificationAdmin) {
+	if !h.authorizeOrgRole(w, r, orgID, rbac.NotificationAdminRole) {
 		return
 	}
 	if err := h.store.DeleteTemplate(r.Context(), id); err != nil {
@@ -147,7 +147,7 @@ func (h *NotificationsResource) DeleteNotificationTemplate(w http.ResponseWriter
 // ListJobTemplateNotifications GET /api/v1/job-templates/{id}/notifications
 func (rs *TemplatesResource) ListJobTemplateNotifications(w http.ResponseWriter, r *http.Request) {
 	jtID := render.GetIDParam(r)
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actRead) {
+	if !rs.authorize(w, r, rbac.JobTemplate, jtID, actRead) {
 		return
 	}
 	rows, err := rs.notifications.JobTemplateAttachments(r.Context(), jtID)
@@ -161,7 +161,7 @@ func (rs *TemplatesResource) ListJobTemplateNotifications(w http.ResponseWriter,
 // AttachJobTemplateNotification POST /api/v1/job-templates/{id}/notifications
 func (rs *TemplatesResource) AttachJobTemplateNotification(w http.ResponseWriter, r *http.Request) {
 	jtID := render.GetIDParam(r)
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actAdmin) {
+	if !rs.authorize(w, r, rbac.JobTemplate, jtID, actAdmin) {
 		return
 	}
 	var body struct {
@@ -188,7 +188,7 @@ func (rs *TemplatesResource) AttachJobTemplateNotification(w http.ResponseWriter
 // DetachJobTemplateNotification DELETE /api/v1/job-templates/{id}/notifications/{ntId}/{event}
 func (rs *TemplatesResource) DetachJobTemplateNotification(w http.ResponseWriter, r *http.Request) {
 	jtID := render.GetIDParam(r)
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, jtID, actAdmin) {
+	if !rs.authorize(w, r, rbac.JobTemplate, jtID, actAdmin) {
 		return
 	}
 	ntID, err := strconv.ParseInt(chi.URLParam(r, "ntId"), 10, 64)
@@ -207,7 +207,7 @@ func (rs *TemplatesResource) DetachJobTemplateNotification(w http.ResponseWriter
 // ListWorkflowNotifications GET /api/v1/workflow-templates/{id}/notifications
 func (rs *WorkflowsResource) ListWorkflowNotifications(w http.ResponseWriter, r *http.Request) {
 	wtID := render.GetIDParam(r)
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, wtID, actRead) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, wtID, actRead) {
 		return
 	}
 	rows, err := rs.notifications.WorkflowTemplateAttachments(r.Context(), wtID)
@@ -224,7 +224,7 @@ func (rs *WorkflowsResource) ListWorkflowNotifications(w http.ResponseWriter, r 
 // on the approval outcome.
 func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
 	wtID := render.GetIDParam(r)
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, wtID, actAdmin) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, wtID, actAdmin) {
 		return
 	}
 	var body struct {
@@ -251,7 +251,7 @@ func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r
 // DetachWorkflowNotification DELETE /api/v1/workflow-templates/{id}/notifications/{ntId}/{event}
 func (rs *WorkflowsResource) DetachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
 	wtID := render.GetIDParam(r)
-	if !rs.authorize(w, r, rbac.ContentTypeWorkflowTemplate, wtID, actAdmin) {
+	if !rs.authorize(w, r, rbac.WorkflowTemplate, wtID, actAdmin) {
 		return
 	}
 	ntID, err := strconv.ParseInt(chi.URLParam(r, "ntId"), 10, 64)

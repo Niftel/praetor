@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 )
 
@@ -12,7 +12,7 @@ import (
 // The audit log is sensitive (every user's actions), so it's restricted to the
 // global view_activitystream capability (System Administrator and System Auditor).
 func (h *AccessResource) ListActivityStream(w http.ResponseWriter, r *http.Request) {
-	if !h.requireGlobal(w, r, rbac.CapViewActivityStream) {
+	if !h.requireGlobal(w, r, rbac.ViewActivityStream) {
 		return
 	}
 

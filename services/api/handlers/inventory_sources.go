@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/praetordev/launch"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 )
 
@@ -22,7 +22,7 @@ func (rs *InventoriesResource) ListInventorySources(w http.ResponseWriter, r *ht
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, invID, actRead) {
+	if !rs.authorize(w, r, rbac.Inventory, invID, actRead) {
 		return
 	}
 	sources, err := rs.store.ListSources(r.Context(), invID)
@@ -40,7 +40,7 @@ func (rs *InventoriesResource) CreateInventorySource(w http.ResponseWriter, r *h
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, invID, actAdmin) {
+	if !rs.authorize(w, r, rbac.Inventory, invID, actAdmin) {
 		return
 	}
 	var body struct {
@@ -58,7 +58,7 @@ func (rs *InventoriesResource) CreateInventorySource(w http.ResponseWriter, r *h
 		body.SourceKind = "inventory"
 	}
 	// Attaching a credential requires use access to it (AWX attach semantics).
-	if body.CredentialID != nil && !rs.authorize(w, r, rbac.ContentTypeCredential, *body.CredentialID, actUse) {
+	if body.CredentialID != nil && !rs.authorize(w, r, rbac.Credential, *body.CredentialID, actUse) {
 		return
 	}
 	id, err := rs.store.CreateSource(r.Context(), invID, body.Name, body.SourceKind, body.Source, body.CredentialID, body.UpdateOnLaunch)
@@ -76,7 +76,7 @@ func (rs *InventoriesResource) DeleteInventorySource(w http.ResponseWriter, r *h
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, invID, actAdmin) {
+	if !rs.authorize(w, r, rbac.Inventory, invID, actAdmin) {
 		return
 	}
 	sid, _ := strconv.ParseInt(chi.URLParam(r, "sourceId"), 10, 64)
@@ -98,7 +98,7 @@ func (rs *InventoriesResource) SyncInventorySource(w http.ResponseWriter, r *htt
 	// Running a source sync is the AWX update_role action — no admin required.
 	// Inventory admins inherit update_role; defining/deleting sources still needs
 	// admin (handled on those endpoints).
-	if !rs.authorize(w, r, rbac.ContentTypeInventory, invID, actUpdate) {
+	if !rs.authorize(w, r, rbac.Inventory, invID, actUpdate) {
 		return
 	}
 	sid, _ := strconv.ParseInt(chi.URLParam(r, "sourceId"), 10, 64)

@@ -80,7 +80,7 @@ polymorphic `roles` (`content_type`,`object_id`,`role_field`), a `role_members`
 grant table, org-insert/team-insert triggers that materialize
 `admin_role`/`member_role`/`auditor_role`/`read_role`, delete-triggers that GC them
 (`000029`), and `users.is_superuser` / `users.is_system_auditor` flags enforced in
-the JWT middleware. Grant/revoke primitives exist (`pkg/rbac/access.go`).
+the JWT middleware. Grant/revoke primitives live in `pkg/accesscontrol`.
 
 | AAP concept | Praetor target |
 |---|---|

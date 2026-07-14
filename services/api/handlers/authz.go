@@ -6,8 +6,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/plog"
+	"github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/pkg/authorization"
-	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/render"
 )
@@ -29,67 +29,63 @@ const (
 )
 
 // actionVerb maps a permAction to the capability verb it requires. actAdmin -> manage is
-// the "administer" capability (see pkg/rbac).
-var actionVerb = map[permAction]rbac.Action{
-	actRead:    rbac.ActionView,
-	actAdmin:   rbac.ActionManage,
-	actUse:     rbac.ActionUse,
-	actExecute: rbac.ActionExecute,
-	actUpdate:  rbac.ActionUpdate,
-	actApprove: rbac.ActionApprove,
+// the "administer" capability.
+var actionVerb = map[permAction]accesscontrol.Verb{
+	actRead:    accesscontrol.View,
+	actAdmin:   accesscontrol.Manage,
+	actUse:     accesscontrol.Use,
+	actExecute: accesscontrol.Execute,
+	actUpdate:  accesscontrol.Update,
+	actApprove: accesscontrol.Approve,
 }
 
 // orgCreateCapability maps a delegated org admin role_field to the capability that gates
 // creating that child type, checked on the organization object. Notifications are not a
 // capability content type, so their create is gated on org manage instead (see
 // authorizeOrgRole).
-var orgCreateCapability = map[rbac.RoleField]string{
-	rbac.RoleFieldProjectAdmin:     rbac.Codename(rbac.ContentTypeProject, rbac.ActionAdd),
-	rbac.RoleFieldInventoryAdmin:   rbac.Codename(rbac.ContentTypeInventory, rbac.ActionAdd),
-	rbac.RoleFieldCredentialAdmin:  rbac.Codename(rbac.ContentTypeCredential, rbac.ActionAdd),
-	rbac.RoleFieldJobTemplateAdmin: rbac.Codename(rbac.ContentTypeJobTemplate, rbac.ActionAdd),
-	rbac.RoleFieldWorkflowAdmin:    rbac.Codename(rbac.ContentTypeWorkflowTemplate, rbac.ActionAdd),
+var orgCreateCapability = map[accesscontrol.RoleKind]string{
+	accesscontrol.ProjectAdminRole:     accesscontrol.Capability(accesscontrol.Project, accesscontrol.Add),
+	accesscontrol.InventoryAdminRole:   accesscontrol.Capability(accesscontrol.Inventory, accesscontrol.Add),
+	accesscontrol.CredentialAdminRole:  accesscontrol.Capability(accesscontrol.Credential, accesscontrol.Add),
+	accesscontrol.JobTemplateAdminRole: accesscontrol.Capability(accesscontrol.JobTemplate, accesscontrol.Add),
+	accesscontrol.WorkflowAdminRole:    accesscontrol.Capability(accesscontrol.WorkflowTemplate, accesscontrol.Add),
 }
 
 // Authorizer is the shared object-level authorization helper (the Policy
 // Enforcement Point), embedded by every resource handler. It translates HTTP
 // requests into questions for the injected rbac.Authorizer (the decision point)
-// and denials into responses; it holds no policy itself. The legacy is_superuser
-// bypass no longer lives here — it is one decorator behind `authz`.
+// and denials into responses; it holds no policy itself. The is_superuser
+// break-glass rule is one explicit decorator behind `authz`.
 //
 // Access is retained for the roles/org grant handlers that still write
 // assignments through it; caps is retained for the creator-grant write path.
 type Authorizer struct {
-	Access *rbac.AccessChecker
-	caps   *rbac.CapabilityStore
-	authz  rbac.Authorizer
+	Access *accesscontrol.Store
+	caps   *accesscontrol.Store
+	authz  accesscontrol.DecisionPoint
 }
 
-// capabilityTables maps each RBAC content type to the physical table the
-// capability store enumerates ids from (AllIDsOfType — the "see all" tier). It is
-// injected into rbac.NewCapabilityStore so the rbac library stays free of
-// praetor's schema names.
-var capabilityTables = map[rbac.ContentType]string{
-	rbac.ContentTypeOrganization:     "organizations",
-	rbac.ContentTypeTeam:             "teams",
-	rbac.ContentTypeProject:          "projects",
-	rbac.ContentTypeInventory:        "inventories",
-	rbac.ContentTypeCredential:       "credentials",
-	rbac.ContentTypeJobTemplate:      "job_templates",
-	rbac.ContentTypeWorkflowTemplate: "workflow_templates",
+var decisionTables = map[accesscontrol.ResourceKind]string{
+	accesscontrol.Organization:     "organizations",
+	accesscontrol.Team:             "teams",
+	accesscontrol.Project:          "projects",
+	accesscontrol.Inventory:        "inventories",
+	accesscontrol.Credential:       "credentials",
+	accesscontrol.JobTemplate:      "job_templates",
+	accesscontrol.WorkflowTemplate: "workflow_templates",
 }
 
 func NewAuthorizer(db *sqlx.DB) *Authorizer {
-	caps := rbac.NewCapabilityStore(db, capabilityTables)
-	policy, err := authorization.NewPostgres(db, capabilityTables)
+	caps := accesscontrol.NewStore(db, decisionTables)
+	policy, err := authorization.NewPostgres(db, decisionTables)
 	if err != nil {
 		// The embedded policy is compiled at startup and is a build-time invariant.
 		panic("compile RBAC v4 policy: " + err.Error())
 	}
 	return &Authorizer{
-		Access: rbac.NewAccessChecker(db),
+		Access: caps,
 		caps:   caps,
-		authz:  rbac.WithSystemFlags(policy),
+		authz:  accesscontrol.WithBreakGlass(policy),
 	}
 }
 
@@ -99,26 +95,26 @@ func currentUser(r *http.Request) middleware.UserContext {
 }
 
 // subject builds the rbac.Subject for the current request. This is the one place
-// the legacy system flags cross from the HTTP layer into the decision point;
+// the break-glass flag crosses from the HTTP layer into the decision point;
 // beyond it, code sees only capabilities.
-func (a *Authorizer) subject(r *http.Request) rbac.Subject {
+func (a *Authorizer) subject(r *http.Request) accesscontrol.Principal {
 	uc := currentUser(r)
-	return rbac.NewSubject(uc.UserID, uc.IsSuperuser, uc.IsSystemAuditor)
+	return accesscontrol.Principal{UserID: uc.UserID, BreakGlassRoot: uc.IsSuperuser}
 }
 
 // authorize verifies the current user may perform action on (contentType, objectID)
 // via the capability model. It writes the response and returns false when the
 // request must stop — 403 if denied, 500 on error. The superuser short-circuit is
-// applied inside the injected Authorizer (the legacy decorator).
+// applied inside the injected decision-point decorator.
 //
 //	if !h.authorize(w, r, ct, id, actAdmin) { return }
-func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentType rbac.ContentType, objectID int64, action permAction) bool {
+func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentType accesscontrol.ResourceKind, objectID int64, action permAction) bool {
 	verb, ok := actionVerb[action]
 	if !ok {
 		render.ErrForbidden(nil).Render(w, r)
 		return false
 	}
-	allowed, err := a.authz.Can(r.Context(), a.subject(r), verb, rbac.Obj(contentType, objectID))
+	allowed, err := a.authz.Can(r.Context(), a.subject(r), verb, accesscontrol.Object(accesscontrol.ResourceKind(contentType), objectID))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return false
@@ -144,7 +140,7 @@ func (a *Authorizer) holdsGlobal(r *http.Request, codename string) (bool, error)
 // resources that have no per-org owner (execution packs, credential types, event
 // sources).
 //
-//	if !rs.requireGlobal(w, r, rbac.CapManageExecutionPack) { return }
+//	if !rs.requireGlobal(w, r, rbac.ManageExecutionPacks) { return }
 func (a *Authorizer) requireGlobal(w http.ResponseWriter, r *http.Request, codename string) bool {
 	ok, err := a.holdsGlobal(r, codename)
 	if err != nil {
@@ -161,16 +157,16 @@ func (a *Authorizer) requireGlobal(w http.ResponseWriter, r *http.Request, coden
 // authorizeOrgRole gates an org-scoped create on the capability that permits creating the
 // child type, checked on the organization. Org admins (who hold the add_* capability) and
 // superusers pass. It writes the response and returns false when the request must stop.
-func (a *Authorizer) authorizeOrgRole(w http.ResponseWriter, r *http.Request, orgID int64, roleField rbac.RoleField) bool {
+func (a *Authorizer) authorizeOrgRole(w http.ResponseWriter, r *http.Request, orgID int64, roleField accesscontrol.RoleKind) bool {
 	codename, ok := orgCreateCapability[roleField]
 	if !ok {
 		// Not a capability-modelled child type (e.g. notifications): require org manage.
-		codename = rbac.Codename(rbac.ContentTypeOrganization, rbac.ActionManage)
+		codename = accesscontrol.Capability(accesscontrol.Organization, accesscontrol.Manage)
 	}
 	// A cross-type check: the codename (e.g. add_project) is held ON the org
 	// object, so it goes through CanCodename, not Can. Superuser short-circuits
 	// inside the injected Authorizer.
-	allowed, err := a.authz.CanCodename(r.Context(), a.subject(r), codename, rbac.Obj(rbac.ContentTypeOrganization, orgID))
+	allowed, err := a.authz.CanCapability(r.Context(), a.subject(r), codename, accesscontrol.Object(accesscontrol.Organization, orgID))
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return false
@@ -186,8 +182,8 @@ func (a *Authorizer) authorizeOrgRole(w http.ResponseWriter, r *http.Request, or
 // Break-glass superusers and any global view-granting system role (e.g. System
 // Auditor) see everything; everyone else gets the objects they hold the view
 // capability on. The tier unification lives in the injected Authorizer.
-func (a *Authorizer) readableIDs(r *http.Request, contentType rbac.ContentType) ([]int64, error) {
-	return a.authz.VisibleIDs(r.Context(), a.subject(r), rbac.ActionView, contentType)
+func (a *Authorizer) readableIDs(r *http.Request, contentType accesscontrol.ResourceKind) ([]int64, error) {
+	return a.authz.VisibleIDs(r.Context(), a.subject(r), accesscontrol.View, accesscontrol.ResourceKind(contentType))
 }
 
 // canViewAll reports whether the current user may view every object of
@@ -197,29 +193,29 @@ func (a *Authorizer) readableIDs(r *http.Request, contentType rbac.ContentType) 
 // condition for "list all" without per-object filtering, and the
 // capability-model replacement for the old `IsSuperuser || IsSystemAuditor`
 // list gate.
-func (a *Authorizer) canViewAll(r *http.Request, contentType rbac.ContentType) (bool, error) {
-	return a.holdsGlobal(r, rbac.Codename(contentType, rbac.ActionView))
+func (a *Authorizer) canViewAll(r *http.Request, contentType accesscontrol.ResourceKind) (bool, error) {
+	return a.holdsGlobal(r, accesscontrol.Capability(accesscontrol.ResourceKind(contentType), accesscontrol.View))
 }
 
 // grantCreatorAdmin assigns the creating user the object's admin RoleDefinition so a
 // non-superuser can manage what they create. Superusers already have implicit access, so
 // they are skipped. Best-effort: a failure is logged, not surfaced.
-func (a *Authorizer) grantCreatorAdmin(ctx context.Context, contentType rbac.ContentType, objectID int64, uc middleware.UserContext) {
+func (a *Authorizer) grantCreatorAdmin(ctx context.Context, contentType accesscontrol.ResourceKind, objectID int64, uc middleware.UserContext) {
 	if uc.IsSuperuser {
 		return
 	}
-	name, ok := rbac.ManagedNameForLegacy(contentType, rbac.RoleFieldAdmin)
+	name, ok := accesscontrol.BuiltinRoleName(contentType, accesscontrol.AdminRole)
 	if !ok {
 		logger.Error("authz: no admin role definition for content type", "content_type", contentType)
 		return
 	}
-	def, err := a.caps.GetRoleDefinitionByName(ctx, name)
+	def, err := a.caps.RoleByName(ctx, name)
 	if err != nil {
 		logger.Error("authz: admin role definition not found", "name", name, "err", err)
 		return
 	}
-	ct := string(contentType)
-	if err := a.caps.GiveUserPermission(ctx, def.ID, &ct, &objectID, uc.UserID); err != nil {
+	resource := accesscontrol.Object(accesscontrol.ResourceKind(contentType), objectID)
+	if err := a.caps.Assign(ctx, accesscontrol.Assignment{RoleDefinitionID: def.ID, Resource: &resource, PrincipalKind: accesscontrol.UserPrincipal, PrincipalID: uc.UserID}); err != nil {
 		logger.Error("authz: grant creator admin failed", "user_id", uc.UserID, "content_type", contentType, "object_id", objectID, "err", err)
 	}
 }

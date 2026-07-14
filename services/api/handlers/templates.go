@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -90,7 +90,7 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 	var templates []models.JobTemplate
 	var total int64
 
-	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeJobTemplate)
+	viewAll, verr := rs.canViewAll(r, rbac.JobTemplate)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -103,7 +103,7 @@ func (rs *TemplatesResource) ListTemplates(w http.ResponseWriter, r *http.Reques
 		}
 		total, _ = rs.store.CountAll(r.Context())
 	} else {
-		ids, err := rs.readableIDs(r, rbac.ContentTypeJobTemplate)
+		ids, err := rs.readableIDs(r, rbac.JobTemplate)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
@@ -174,16 +174,16 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 	// Creating a template requires the org's job_template_admin_role, plus use
 	// access on any project/inventory/credential it attaches (AWX attach
 	// semantics). Org admins/superusers inherit job_template_admin_role.
-	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldJobTemplateAdmin) {
+	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.JobTemplateAdminRole) {
 		return
 	}
-	if input.ProjectID != nil && !rs.authorize(w, r, rbac.ContentTypeProject, *input.ProjectID, actUse) {
+	if input.ProjectID != nil && !rs.authorize(w, r, rbac.Project, *input.ProjectID, actUse) {
 		return
 	}
-	if input.InventoryID != nil && !rs.authorize(w, r, rbac.ContentTypeInventory, *input.InventoryID, actUse) {
+	if input.InventoryID != nil && !rs.authorize(w, r, rbac.Inventory, *input.InventoryID, actUse) {
 		return
 	}
-	if input.CredentialID != nil && !rs.authorize(w, r, rbac.ContentTypeCredential, *input.CredentialID, actUse) {
+	if input.CredentialID != nil && !rs.authorize(w, r, rbac.Credential, *input.CredentialID, actUse) {
 		return
 	}
 
@@ -193,7 +193,7 @@ func (rs *TemplatesResource) CreateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeJobTemplate, created.ID, currentUser(r))
+	rs.grantCreatorAdmin(r.Context(), rbac.JobTemplate, created.ID, currentUser(r))
 	render.Created(w, r, dto.FromJobTemplate(created))
 }
 
@@ -206,7 +206,7 @@ func (rs *TemplatesResource) GetTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, id, actRead) {
+	if !rs.authorize(w, r, rbac.JobTemplate, id, actRead) {
 		return
 	}
 
@@ -228,7 +228,7 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.JobTemplate, id, actAdmin) {
 		return
 	}
 
@@ -266,13 +266,13 @@ func (rs *TemplatesResource) UpdateTemplate(w http.ResponseWriter, r *http.Reque
 	changed := func(newV, oldV *int64) bool {
 		return newV != nil && (oldV == nil || *newV != *oldV)
 	}
-	if changed(input.ProjectID, existing.ProjectID) && !rs.authorize(w, r, rbac.ContentTypeProject, *input.ProjectID, actUse) {
+	if changed(input.ProjectID, existing.ProjectID) && !rs.authorize(w, r, rbac.Project, *input.ProjectID, actUse) {
 		return
 	}
-	if changed(input.InventoryID, existing.InventoryID) && !rs.authorize(w, r, rbac.ContentTypeInventory, *input.InventoryID, actUse) {
+	if changed(input.InventoryID, existing.InventoryID) && !rs.authorize(w, r, rbac.Inventory, *input.InventoryID, actUse) {
 		return
 	}
-	if changed(input.CredentialID, existing.CredentialID) && !rs.authorize(w, r, rbac.ContentTypeCredential, *input.CredentialID, actUse) {
+	if changed(input.CredentialID, existing.CredentialID) && !rs.authorize(w, r, rbac.Credential, *input.CredentialID, actUse) {
 		return
 	}
 
@@ -294,7 +294,7 @@ func (rs *TemplatesResource) DeleteTemplate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeJobTemplate, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.JobTemplate, id, actAdmin) {
 		return
 	}
 

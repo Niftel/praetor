@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )
@@ -56,7 +56,7 @@ func (rs *TriggersResource) Routes() chi.Router {
 var validEventTypes = map[string]bool{"job_succeeded": true, "job_failed": true, "job_finished": true}
 
 func (rs *TriggersResource) ListEvent(w http.ResponseWriter, r *http.Request) {
-	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeOrganization)
+	viewAll, verr := rs.canViewAll(r, rbac.Organization)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -70,7 +70,7 @@ func (rs *TriggersResource) ListEvent(w http.ResponseWriter, r *http.Request) {
 		render.JSON(w, r, rows)
 		return
 	}
-	ids, err := rs.readableIDs(r, rbac.ContentTypeOrganization)
+	ids, err := rs.readableIDs(r, rbac.Organization)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -95,7 +95,7 @@ func (rs *TriggersResource) CreateEvent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// Only an admin of the trigger's organization may create it.
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, in.OrganizationID, actAdmin) {
+	if !rs.authorize(w, r, rbac.Organization, in.OrganizationID, actAdmin) {
 		return
 	}
 	// Enabled by default (an absent JSON bool is false, which we don't want here).
@@ -121,7 +121,7 @@ func (rs *TriggersResource) UpdateEvent(w http.ResponseWriter, r *http.Request) 
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	if !rs.authorize(w, r, rbac.Organization, org, actAdmin) {
 		return
 	}
 	var in eventTrigger
@@ -152,7 +152,7 @@ func (rs *TriggersResource) DeleteEvent(w http.ResponseWriter, r *http.Request) 
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.ContentTypeOrganization, org, actAdmin) {
+	if !rs.authorize(w, r, rbac.Organization, org, actAdmin) {
 		return
 	}
 	if err := rs.store.DeleteEvent(r.Context(), id); err != nil {
@@ -174,7 +174,7 @@ type webhookTrigger struct {
 // enabled, with the URL to POST to — the secret is never returned.
 func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) {
 	out := []webhookTrigger{}
-	all, verr := rs.canViewAll(r, rbac.ContentTypeOrganization)
+	all, verr := rs.canViewAll(r, rbac.Organization)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -182,7 +182,7 @@ func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) 
 	var orgIDs []int64
 	if !all {
 		var err error
-		if orgIDs, err = rs.readableIDs(r, rbac.ContentTypeOrganization); err != nil {
+		if orgIDs, err = rs.readableIDs(r, rbac.Organization); err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
@@ -205,7 +205,7 @@ func (rs *TriggersResource) ListWebhook(w http.ResponseWriter, r *http.Request) 
 	// Execution packs are shared infrastructure; only holders of the global
 	// manage_executionpack capability see pack build triggers. Packs have no
 	// service; the URL takes it as a param.
-	packAdmin, err := rs.holdsGlobal(r, rbac.CapManageExecutionPack)
+	packAdmin, err := rs.holdsGlobal(r, rbac.ManageExecutionPacks)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return

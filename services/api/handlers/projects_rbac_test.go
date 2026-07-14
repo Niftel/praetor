@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -35,7 +35,7 @@ func TestProjectRBAC(t *testing.T) {
 	defer db.Close()
 
 	h := handlers.NewProjectsResource(db, handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
 	orgA := createOrg(t, db, fmt.Sprintf("rbac-orgA-%d", uniq))
@@ -44,7 +44,7 @@ func TestProjectRBAC(t *testing.T) {
 	nobody := createUser(t, db, fmt.Sprintf("rbac-nobody-%d", uniq)) // no roles
 
 	// Make `admin` an administrator of org A only.
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, orgA, rbac.RoleFieldAdmin, admin)
+	grantObjectRole(t, access, rbac.Organization, orgA, rbac.AdminRole, admin)
 
 	adminUC := middleware.UserContext{UserID: admin, Username: "rbac-admin"}
 	nobodyUC := middleware.UserContext{UserID: nobody, Username: "rbac-nobody"}
@@ -64,7 +64,7 @@ func TestProjectRBAC(t *testing.T) {
 	}
 
 	// 3. Creator was granted admin on the new project (creator-grants-admin).
-	canAdmin, err := capCheck(access, admin, rbac.ContentTypeProject, projectA, rbac.ActionManage)
+	canAdmin, err := capCheck(access, admin, rbac.Project, projectA, rbac.Manage)
 	if err != nil || !canAdmin {
 		t.Fatalf("creator should administer the project they made: canAdmin=%v err=%v", canAdmin, err)
 	}

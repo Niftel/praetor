@@ -12,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -47,7 +47,7 @@ func (h *ProjectsResource) ListProjects(w http.ResponseWriter, r *http.Request) 
 	var projects []models.Project
 	var total int64
 
-	viewAll, verr := h.canViewAll(r, rbac.ContentTypeProject)
+	viewAll, verr := h.canViewAll(r, rbac.Project)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -60,7 +60,7 @@ func (h *ProjectsResource) ListProjects(w http.ResponseWriter, r *http.Request) 
 		}
 		total, _ = h.store.CountAll(r.Context())
 	} else {
-		ids, err := h.readableIDs(r, rbac.ContentTypeProject)
+		ids, err := h.readableIDs(r, rbac.Project)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
@@ -97,7 +97,7 @@ func (h *ProjectsResource) CreateProject(w http.ResponseWriter, r *http.Request)
 
 	// Creating a project requires the org's project_admin_role (org admins and
 	// superusers inherit it through the role hierarchy).
-	if !h.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldProjectAdmin) {
+	if !h.authorizeOrgRole(w, r, input.OrganizationID, rbac.ProjectAdminRole) {
 		return
 	}
 
@@ -112,7 +112,7 @@ func (h *ProjectsResource) CreateProject(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// The creator becomes admin of the project they just made.
-	h.grantCreatorAdmin(r.Context(), rbac.ContentTypeProject, created.ID, currentUser(r))
+	h.grantCreatorAdmin(r.Context(), rbac.Project, created.ID, currentUser(r))
 	render.Created(w, r, dto.FromProject(created))
 }
 
@@ -127,7 +127,7 @@ func (h *ProjectsResource) SyncProject(w http.ResponseWriter, r *http.Request) {
 
 	// Triggering an SCM sync is the AWX update_role action: it may run a project
 	// update without full admin. Project admins inherit update_role.
-	if !h.authorize(w, r, rbac.ContentTypeProject, id, actUpdate) {
+	if !h.authorize(w, r, rbac.Project, id, actUpdate) {
 		return
 	}
 

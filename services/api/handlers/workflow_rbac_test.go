@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -20,7 +20,7 @@ func TestWorkflowRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 	wf := handlers.NewWorkflowsResource(db, handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
 	org := createOrg(t, db, fmt.Sprintf("wf-rbac-org-%d", uniq))
@@ -29,8 +29,8 @@ func TestWorkflowRBAC(t *testing.T) {
 	execOnly := createUser(t, db, fmt.Sprintf("wf-exec-%d", uniq))      // only wfA execute_role
 	orgExec := createUser(t, db, fmt.Sprintf("wf-orgexec-%d", uniq))    // org execute_role
 	nobody := createUser(t, db, fmt.Sprintf("wf-nobody-%d", uniq))
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldWorkflowAdmin, creator)
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldExecute, orgExec)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.WorkflowAdminRole, creator)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.ExecuteRole, orgExec)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, org)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4,$5)`, creator, perWfAdmin, execOnly, orgExec, nobody)
@@ -53,12 +53,12 @@ func TestWorkflowRBAC(t *testing.T) {
 	}
 	wfB := extractID(t, rec.Body.String())
 
-	if ok, err := capCheck(access, creator, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionManage); err != nil || !ok {
+	if ok, err := capCheck(access, creator, rbac.WorkflowTemplate, wfA, rbac.Manage); err != nil || !ok {
 		t.Fatalf("creator should administer wfA (creator-admin grant): ok=%v err=%v", ok, err)
 	}
 
 	// 2. Per-workflow admin (only wfA.admin_role) edits wfA but not wfB.
-	grantObjectRole(t, access, rbac.ContentTypeWorkflowTemplate, wfA, rbac.RoleFieldAdmin, perWfAdmin)
+	grantObjectRole(t, access, rbac.WorkflowTemplate, wfA, rbac.AdminRole, perWfAdmin)
 	pwaUC := middleware.UserContext{UserID: perWfAdmin}
 	rec = callJSON(t, wf.UpdateWorkflow, http.MethodPut, body("wfA-edited"), pwaUC, map[string]string{"id": fmt.Sprint(wfA)})
 	if rec.Code != http.StatusOK {
@@ -70,14 +70,14 @@ func TestWorkflowRBAC(t *testing.T) {
 	}
 
 	// 3. Execute-only: launch authz passes (not 403) + read, but cannot edit.
-	grantObjectRole(t, access, rbac.ContentTypeWorkflowTemplate, wfA, rbac.RoleFieldExecute, execOnly)
-	if ok, err := capCheck(access, execOnly, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionExecute); err != nil || !ok {
+	grantObjectRole(t, access, rbac.WorkflowTemplate, wfA, rbac.ExecuteRole, execOnly)
+	if ok, err := capCheck(access, execOnly, rbac.WorkflowTemplate, wfA, rbac.Execute); err != nil || !ok {
 		t.Fatalf("execute-only should have execute on wfA: ok=%v err=%v", ok, err)
 	}
-	if ok, _ := capCheck(access, execOnly, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionView); !ok {
+	if ok, _ := capCheck(access, execOnly, rbac.WorkflowTemplate, wfA, rbac.View); !ok {
 		t.Fatalf("execute-only should read wfA (read is a child of execute)")
 	}
-	if ok, _ := capCheck(access, execOnly, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionManage); ok {
+	if ok, _ := capCheck(access, execOnly, rbac.WorkflowTemplate, wfA, rbac.Manage); ok {
 		t.Fatalf("execute-only must NOT admin wfA")
 	}
 	execUC := middleware.UserContext{UserID: execOnly}
@@ -91,12 +91,12 @@ func TestWorkflowRBAC(t *testing.T) {
 	}
 
 	// 4. Org execute_role holder can execute any workflow in the org (parent edge).
-	if ok, err := capCheck(access, orgExec, rbac.ContentTypeWorkflowTemplate, wfB, rbac.ActionExecute); err != nil || !ok {
+	if ok, err := capCheck(access, orgExec, rbac.WorkflowTemplate, wfB, rbac.Execute); err != nil || !ok {
 		t.Fatalf("org-execute should run any org workflow (wfB): ok=%v err=%v", ok, err)
 	}
 
 	// 5. Approval is NOT inherited from the workflow admin_role.
-	if ok, _ := capCheck(access, creator, rbac.ContentTypeWorkflowTemplate, wfA, rbac.ActionApprove); ok {
+	if ok, _ := capCheck(access, creator, rbac.WorkflowTemplate, wfA, rbac.Approve); ok {
 		t.Fatalf("workflow admin must NOT inherit approval_role (manage != approve)")
 	}
 

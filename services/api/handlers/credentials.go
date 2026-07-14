@@ -10,7 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/models"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -49,7 +49,7 @@ func (rs *CredentialsResource) Routes() chi.Router {
 
 func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	var creds []models.Credential
-	viewAll, verr := rs.canViewAll(r, rbac.ContentTypeCredential)
+	viewAll, verr := rs.canViewAll(r, rbac.Credential)
 	if verr != nil {
 		render.ErrInternal(verr).Render(w, r)
 		return
@@ -61,7 +61,7 @@ func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Re
 			return
 		}
 	} else {
-		ids, err := rs.readableIDs(r, rbac.ContentTypeCredential)
+		ids, err := rs.readableIDs(r, rbac.Credential)
 		if err != nil {
 			render.ErrInternal(err).Render(w, r)
 			return
@@ -96,7 +96,7 @@ func (rs *CredentialsResource) GetCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeCredential, id, actRead) {
+	if !rs.authorize(w, r, rbac.Credential, id, actRead) {
 		return
 	}
 
@@ -130,7 +130,7 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 
 	// Creating a credential requires the org's credential_admin_role (org admins
 	// and superusers inherit it through the role hierarchy).
-	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.RoleFieldCredentialAdmin) {
+	if !rs.authorizeOrgRole(w, r, input.OrganizationID, rbac.CredentialAdminRole) {
 		return
 	}
 
@@ -145,7 +145,7 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeCredential, created.ID, currentUser(r))
+	rs.grantCreatorAdmin(r.Context(), rbac.Credential, created.ID, currentUser(r))
 	rs.maskCredentialSecrets(r.Context(), &created)
 	render.Created(w, r, dto.FromCredential(created))
 }
@@ -158,7 +158,7 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeCredential, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.Credential, id, actAdmin) {
 		return
 	}
 
@@ -200,7 +200,7 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if !rs.authorize(w, r, rbac.ContentTypeCredential, id, actAdmin) {
+	if !rs.authorize(w, r, rbac.Credential, id, actAdmin) {
 		return
 	}
 

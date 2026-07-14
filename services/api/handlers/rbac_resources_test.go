@@ -11,7 +11,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
+	"github.com/praetordev/praetor/pkg/authorization"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -29,20 +30,36 @@ func rbacTestDB(t *testing.T) *sqlx.DB {
 	return db
 }
 
-// grantObjectRole grants the mirror capability RoleDefinition for a legacy field on an
-// object (the capability model's assignment path), for test setup.
-func grantObjectRole(t *testing.T, access *rbac.AccessChecker, ct rbac.ContentType, objID int64, field rbac.RoleField, userID int64) {
+var testResourceTables = map[rbac.ResourceKind]string{
+	rbac.Organization: "organizations", rbac.Team: "teams", rbac.Project: "projects",
+	rbac.Inventory: "inventories", rbac.Credential: "credentials",
+	rbac.JobTemplate: "job_templates", rbac.WorkflowTemplate: "workflow_templates",
+}
+
+// grantObjectRole grants a built-in role definition on an object for test setup.
+func grantObjectRole(t *testing.T, access *rbac.Store, ct rbac.ResourceKind, objID int64, field rbac.RoleKind, userID int64) {
 	t.Helper()
-	if _, err := rbac.GrantCapabilityForLegacyFields(context.Background(), access.DB, string(ct), objID, string(field), userID, true); err != nil {
+	name, ok := rbac.BuiltinRoleName(ct, field)
+	if !ok {
+		t.Fatalf("no built-in role for %s/%s", ct, field)
+	}
+	definition, err := access.RoleByName(context.Background(), name)
+	if err != nil {
+		t.Fatalf("find role %s: %v", name, err)
+	}
+	resource := rbac.Object(ct, objID)
+	if err := access.Assign(context.Background(), rbac.Assignment{RoleDefinitionID: definition.ID, Resource: &resource, PrincipalKind: rbac.UserPrincipal, PrincipalID: userID}); err != nil {
 		t.Fatalf("grant %s on %s/%d to user %d: %v", field, ct, objID, userID, err)
 	}
 }
 
-// capCheck answers a capability question with the same (bool, error) shape the legacy
-// Can* checks had, so the RBAC tests read the same after the cutover.
-func capCheck(access *rbac.AccessChecker, user int64, ct rbac.ContentType, id int64, a rbac.Action) (bool, error) {
-	// HasCapability never touches the content-type→table map, so nil is fine here.
-	return rbac.NewCapabilityStore(access.DB, nil).HasCapability(context.Background(), user, ct, id, rbac.Codename(ct, a))
+// capCheck asks the production RBAC v4 decision adapter directly.
+func capCheck(access *rbac.Store, user int64, ct rbac.ResourceKind, id int64, a rbac.Verb) (bool, error) {
+	decision, err := authorization.NewPostgres(access.DB(), testResourceTables)
+	if err != nil {
+		return false, err
+	}
+	return decision.Can(context.Background(), rbac.Principal{UserID: user}, a, rbac.Object(ct, id))
 }
 
 // TestInventoryHostRBAC covers inventory create-scoping, the creator-admin
@@ -54,7 +71,7 @@ func TestInventoryHostRBAC(t *testing.T) {
 	defer db.Close()
 	invRes := handlers.NewInventoriesResource(db, handlers.NewAuthorizer(db))
 	hostRes := handlers.NewHostsResource(db, handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
 	orgA := createOrg(t, db, fmt.Sprintf("rbac-inv-orgA-%d", uniq))
@@ -62,7 +79,7 @@ func TestInventoryHostRBAC(t *testing.T) {
 	admin := createUser(t, db, fmt.Sprintf("rbac-inv-admin-%d", uniq))
 	reader := createUser(t, db, fmt.Sprintf("rbac-inv-reader-%d", uniq))
 	nobody := createUser(t, db, fmt.Sprintf("rbac-inv-nobody-%d", uniq))
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, orgA, rbac.RoleFieldAdmin, admin)
+	grantObjectRole(t, access, rbac.Organization, orgA, rbac.AdminRole, admin)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id IN ($1,$2)`, orgA, orgB)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`, admin, reader, nobody)
@@ -85,7 +102,7 @@ func TestInventoryHostRBAC(t *testing.T) {
 	}
 
 	// reader gets read on the inventory.
-	grantObjectRole(t, access, rbac.ContentTypeInventory, invID, rbac.RoleFieldRead, reader)
+	grantObjectRole(t, access, rbac.Inventory, invID, rbac.ReadRole, reader)
 
 	params := map[string]string{"inventoryId": fmt.Sprint(invID)}
 
@@ -120,14 +137,14 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 	defer db.Close()
 	tmplRes := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
 	jobsRes := handlers.NewJobsResource(db, "", "", handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
 	orgA := createOrg(t, db, fmt.Sprintf("rbac-tmpl-org-%d", uniq))
 	admin := createUser(t, db, fmt.Sprintf("rbac-tmpl-admin-%d", uniq))
 	operator := createUser(t, db, fmt.Sprintf("rbac-tmpl-op-%d", uniq))
 	nobody := createUser(t, db, fmt.Sprintf("rbac-tmpl-nobody-%d", uniq))
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, orgA, rbac.RoleFieldAdmin, admin)
+	grantObjectRole(t, access, rbac.Organization, orgA, rbac.AdminRole, admin)
 
 	adminUC := middleware.UserContext{UserID: admin}
 	operatorUC := middleware.UserContext{UserID: operator}
@@ -165,7 +182,7 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 	})
 
 	// operator gets execute on the template.
-	grantObjectRole(t, access, rbac.ContentTypeJobTemplate, created.ID, rbac.RoleFieldExecute, operator)
+	grantObjectRole(t, access, rbac.JobTemplate, created.ID, rbac.ExecuteRole, operator)
 
 	launchBody := fmt.Sprintf(`{"unified_job_template_id":%d,"name":"launch-%d"}`, *created.UnifiedJobTemplateID, uniq)
 

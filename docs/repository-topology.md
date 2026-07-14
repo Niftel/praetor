@@ -107,7 +107,7 @@ overrides and do not alter that declaration.
 
 - Authorization decisions use `github.com/praetordev/rbac/v4`; Praetor-specific
   capability vocabulary, assignment persistence, and handler contracts live in
-  this repository under `pkg/rbac`.
+  this repository under `pkg/accesscontrol`.
 - Several tests under `tests` still describe extracted services. They need to be
   classified as platform contract tests or moved to the owning service.
 - The UI client is handwritten. The external API contract should eventually

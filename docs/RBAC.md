@@ -1,11 +1,12 @@
 # Praetor RBAC
 
-Praetor separates authorization into three explicit responsibilities:
+Praetor separates authorization into four explicit responsibilities:
 
 1. Praetor's PostgreSQL schema stores role definitions, assignments, and the
    materialized capability grants derived from them.
-2. `pkg/authorization` resolves trusted grants for an authenticated user.
-3. `github.com/praetordev/rbac/v4` is the domain-blind policy decision point
+2. `pkg/accesscontrol` owns Praetor's original domain vocabulary and assignment store.
+3. `pkg/authorization` resolves trusted grants for an authenticated user.
+4. `github.com/praetordev/rbac/v4` is the domain-blind policy decision point
    (PDP) that evaluates those grants using an immutable policy snapshot.
 
 HTTP handlers remain policy enforcement points. They express a capability
@@ -50,10 +51,10 @@ The embedded policy uses `DenyOverrides`, exact capability matching, exact
 scoped matching, and global grants. A missing policy, missing grant, malformed
 scope, database failure, or unmatched rule never grants access.
 
-`pkg/rbac` is Praetor-owned. It contains the platform-specific capability
-catalog, managed-role definitions, assignment writes, and the handler-facing
-authorization contract. It is not a second decision engine: runtime verdicts
-are produced by RBAC v4 through `pkg/authorization`.
+`pkg/accesscontrol` contains newly authored platform vocabulary, built-in role
+declarations, assignment persistence, and the handler-facing decision contract.
+It contains no policy evaluator. Runtime verdicts are produced exclusively by
+RBAC v4 through `pkg/authorization`.
 
 ## Enforcement helpers
 
@@ -65,8 +66,8 @@ The API's shared `Authorizer` exposes:
 - `readableIDs` and `canViewAll` for collection filtering;
 - `grantCreatorAdmin` for assignment after object creation.
 
-The legacy `users.is_superuser` break-glass behavior remains isolated in the
-existing compatibility decorator. Normal user and team decisions pass through
+The `users.is_superuser` break-glass behavior remains isolated in an explicit
+Praetor decorator. Normal user and team decisions pass through
 RBAC v4. System-auditor access is represented by global capability assignments.
 
 ## Verification

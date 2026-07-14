@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/praetordev/praetor/pkg/rbac"
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -19,7 +19,7 @@ func TestUpdateTemplateRechecksUse(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 	rs := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 	ctx := context.Background()
 
 	uniq := time.Now().UnixNano()
@@ -48,7 +48,7 @@ func TestUpdateTemplateRechecksUse(t *testing.T) {
 	}
 
 	editor := createUser(t, db, fmt.Sprintf("credscope-editor-%d", uniq))
-	grantObjectRole(t, access, rbac.ContentTypeJobTemplate, tmplID, rbac.RoleFieldAdmin, editor)
+	grantObjectRole(t, access, rbac.JobTemplate, tmplID, rbac.AdminRole, editor)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id=$1`, org)
 		_, _ = db.Exec(`DELETE FROM unified_job_templates WHERE id=$1`, ujtID)
@@ -66,7 +66,7 @@ func TestUpdateTemplateRechecksUse(t *testing.T) {
 	}
 
 	// Grant use on the credential -> the same update now succeeds.
-	grantObjectRole(t, access, rbac.ContentTypeCredential, credID, rbac.RoleFieldUse, editor)
+	grantObjectRole(t, access, rbac.Credential, credID, rbac.UseRole, editor)
 	rec = callJSON(t, rs.UpdateTemplate, http.MethodPut, withCred, editorUC, idParam)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("attach credential with use: want 200, got %d (%s)", rec.Code, rec.Body)
@@ -79,7 +79,7 @@ func TestCredentialGrantOrgFence(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 	h := handlers.NewAccessResource(db, handlers.NewAuthorizer(db))
-	access := rbac.NewAccessChecker(db)
+	access := rbac.NewStore(db, testResourceTables)
 	ctx := context.Background()
 
 	uniq := time.Now().UnixNano()
@@ -93,8 +93,8 @@ func TestCredentialGrantOrgFence(t *testing.T) {
 	granter := createUser(t, db, fmt.Sprintf("fence-granter-%d", uniq))
 	outsider := createUser(t, db, fmt.Sprintf("fence-outsider-%d", uniq))
 	member := createUser(t, db, fmt.Sprintf("fence-member-%d", uniq))
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldCredentialAdmin, granter)
-	grantObjectRole(t, access, rbac.ContentTypeOrganization, org, rbac.RoleFieldMember, member)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.CredentialAdminRole, granter)
+	grantObjectRole(t, access, rbac.Organization, org, rbac.MemberRole, member)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id=$1`, org)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`, granter, outsider, member)
