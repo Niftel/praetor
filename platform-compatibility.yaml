@@ -5,7 +5,7 @@
 # development, but those overrides do not define a platform release.
 schemaVersion: 1
 platformVersion: 0.1.0
-releaseStatus: development
+releaseStatus: stable
 wireContracts: v1
 
 # praetor-v2 currently applies one tag to every first-party image. Keep component
