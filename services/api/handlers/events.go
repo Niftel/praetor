@@ -18,7 +18,7 @@ import (
 	"github.com/hyperjumptech/grule-rule-engine/pkg"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/launch"
-	"github.com/praetordev/rbac"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )

@@ -28,8 +28,8 @@ made, as required by the engine's integration contract.
 
 ## Decision flow
 
-`services/api/handlers/authz.go` constructs one shared authorizer. Grant writes
-continue through the v1 compatibility package while the decision path uses v4:
+`services/api/handlers/authz.go` constructs one shared authorizer. Praetor owns
+the capability vocabulary and grant persistence while the decision path uses v4:
 
 ```text
 verified user id
@@ -50,11 +50,10 @@ The embedded policy uses `DenyOverrides`, exact capability matching, exact
 scoped matching, and global grants. A missing policy, missing grant, malformed
 scope, database failure, or unmatched rule never grants access.
 
-The temporary v1 dependency remains for Praetor-specific vocabulary,
-assignment writes, and compatibility interfaces. It is not the PDP. Removing it
-requires extracting those remaining domain and persistence APIs into a
-Praetor-owned package; that is a later migration and must not be conflated with
-the v4 decision cutover.
+`pkg/rbac` is Praetor-owned. It contains the platform-specific capability
+catalog, managed-role definitions, assignment writes, and the handler-facing
+authorization contract. It is not a second decision engine: runtime verdicts
+are produced by RBAC v4 through `pkg/authorization`.
 
 ## Enforcement helpers
 

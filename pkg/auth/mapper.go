@@ -9,7 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
-	"github.com/praetordev/rbac"
+	"github.com/praetordev/praetor/pkg/rbac"
 )
 
 // UserIdentity is what an LDAP bind + group resolution yields for one user.

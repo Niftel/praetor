@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	legacy "github.com/praetordev/rbac"
+	legacy "github.com/praetordev/praetor/pkg/rbac"
 	engine "github.com/praetordev/rbac/v4"
 )
 

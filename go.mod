@@ -21,7 +21,6 @@ require (
 	github.com/praetordev/models v0.2.0
 	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
-	github.com/praetordev/rbac v1.1.0
 	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
 	github.com/praetordev/scheduler v0.1.0

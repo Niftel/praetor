@@ -8,8 +8,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/pkg/rbac"
 	"github.com/praetordev/praetor/services/api/dto"
-	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 	"golang.org/x/crypto/bcrypt"
