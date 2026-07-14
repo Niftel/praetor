@@ -47,6 +47,10 @@ web_config_backup/
 .DS_Store
 .backups/
 
+# Local-only working files (kept on disk, not tracked)
+scripts/gitea-issue.sh
+docs/webhook-key-exposure.md
+
 # local multi-module dev workspace (per-machine paths; CI uses tagged modules)
 go.work
 go.work.sum
