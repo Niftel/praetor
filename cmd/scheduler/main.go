@@ -11,10 +11,10 @@ import (
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/db"
 	"github.com/praetordev/env"
+	"github.com/praetordev/eventbus"
 	"github.com/praetordev/metrics"
 	"github.com/praetordev/objectstore"
 	"github.com/praetordev/plog"
-	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	core "github.com/praetordev/praetor/services/scheduler/core"
 )
 
@@ -35,7 +35,7 @@ func main() {
 	}
 
 	// 2. Init NATS
-	bus, err := natsTransport.NewNatsBus(env.String("NATS_URL", natsTransport.DefaultURL))
+	bus, err := eventbus.NewBus(env.String("NATS_URL", eventbus.DefaultURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}

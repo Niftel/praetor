@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	"github.com/praetordev/eventbus"
 	"github.com/praetordev/events"
-	natsbus "github.com/praetordev/praetor/pkg/transport/nats"
 )
 
 // TestOutboxRelayDeliversDurably proves item 6b end-to-end: a committed outbox
@@ -33,7 +33,7 @@ func TestOutboxRelayDeliversDurably(t *testing.T) {
 	}
 	defer db.Close()
 
-	bus, err := natsbus.NewNatsBus(natsURL)
+	bus, err := eventbus.NewBus(natsURL)
 	if err != nil {
 		t.Skipf("cannot reach JetStream NATS: %v", err)
 	}

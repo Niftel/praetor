@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	"github.com/praetordev/eventbus"
 	"github.com/praetordev/events"
 	"github.com/praetordev/objectstore"
-	natsbus "github.com/praetordev/praetor/pkg/transport/nats"
 	consumercore "github.com/praetordev/praetor/services/consumer/core"
 	"github.com/praetordev/praetor/services/ingestion/core"
 )
@@ -36,7 +36,7 @@ func TestLogChunkEndToEnd(t *testing.T) {
 	}
 	defer db.Close()
 
-	bus, err := natsbus.NewNatsBus(natsURL)
+	bus, err := eventbus.NewBus(natsURL)
 	if err != nil {
 		t.Skipf("cannot reach JetStream NATS: %v", err)
 	}

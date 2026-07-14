@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/praetordev/env"
+	"github.com/praetordev/eventbus"
 	"github.com/praetordev/events"
-	"github.com/praetordev/praetor/pkg/ingestclient"
 	"github.com/praetordev/metrics"
 	"github.com/praetordev/plog"
-	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
+	"github.com/praetordev/praetor/pkg/ingestclient"
 	"github.com/praetordev/praetor/services/executor/core"
 )
 
@@ -21,7 +21,7 @@ func main() {
 	log.Println("Starting Executor Agent...")
 
 	// 1. Setup Infrastructure
-	bus, err := natsTransport.NewNatsBus(env.String("NATS_URL", natsTransport.DefaultURL))
+	bus, err := eventbus.NewBus(env.String("NATS_URL", eventbus.DefaultURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}

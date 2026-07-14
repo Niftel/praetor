@@ -9,11 +9,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/praetordev/db"
 	"github.com/praetordev/env"
+	"github.com/praetordev/eventbus"
 	"github.com/praetordev/metrics"
 	"github.com/praetordev/objectstore"
 	"github.com/praetordev/plog"
 	"github.com/praetordev/runtoken"
-	natsTransport "github.com/praetordev/praetor/pkg/transport/nats"
 	"github.com/praetordev/praetor/services/ingestion/core"
 	"github.com/praetordev/praetor/services/ingestion/handler"
 )
@@ -87,7 +87,7 @@ func main() {
 	}
 
 	// 2. NATS Infrastructure
-	bus, err := natsTransport.NewNatsBus(env.String("NATS_URL", natsTransport.DefaultURL))
+	bus, err := eventbus.NewBus(env.String("NATS_URL", eventbus.DefaultURL))
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
