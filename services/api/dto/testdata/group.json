@@ -1,0 +1,11 @@
+{
+  "id": 6,
+  "inventory_id": 4,
+  "name": "g1",
+  "description": "a description",
+  "variables": {
+    "k": "v"
+  },
+  "created_at": "2026-07-14T12:00:00Z",
+  "modified_at": "2026-07-14T12:00:00Z"
+}
