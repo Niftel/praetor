@@ -5,14 +5,6 @@ import { api } from '../services/api';
 import { WorkflowApproval } from '../types';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
-const elapsed = (iso: string, now: number) => {
-  const seconds = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86400)}d`;
-};
-
 const remaining = (iso: string, now: number) => {
   const seconds = Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 1000));
   if (seconds < 60) return `${seconds}s left`;
@@ -89,7 +81,7 @@ const ApprovalsPage = () => {
       {error && <div role="alert" className="mx-8 mb-4 rounded-md border border-err/30 bg-err/10 px-3 py-2 text-sm text-err">{error}</div>}
 
       <div className="grid h-8 grid-cols-[minmax(220px,1.3fr)_minmax(180px,1fr)_130px_130px_250px] items-center border-y border-line px-8 font-mono text-[9.5px] uppercase tracking-[0.1em] text-dim max-[920px]:grid-cols-[1fr_130px]">
-        <span>Workflow</span><span className="max-[920px]:hidden">Approval gate</span><span className="max-[920px]:hidden">Requested by</span><span>Waiting / deadline</span><span className="text-right max-[920px]:hidden">Decision</span>
+        <span>Workflow</span><span className="max-[920px]:hidden">Approval gate</span><span className="max-[920px]:hidden">Requested by</span><span>Timeout in</span><span className="text-right max-[920px]:hidden">Decision</span>
       </div>
 
       <div className="flex-1">
@@ -105,8 +97,7 @@ const ApprovalsPage = () => {
             </div>
             <span className="truncate pr-3 font-mono text-[11px] text-mut max-[920px]:hidden">{item.requested_by || 'automation'}</span>
             <span className="font-mono text-[11px] tabular-nums text-mut" title={`Waiting since ${new Date(item.awaiting_since).toLocaleString()}`}>
-              <span className="block">{elapsed(item.awaiting_since, now)}</span>
-              <span className={item.deadline ? 'text-changed' : 'text-dim'}>{item.deadline ? remaining(item.deadline, now) : 'no timeout'}</span>
+              <span className={item.deadline ? 'text-changed' : 'text-dim'}>{item.deadline ? remaining(item.deadline, now) : 'No timeout'}</span>
             </span>
             <div className="flex justify-end gap-2 max-[920px]:col-span-2 max-[920px]:mt-2 max-[920px]:pb-3">
               <button onClick={() => navigate(`/workflows/runs/${item.workflow_job_id}`)} className="grid h-8 w-8 place-items-center rounded-md border border-line2 text-mut hover:border-white/25 hover:text-ink" title="Open workflow run"><ExternalLink size={13} /></button>
