@@ -45,7 +45,7 @@ Create an organization-owned GitHub App installed only on `praetor`,
 repository **Contents: write**; tag creation automatically triggers the existing
 image workflows. Configure:
 
-- repository/environment variable `PRAETOR_RELEASE_APP_CLIENT_ID`;
+- repository/environment variable `PRAETOR_RELEASE_APP_ID`;
 - protected environment secret `PRAETOR_RELEASE_APP_PRIVATE_KEY`;
 - required reviewers on the `platform-release` environment.
 
