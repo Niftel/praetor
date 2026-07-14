@@ -14,7 +14,7 @@ import (
 // `SELECT *` / `RETURNING *` may appear in a SQL string literal in any non-test
 // .go file. Scanning `*` into a struct breaks ("missing destination name X") the
 // instant the table gains a column — and on the dispatch path (the scheduler's
-// schedule tick, pkg/inventoryrender's host/group render that ingestion runs at
+// schedule tick, the ingestion service's inventoryrender host/group render at
 // every job dispatch) that stops jobs from launching, not just one API read.
 //
 // The original #39 gate lived in services/api/handlers and only scanned that one
