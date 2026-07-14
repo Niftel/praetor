@@ -403,7 +403,7 @@ func (s *Scheduler) processTimedOutJobs(ctx context.Context) error {
 	// job and hold the authoritative WAL that never got pushed. Hand it to the
 	// pull-based reconciler by moving it to 'reconciling'; the job stays as-is
 	// (not errored) until the reconciler resolves the true outcome. finished_at
-	// stays NULL. See services/reconciler.
+	// stays NULL. See the reconciler service (github.com/praetordev/reconciler).
 	staleCond := `(
 		(er.last_heartbeat_at IS NOT NULL AND er.last_heartbeat_at < now() - $1::interval)
 		OR (er.last_heartbeat_at IS NULL AND er.started_at IS NOT NULL AND er.started_at < now() - $2::interval)
