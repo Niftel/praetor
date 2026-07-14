@@ -53,22 +53,15 @@ func NewWorkflowsResource(db *sqlx.DB, authz *Authorizer) *WorkflowsResource {
 type workflowNode = store.WorkflowNode
 type workflowEdge = store.WorkflowEdge
 
+const approvalExpirySeconds = 24 * 60 * 60
+
 func validateWorkflowNodes(nodes []workflowNode) error {
 	for i := range nodes {
 		n := &nodes[i]
-		if n.NodeType != "approval" {
-			n.ApprovalTimeoutSeconds = 0
-			n.ApprovalTimeoutAction = "rejected"
-			continue
-		}
-		if n.ApprovalTimeoutSeconds < 0 {
-			return fmt.Errorf("approval timeout must not be negative")
-		}
-		if n.ApprovalTimeoutAction == "" {
-			n.ApprovalTimeoutAction = "rejected"
-		}
-		if n.ApprovalTimeoutAction != "approved" && n.ApprovalTimeoutAction != "rejected" {
-			return fmt.Errorf("approval timeout action must be approved or rejected")
+		n.ApprovalTimeoutSeconds = 0
+		n.ApprovalTimeoutAction = "rejected"
+		if n.NodeType == "approval" {
+			n.ApprovalTimeoutSeconds = approvalExpirySeconds
 		}
 	}
 	return nil

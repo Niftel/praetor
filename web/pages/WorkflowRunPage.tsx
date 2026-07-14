@@ -302,11 +302,11 @@ const Inspector: React.FC<{
           <span className="text-[14px] font-semibold">{node.name || node.node_key}</span>
         </div>
         <div className="font-mono text-[11px] text-mut mt-1.5">{node.node_type} · {node.timed_out ? `timed out → ${node.status}` : node.status}</div>
-        {node.status === 'awaiting_approval' && node.approval_timeout_seconds ? (
+        {node.status === 'awaiting_approval' && (
           <div className="mt-2 rounded-md border border-changed/30 bg-changed/10 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-changed">
-            Timeout policy: {node.approval_timeout_seconds}s → {node.approval_timeout_action === 'approved' ? 'approve / success edge' : 'deny / failure edge'}
+            Automatically denies after 24 hours and follows the failure edge.
           </div>
-        ) : null}
+        )}
       </div>
 
       {node.run_id && (

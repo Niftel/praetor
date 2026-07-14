@@ -66,4 +66,4 @@ contracts:
 
 database:
   minimumMigration: 1
-  maximumMigration: 60
+  maximumMigration: 61
