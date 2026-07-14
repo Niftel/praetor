@@ -1,9 +1,7 @@
-.PHONY: build host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api run-scheduler run-ingestion up up-demo down restart
+.PHONY: build host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api up up-demo down restart
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
-SCHEDULER_BINARY=$(BINARY_DIR)/praetor-scheduler
-INGESTION_BINARY=$(BINARY_DIR)/praetor-ingestion
 
 # Host-runner cross-compilation target. The binary is bootstrapped onto your
 # MANAGED hosts, so this is their CPU arch, not necessarily the build machine's.
@@ -15,14 +13,11 @@ HOST_RUNNER_ARCH ?= $(shell go env GOHOSTARCH)
 HOST_RUNNER_BINARY=build/$(HOST_RUNNER_OS)/praetor-host-runner
 
 build:
-	@echo "Building services..."
+	@echo "Building the api service..."
 	mkdir -p $(BINARY_DIR)
 	go build -o $(API_BINARY) ./cmd/api
-	go build -o $(SCHEDULER_BINARY) ./cmd/scheduler
-	go build -o $(INGESTION_BINARY) ./cmd/ingestion
-	go build -o $(BINARY_DIR)/praetor-consumer ./cmd/consumer
-	go build -o $(BINARY_DIR)/praetor-executor ./cmd/executor
-	@echo "Build complete."
+	@echo "Build complete. (scheduler, ingestion, consumer, executor, reconciler now"
+	@echo " live in their own repos — github.com/praetordev/<service>.)"
 
 # Cross-compile the host-runner daemon locally (dev convenience). NOTE: this is
 # NOT how a target gets its daemon — the daemon ships inside the Execution Pack,
@@ -104,12 +99,6 @@ DB_URL ?= postgres://postgres:postgres@localhost:5432/praetor?sslmode=disable
 # Runners (Use separate terminals)
 run-api:
 	DATABASE_URL=$(DB_URL) PORT=8080 go run ./cmd/api
-
-run-scheduler:
-	DATABASE_URL=$(DB_URL) go run ./cmd/scheduler
-
-run-ingestion:
-	DATABASE_URL=$(DB_URL) INGESTION_PORT=8081 go run ./cmd/ingestion
 
 # Docker Compose
 .PHONY: up down restart logs clean-docker gen-keys
