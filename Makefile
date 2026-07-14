@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test release-preflight release-preflight-remote workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart
+.PHONY: build compat-check contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -34,6 +34,10 @@ release-preflight:
 
 release-preflight-remote:
 	./scripts/release-preflight.sh --remote
+
+release-plan:
+	@test -n "$(VERSION)" || { echo "usage: make release-plan VERSION=x.y.z"; exit 1; }
+	./scripts/promote-platform-release.sh --dry-run "$(VERSION)"
 
 # Run each extracted deployable service as an independent module. Repositories
 # are expected beside this one; override their parent with PRAETOR_WORKSPACE_DIR.
