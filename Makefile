@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test release-preflight release-preflight-remote workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api up up-demo down restart
+.PHONY: build compat-check contract-test release-preflight release-preflight-remote workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -83,6 +83,11 @@ test:
 	@echo "Running unit tests (incl. #39 no-wildcard-SELECT gate + column-drift checks)..."
 	go test ./services/... ./pkg/...
 	@echo "Tests passed."
+
+# Exercise execution-plane durability against isolated PostgreSQL and NATS
+# containers. This intentionally pauses PostgreSQL and restarts NATS.
+chaos-test:
+	./scripts/chaos-test.sh
 
 # Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
 # tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run

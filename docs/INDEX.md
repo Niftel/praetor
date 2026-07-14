@@ -8,6 +8,7 @@ This directory contains the core documentation for the Praetor backend.
 - [Platform Releases](releasing.md) - Compatibility promotion and artifact preflight procedure.
 - [Wire Contracts](wire-contracts.md) - Versioned cross-service payloads and compatibility rules.
 - [Execution State Machine](execution-state-machine.md) - Authoritative state ownership and monotonic projection rules.
+- [Chaos Testing](chaos-testing.md) - Repeatable PostgreSQL-outage and JetStream-restart resilience checks.
 - [Architecture](architecture.md) - Kubernetes-native design, data models, and component diagrams.
 - [REST API v1](praetor_rest_api_v1_full.md) - Detailed API reference for the Control Plane and Execution Plane.
 - [Backend Roadmap](praetor_backend_roadmap_for_agent.md) - Phased implementation plan for the backend agent.

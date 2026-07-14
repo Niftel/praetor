@@ -13,10 +13,10 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.52.0
-	github.com/praetordev/consumer v0.1.0
+	github.com/praetordev/consumer v0.1.1
 	github.com/praetordev/db v0.1.0
 	github.com/praetordev/eventbus v0.1.0
-	github.com/praetordev/ingestion v0.1.0
+	github.com/praetordev/ingestion v0.1.1
 	github.com/praetordev/launch v0.1.0
 	github.com/praetordev/models v0.2.0
 	github.com/praetordev/notify v0.1.0
@@ -34,6 +34,7 @@ require (
 require (
 	github.com/go-git/go-billy/v5 v5.6.2 // indirect
 	github.com/praetordev/credentials v0.1.0 // indirect
+	github.com/praetordev/runtoken v0.1.0 // indirect
 )
 
 require (
