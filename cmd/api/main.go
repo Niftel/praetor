@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/db"
@@ -28,10 +30,22 @@ func main() {
 		log.Println("Starting in NO-DB mode (endpoints will fail)")
 	}
 
+	refreshInterval, err := time.ParseDuration(env.String("PRAETOR_RBAC_POLICY_REFRESH_INTERVAL", "30s"))
+	if err != nil {
+		log.Fatalf("invalid PRAETOR_RBAC_POLICY_REFRESH_INTERVAL: %v", err)
+	}
+	auditDecisions, err := strconv.ParseBool(env.String("PRAETOR_RBAC_DECISION_AUDIT", "false"))
+	if err != nil {
+		log.Fatalf("invalid PRAETOR_RBAC_DECISION_AUDIT: %v", err)
+	}
 	router := api.NewRouter(database, api.Config{
-		IngestionURL:   env.String("INGESTION_URL", ""),
-		InternalToken:  env.String("PRAETOR_INTERNAL_TOKEN", ""),
-		LDAPConfigPath: env.String("PRAETOR_LDAP_CONFIG", ""),
+		IngestionURL:              env.String("INGESTION_URL", ""),
+		InternalToken:             env.String("PRAETOR_INTERNAL_TOKEN", ""),
+		LDAPConfigPath:            env.String("PRAETOR_LDAP_CONFIG", ""),
+		RBACPolicyPath:            env.String("PRAETOR_RBAC_POLICY", ""),
+		RBACPolicySHA256:          env.String("PRAETOR_RBAC_POLICY_SHA256", ""),
+		RBACPolicyRefreshInterval: refreshInterval,
+		RBACDecisionAudit:         auditDecisions,
 	})
 
 	fmt.Printf("Praetor API Service starting on port %s...\n", port)

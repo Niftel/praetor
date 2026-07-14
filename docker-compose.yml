@@ -180,11 +180,16 @@ services:
       # ingestion's PRAETOR_INTERNAL_TOKEN.
       PRAETOR_INTERNAL_TOKEN: "${PRAETOR_INTERNAL_TOKEN:-dev-internal-token}"
       PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
+      PRAETOR_RBAC_POLICY: /etc/praetor/rbac-policy.json
+      PRAETOR_RBAC_POLICY_SHA256: "${PRAETOR_RBAC_POLICY_SHA256:-}"
+      PRAETOR_RBAC_POLICY_REFRESH_INTERVAL: "${PRAETOR_RBAC_POLICY_REFRESH_INTERVAL:-30s}"
+      PRAETOR_RBAC_DECISION_AUDIT: "${PRAETOR_RBAC_DECISION_AUDIT:-false}"
       # LDAP bind password, read by ldap-config.yaml via bind_password_env (never
       # committed in the config file). Demo default matches the mock's admin pw.
       PRAETOR_LDAP_BIND_PASSWORD: "${PRAETOR_LDAP_BIND_PASSWORD:-admin}"
     volumes:
       - ./deployments/ldap/ldap-config.yaml:/etc/praetor/ldap.yaml:ro
+      - ./pkg/authorization/policy.json:/etc/praetor/rbac-policy.json:ro
     ports:
       - "${PRAETOR_API_PORT:-8080}:8080"
     depends_on:

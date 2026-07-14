@@ -18,6 +18,17 @@ func NewPostgres(db *sqlx.DB, tables map[accesscontrol.ResourceKind]string) (*Au
 	return New(&PostgresResolver{db: db, tables: tables})
 }
 
+func NewPostgresWithPolicy(ctx context.Context, db *sqlx.DB, tables map[accesscontrol.ResourceKind]string, path, expectedSHA256 string) (*Authorizer, error) {
+	resolver := &PostgresResolver{db: db, tables: tables}
+	if path == "" {
+		return New(resolver)
+	}
+	if expectedSHA256 != "" {
+		return NewVerifiedFile(ctx, resolver, path, expectedSHA256)
+	}
+	return NewFile(ctx, resolver, path)
+}
+
 const actorHolds = `(
 	EXISTS (SELECT 1 FROM role_user_assignments ua WHERE ua.object_role_id = orl.id AND ua.user_id = $1)
 	OR EXISTS (SELECT 1 FROM role_team_assignments ta

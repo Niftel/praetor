@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/plog"
@@ -63,6 +64,7 @@ type Authorizer struct {
 	Access *accesscontrol.Store
 	caps   *accesscontrol.Store
 	authz  accesscontrol.DecisionPoint
+	policy *authorization.Authorizer
 }
 
 var decisionTables = map[accesscontrol.ResourceKind]string{
@@ -76,17 +78,51 @@ var decisionTables = map[accesscontrol.ResourceKind]string{
 }
 
 func NewAuthorizer(db *sqlx.DB) *Authorizer {
+	return NewAuthorizerWithPolicy(db, "", "", 0, false)
+}
+
+func NewAuthorizerWithPolicy(db *sqlx.DB, policyPath, expectedSHA256 string, refreshInterval time.Duration, auditDecisions bool) *Authorizer {
 	caps := accesscontrol.NewStore(db, decisionTables)
-	policy, err := authorization.NewPostgres(db, decisionTables)
+	policy, err := authorization.NewPostgresWithPolicy(context.Background(), db, decisionTables, policyPath, expectedSHA256)
 	if err != nil {
-		// The embedded policy is compiled at startup and is a build-time invariant.
-		panic("compile RBAC v4 policy: " + err.Error())
+		panic("load RBAC v4 policy: " + err.Error())
+	}
+	if policyPath != "" && refreshInterval > 0 {
+		go policy.RefreshEvery(context.Background(), refreshInterval, func(err error) {
+			logger.Error("RBAC policy refresh failed; serving last-known-good", "err", err)
+		})
+	}
+	if auditDecisions {
+		policy.SetDecisionObserver(func(event authorization.DecisionEvent) {
+			logger.Info("RBAC decision", "user_id", event.UserID, "capability", event.Capability, "scope", event.Scope,
+				"allow", event.Allow, "snapshot", event.Snapshot, "reason", event.Reason, "rule_id", event.RuleID,
+				"rule_name", event.RuleName, "rule_effect", event.RuleEffect)
+		})
 	}
 	return &Authorizer{
 		Access: caps,
 		caps:   caps,
 		authz:  accesscontrol.WithBreakGlass(policy),
+		policy: policy,
 	}
+}
+
+func (a *Authorizer) PolicyStatus(w http.ResponseWriter, r *http.Request) {
+	if !a.requireGlobal(w, r, accesscontrol.ManageUsers) {
+		return
+	}
+	render.JSON(w, r, a.policy.PolicyStatus())
+}
+
+func (a *Authorizer) RefreshPolicy(w http.ResponseWriter, r *http.Request) {
+	if !a.requireGlobal(w, r, accesscontrol.ManageUsers) {
+		return
+	}
+	if err := a.policy.RefreshPolicy(r.Context()); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	render.JSON(w, r, a.policy.PolicyStatus())
 }
 
 // currentUser pulls the authenticated user set by the auth middleware.
