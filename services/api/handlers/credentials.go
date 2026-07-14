@@ -282,12 +282,22 @@ func (rs *CredentialsResource) processSecrets(ctx context.Context, input *models
 	return nil
 }
 
+// maskCredentialSecrets redacts secret input values before a credential is
+// serialized to a client. It fails CLOSED: if we cannot positively identify and
+// mask the secret fields (missing type, unparseable schema or inputs), we redact
+// the entire Inputs blob rather than leak plaintext. Non-secret field values are
+// preserved only on the happy path where the type schema is known.
 func (rs *CredentialsResource) maskCredentialSecrets(ctx context.Context, cred *models.Credential) {
-	// Fetch Type Definition (Optimization: Could assume all inputs are opaque or fetch cache)
-	// For correctness we fetch type.
+	if len(cred.Inputs) == 0 {
+		return
+	}
+	// Any inability to mask precisely => drop the raw inputs entirely.
+	redactAll := func() { cred.Inputs = json.RawMessage(`{}`) }
+
 	typeInputs, err := rs.store.CredentialTypeInputs(ctx, cred.CredentialTypeID)
 	if err != nil {
-		return // Cannot mask if can't find type
+		redactAll() // cannot determine which fields are secret
+		return
 	}
 
 	type SchemaField struct {
@@ -298,26 +308,28 @@ func (rs *CredentialsResource) maskCredentialSecrets(ctx context.Context, cred *
 		Fields []SchemaField `json:"fields"`
 	}
 	if err := json.Unmarshal(typeInputs, &schema); err != nil {
+		redactAll()
 		return
 	}
 
 	var inputMap map[string]interface{}
 	if err := json.Unmarshal(cred.Inputs, &inputMap); err != nil {
+		redactAll()
 		return
 	}
 
-	masked := false
 	for _, f := range schema.Fields {
 		if f.Secret {
 			if _, ok := inputMap[f.ID]; ok {
 				inputMap[f.ID] = "$encrypted$"
-				masked = true
 			}
 		}
 	}
 
-	if masked {
-		out, _ := json.Marshal(inputMap)
-		cred.Inputs = out
+	out, err := json.Marshal(inputMap)
+	if err != nil {
+		redactAll()
+		return
 	}
+	cred.Inputs = out
 }
