@@ -65,7 +65,8 @@ Usage: include "praetor.image" (dict "root" $ "svc" "api")
 {{- define "praetor.image" -}}
 {{- $root := .root -}}
 {{- $repo := index $root.Values.images .svc -}}
-{{- $tag := $root.Values.image.tag | default $root.Chart.AppVersion -}}
+{{- $componentTag := index $root.Values.imageTags .svc -}}
+{{- $tag := $root.Values.image.tag | default $componentTag | default $root.Chart.AppVersion -}}
 {{- if $root.Values.image.registry -}}
 {{- printf "%s/%s:%s" $root.Values.image.registry $repo $tag -}}
 {{- else -}}

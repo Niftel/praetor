@@ -27,6 +27,12 @@ jobs:
       # plain `gofmt -l` reports as "unformatted" by design. vet + build + test
       # are the real gates. go.work is gitignored, so CI resolves the extracted
       # service/lib modules from their published tags via the proxy.
+      - name: compatibility manifest
+        run: go run ./cmd/compatcheck
+
+      - name: wire contracts
+        run: GOWORK=off go test ./tests/contracts
+
       - name: go vet
         run: go vet ./...
 

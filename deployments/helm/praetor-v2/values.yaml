@@ -25,6 +25,19 @@ images:
   ui: praetor-ui
   migrator: praetor-migrator
 
+# Per-component release versions. These are pinned by
+# platform-compatibility.yaml and take precedence over image.tag. The shared tag
+# remains a convenient override for local/k3d development.
+imageTags:
+  api: 0.1.0
+  ingestion: 0.1.1
+  scheduler: 0.1.0
+  consumer: 0.1.0
+  reconciler: 0.1.0
+  executor: 0.1.0
+  ui: 0.1.0
+  migrator: 0.1.0
+
 serviceAccount:
   create: true
   name: ""
