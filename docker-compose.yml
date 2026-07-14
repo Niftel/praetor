@@ -207,9 +207,12 @@ services:
   # finished on the host but never pushed is recovered to its true outcome.
   reconciler:
     logging: *default-logging
+    # The reconciler service lives in its own repo (github.com/praetordev/reconciler),
+    # checked out alongside this one. Image name stays praetor-reconciler so kind-load
+    # and the Helm chart are unaffected by the split.
     build:
-      context: .
-      dockerfile: build/package/Dockerfile.reconciler
+      context: ../reconciler
+      dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/praetor?sslmode=disable
       PRAETOR_SECRET_KEY: "${PRAETOR_SECRET_KEY:-}"
