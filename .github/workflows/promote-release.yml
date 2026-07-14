@@ -21,16 +21,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: platform-release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Create scoped release token
         id: release-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.PRAETOR_RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.PRAETOR_RELEASE_APP_PRIVATE_KEY }}
@@ -45,7 +45,7 @@ jobs:
           permission-contents: write
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
