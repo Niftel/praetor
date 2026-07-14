@@ -32,7 +32,7 @@ jobs:
         id: release-token
         uses: actions/create-github-app-token@v3
         with:
-          client-id: ${{ vars.PRAETOR_RELEASE_APP_CLIENT_ID }}
+          app-id: ${{ vars.PRAETOR_RELEASE_APP_ID }}
           private-key: ${{ secrets.PRAETOR_RELEASE_APP_PRIVATE_KEY }}
           owner: Niftel
           repositories: |
