@@ -1,0 +1,36 @@
+name: Release preflight
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify stable release manifest
+        run: go run ./cmd/compatcheck -release
+
+      - name: Verify release tag matches manifest
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          manifest_version=$(go run ./cmd/compatcheck -release -output summary | sed -E 's/^Praetor ([^ ]+).*/\1/')
+          test "$RELEASE_TAG" = "v$manifest_version"
+
+      - name: Verify published artifacts
+        if: github.event_name == 'workflow_dispatch'
+        run: ./scripts/release-preflight.sh --remote

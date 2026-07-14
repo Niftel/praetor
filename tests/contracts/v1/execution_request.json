@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "execution_run_id": "11111111-2222-3333-4444-555555555555",
+  "unified_job_id": 4242,
+  "job_manifest": {
+    "inventory_id": 7,
+    "inventory": "[web]\nhost-1 ansible_host=10.0.0.1\n",
+    "project_url": "https://gitea.example/acme/playbooks.git",
+    "project_ref": "main",
+    "playbook": "site.yml",
+    "playbook_content": "",
+    "extra_vars": {"environment": "production"},
+    "limit": "web",
+    "verbosity": 2,
+    "forks": 5,
+    "runner_host": "host-1",
+    "runner_host_id": 11,
+    "api_url": "https://ingest.praetor.example",
+    "execution_pack": "default",
+    "credential_id": 13,
+    "ingest_token": "fixture-run-token"
+  },
+  "created_at": "2026-07-14T12:00:00Z"
+}

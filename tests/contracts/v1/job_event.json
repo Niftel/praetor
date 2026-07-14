@@ -1,0 +1,12 @@
+{
+  "execution_run_id": "11111111-2222-3333-4444-555555555555",
+  "unified_job_id": 4242,
+  "seq": 17,
+  "event_type": "TASK_OK",
+  "timestamp": "2026-07-14T12:01:00Z",
+  "host": "host-1",
+  "task_name": "Install package",
+  "play_name": "Configure web tier",
+  "stdout_snippet": "ok: [host-1]",
+  "event_data": {"changed": false, "duration_ms": 42}
+}

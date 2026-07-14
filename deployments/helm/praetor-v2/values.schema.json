@@ -4,6 +4,19 @@
   "type": "object",
   "properties": {
     "allowInsecureDefaults": { "type": "boolean" },
+    "imageTags": {
+      "type": "object",
+      "properties": {
+        "api": { "type": "string" },
+        "ingestion": { "type": "string" },
+        "scheduler": { "type": "string" },
+        "consumer": { "type": "string" },
+        "reconciler": { "type": "string" },
+        "executor": { "type": "string" },
+        "ui": { "type": "string" },
+        "migrator": { "type": "string" }
+      }
+    },
     "secrets": {
       "type": "object",
       "properties": {

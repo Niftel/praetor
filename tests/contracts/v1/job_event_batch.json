@@ -1,0 +1,18 @@
+[
+  {
+    "execution_run_id": "11111111-2222-3333-4444-555555555555",
+    "unified_job_id": 4242,
+    "seq": 1,
+    "event_type": "JOB_STARTED",
+    "timestamp": "2026-07-14T12:00:01Z",
+    "host": "host-1"
+  },
+  {
+    "execution_run_id": "11111111-2222-3333-4444-555555555555",
+    "unified_job_id": 4242,
+    "seq": 2,
+    "event_type": "JOB_COMPLETED",
+    "timestamp": "2026-07-14T12:02:00Z",
+    "host": "host-1"
+  }
+]

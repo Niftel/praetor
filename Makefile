@@ -1,4 +1,4 @@
-.PHONY: build host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api up up-demo down restart
+.PHONY: build compat-check contract-test release-preflight release-preflight-remote workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test clean run-api up up-demo down restart
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -18,6 +18,27 @@ build:
 	go build -o $(API_BINARY) ./cmd/api
 	@echo "Build complete. (scheduler, ingestion, consumer, executor, reconciler now"
 	@echo " live in their own repos — github.com/praetordev/<service>.)"
+
+# Validate the released component set, contract module versions, and database
+# migration range before building or publishing a platform release.
+compat-check:
+	go run ./cmd/compatcheck
+
+contract-test:
+	GOWORK=off go test ./tests/contracts
+
+# A release preflight intentionally fails while the manifest is marked
+# development. The remote form also verifies GHCR images and Go module tags.
+release-preflight:
+	./scripts/release-preflight.sh
+
+release-preflight-remote:
+	./scripts/release-preflight.sh --remote
+
+# Run each extracted deployable service as an independent module. Repositories
+# are expected beside this one; override their parent with PRAETOR_WORKSPACE_DIR.
+workspace-health:
+	./scripts/check-workspace-health.sh
 
 # Cross-compile the host-runner daemon locally (dev convenience). NOTE: this is
 # NOT how a target gets its daemon — the daemon ships inside the Execution Pack,
@@ -141,7 +162,7 @@ clean-docker: down
 	@echo "Cleaning up Docker resources..."
 	docker compose down --volumes --remove-orphans
 # Kubernetes / Helm
-HELM_CHART = deployments/helm/praetor
+HELM_CHART = deployments/helm/praetor-v2
 RELEASE_NAME = praetor
 KIND_CLUSTER = praetor-cluster
 
@@ -177,5 +198,3 @@ dev-k8s:
 	$(MAKE) kind-load
 	$(MAKE) helm-install
 	@echo "Deploy complete. Check pods with: kubectl get pods"
-
-
