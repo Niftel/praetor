@@ -51,7 +51,7 @@ components:
     repository: praetordev/consumer
     module: github.com/praetordev/consumer
     image: praetor-consumer
-    version: 0.1.0
+    version: 0.1.1
 
 # Versions here are compatibility commitments and must match this repository's
 # go.mod when it imports the module directly.

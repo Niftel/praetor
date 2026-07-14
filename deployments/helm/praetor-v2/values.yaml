@@ -32,7 +32,7 @@ imageTags:
   api: 0.1.0
   ingestion: 0.1.1
   scheduler: 0.1.0
-  consumer: 0.1.0
+  consumer: 0.1.1
   reconciler: 0.1.0
   executor: 0.1.0
   ui: 0.1.0
