@@ -69,12 +69,18 @@ const WorkflowsPage = () => {
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink overflow-auto scroll-tint">
       <div className="max-w-[1060px] w-full mx-auto px-8 pt-6 pb-16">
-        <div className="flex items-start gap-4 mb-6">
-          <div>
+        <div className="flex flex-wrap items-start gap-4 mb-6">
+          <div className="min-w-0 flex-1">
             <Link to="/workflows" className="inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-acc"><ArrowLeft size={14} /> Organizations</Link>
             <h1 className="text-[21px] font-semibold tracking-tight mt-1.5 flex items-center gap-2"><GitFork size={20} className="text-acc2" /> {orgName} · Workflows</h1>
             <p className="mt-2 text-[12.5px] text-mut max-w-[560px] leading-relaxed">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
           </div>
+          <button
+            onClick={() => navigate(`/workflows/org/${orgId}/builder`)}
+            className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          >
+            <Plus size={15} /> New workflow
+          </button>
         </div>
 
         {/* Catalog */}
