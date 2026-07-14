@@ -8,10 +8,12 @@ release preflight is the gate that verifies it.
 
 1. Choose the semantic version of each changed component. Components that have
    not changed retain their existing version.
-2. Publish each changed service image at its component version. A
+2. Tag each changed component repository at `v<component version>` and publish
+   its service image at the same component version. A
    commit-addressed image may be used during qualification, but the final
    manifest uses semantic tags.
-3. Publish every Go contract module version declared by the manifest.
+3. Publish every component and shared Go module version declared by the
+   manifest.
 4. Update each changed `components.<name>.version` and the matching Helm
    `imageTags.<name>`. `platformVersion` advances only when publishing a new
    compatible platform set.
@@ -51,6 +53,6 @@ The local gate verifies:
 - Contract versions aligned with this repository's `go.mod`
 - A database migration range ending at the latest numbered migration
 
-The remote gate additionally verifies that each GHCR image manifest and Go
-module version can be resolved. It does not push images, create tags, or mutate
-any repository.
+The remote gate additionally verifies that every component repository tag,
+GHCR image manifest, component Go module, and shared contract module can be
+resolved. It does not push images, create tags, or mutate any repository.

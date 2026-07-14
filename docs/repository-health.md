@@ -68,17 +68,18 @@ Pass service names directly for a focused check:
 
 ## Remaining gaps
 
-1. Service CI validates each repository independently but does not validate a
-   declared platform component set.
-2. The compatibility manifest pins a common image tag, but there is not yet an
-   automated multi-repository release process that guarantees every image exists
-   at that tag.
-3. Cross-service event and database compatibility tests are not yet separated
-   clearly from implementation tests.
-4. Shared modules have not yet received the same standalone health inventory.
-5. The RBAC v1 to v4 consumer migration remains unresolved.
+1. Promotion is still initiated manually; there is not yet one workflow that
+   tags every component repository and waits for all image publications.
+2. Database compatibility is represented by the supported migration range, but
+   cross-version upgrade/downgrade scenarios are not yet executable tests.
+3. Shared modules have not yet received the same standalone health inventory.
 
-The release preflight now verifies every image and contract tag declared in
-`platform-compatibility.yaml` before the platform can be marked stable. The next
-remediation is to make contract and event compatibility executable rather than
-depending only on exact module versions.
+The RBAC v1-to-v4 consumer migration is complete. Praetor now uses the native
+`github.com/praetordev/rbac/v4` loader, an embedded versioned policy, atomic
+last-known-good refresh, integrity pinning, and v4 decision provenance.
+
+The compatibility gate validates the declared component set, Helm image tags,
+Go dependency versions, wire-contract fixture version, and migration range on
+every pull request. The remote release preflight additionally verifies every
+component repository tag, deployable image, component module, and shared
+contract module declared in `platform-compatibility.yaml`.

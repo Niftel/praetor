@@ -37,10 +37,19 @@ while IFS= read -r image; do
     docker manifest inspect "$image" >/dev/null
 done < <(go run ./cmd/compatcheck -release -output images)
 
-printf '\nChecking published Go contract modules...\n'
+printf '\nChecking component repository tags...\n'
+while IFS=@ read -r repository version; do
+    printf '  %s@%s\n' "$repository" "$version"
+    if ! git ls-remote --exit-code "https://github.com/$repository.git" "refs/tags/$version" >/dev/null; then
+        printf 'missing component tag: %s@%s\n' "$repository" "$version" >&2
+        exit 1
+    fi
+done < <(go run ./cmd/compatcheck -release -output repositories)
+
+printf '\nChecking published Go component and contract modules...\n'
 while IFS= read -r module; do
     printf '  %s\n' "$module"
     GOMODCACHE="$cache_root/go-mod" go mod download "$module"
-done < <(go run ./cmd/compatcheck -release -output contracts)
+done < <(go run ./cmd/compatcheck -release -output modules)
 
 printf '\nRemote release preflight passed.\n'
