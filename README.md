@@ -41,22 +41,25 @@ Praetor consists of decoupled microservices communicating via a PostgreSQL datab
     make build
     ```
 
-### Running Services
+### Running
 
-Run each service in a separate terminal:
+This repo is the **API service** plus shared tooling (migrator, host-runner, pack
+builder). The other services — scheduler, ingestion, consumer, executor, and
+reconciler — live in their own repos at `github.com/praetordev/<service>`.
+
+Run just the API:
 
 ```bash
-# Terminal 1: API
 make run-api
+```
 
-# Terminal 2: Scheduler
-make run-scheduler
+Or bring up the full multi-service stack (builds the sibling service repos, which
+are expected to be checked out alongside this one):
 
-# Terminal 3: Controller (Requires KUBECONFIG)
-make run-controller
-
-# Terminal 4: Ingestion
-make run-ingestion
+```bash
+make up        # docker-compose
+# or
+make dev-k8s   # build images, load into k3d/kind, helm install
 ```
 
 ### Verification
