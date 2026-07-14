@@ -55,9 +55,9 @@ const WorkflowsPage = () => {
   }, [runs]);
   const toggleGroup = (id: number) => setCollapsed(c => ({ ...c, [id]: !c[id] }));
 
-  const launch = async (options: WorkflowLaunchOptions) => {
+  const launch = async (options: WorkflowLaunchOptions, signal?: AbortSignal) => {
     if (!launching) return;
-    const res = await api.launchWorkflow(launching.id, options);
+    const res = await api.launchWorkflow(launching.id, options, signal);
     navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
   const remove = async (wf: Workflow) => {

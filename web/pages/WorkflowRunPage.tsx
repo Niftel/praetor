@@ -153,10 +153,10 @@ const WorkflowRunPage = () => {
   const selected = selKey ? nodes.find(n => n.node_key === selKey) || null : null;
   const badStatus = isTerminal && job?.status !== 'successful';
 
-  const relaunch = async (options: WorkflowLaunchOptions) => {
+  const relaunch = async (options: WorkflowLaunchOptions, signal?: AbortSignal) => {
     const wt = job?.workflow_template_id;
     if (!wt) return;
-    const res = await api.launchWorkflow(wt, options);
+    const res = await api.launchWorkflow(wt, options, signal);
     navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
 
