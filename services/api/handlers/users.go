@@ -8,6 +8,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -38,10 +39,10 @@ func NewUsersResource(db *sqlx.DB, authz *Authorizer) *UsersResource {
 	return &UsersResource{DB: db, Authorizer: authz, store: store.NewUserStore(db)}
 }
 
-// userInput is the create/update payload: the user fields plus a write-only
-// password (the User model itself never (de)serializes a password).
+// userInput is the create/update payload: the wire user fields plus a write-only
+// password (the User DTO itself never carries a password or its hash).
 type userInput struct {
-	models.User
+	dto.User
 	Password string `json:"password"`
 }
 
@@ -58,7 +59,7 @@ func (h *UsersResource) ListUsers(w http.ResponseWriter, r *http.Request) {
 	total, _ := h.store.Count(r.Context())
 
 	render.JSON(w, r, &render.PaginatedResponse{
-		Items:  users,
+		Items:  dto.FromUsers(users),
 		Total:  total,
 		Limit:  pg.Limit,
 		Offset: pg.Offset,
@@ -86,14 +87,15 @@ func (h *UsersResource) CreateUser(w http.ResponseWriter, r *http.Request) {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	input.PasswordHash = string(hash)
+	m := input.User.ToModel()
+	m.PasswordHash = string(hash)
 
-	created, err := h.store.Create(r.Context(), input.User)
+	created, err := h.store.Create(r.Context(), m)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromUser(created))
 }
 
 // GetUser GET /api/v1/users/{id}
@@ -104,7 +106,7 @@ func (h *UsersResource) GetUser(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
 	}
-	render.JSON(w, r, user)
+	render.JSON(w, r, dto.FromUser(user))
 }
 
 // UpdateUser PUT /api/v1/users/{id}
@@ -122,6 +124,7 @@ func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.ID = id
+	m := input.User.ToModel()
 
 	// A non-empty password resets it; otherwise the password is left unchanged.
 	setPassword := input.Password != ""
@@ -131,10 +134,10 @@ func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			render.ErrInternal(err).Render(w, r)
 			return
 		}
-		input.PasswordHash = string(hash)
+		m.PasswordHash = string(hash)
 	}
 
-	updated, err := h.store.Update(r.Context(), input.User, setPassword)
+	updated, err := h.store.Update(r.Context(), m, setPassword)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -143,7 +146,7 @@ func (h *UsersResource) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
 	}
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromUser(updated))
 }
 
 // DeleteUser DELETE /api/v1/users/{id}
@@ -175,7 +178,7 @@ func (h *UsersResource) ListUserOrganizations(w http.ResponseWriter, r *http.Req
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, orgs)
+	render.JSON(w, r, dto.FromOrganizations(orgs))
 }
 
 // ListUserTeams GET /api/v1/users/{id}/teams
@@ -188,5 +191,5 @@ func (h *UsersResource) ListUserTeams(w http.ResponseWriter, r *http.Request) {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, teams)
+	render.JSON(w, r, dto.FromTeams(teams))
 }

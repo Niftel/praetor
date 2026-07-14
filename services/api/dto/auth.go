@@ -85,6 +85,26 @@ func FromUsers(ms []models.User) []User {
 	return out
 }
 
+// ToModel maps a decoded user request to the persistence struct. PasswordHash is
+// not a wire field, so it is left zero here — the handler sets it from the
+// separately-decoded password.
+func (d User) ToModel() models.User {
+	return models.User{
+		ID:              d.ID,
+		Username:        d.Username,
+		FirstName:       d.FirstName,
+		LastName:        d.LastName,
+		Email:           d.Email,
+		IsSuperuser:     d.IsSuperuser,
+		IsSystemAuditor: d.IsSystemAuditor,
+		IsActive:        d.IsActive,
+		LdapDN:          d.LdapDN,
+		LdapSyncedAt:    d.LdapSyncedAt,
+		CreatedAt:       d.CreatedAt,
+		ModifiedAt:      d.ModifiedAt,
+	}
+}
+
 // Team is the wire shape of a team.
 type Team struct {
 	ID             int64     `json:"id"`

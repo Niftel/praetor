@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -144,7 +145,7 @@ func (rs *CredentialTypesResource) CreateCredentialType(w http.ResponseWriter, r
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.Created(w, r, ct)
+	render.Created(w, r, dto.FromCredentialType(ct))
 }
 
 // UpdateCredentialType PUT /credential-types/{id} — edit a user credential type.
@@ -191,7 +192,7 @@ func (rs *CredentialTypesResource) UpdateCredentialType(w http.ResponseWriter, r
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, ct)
+	render.JSON(w, r, dto.FromCredentialType(ct))
 }
 
 // DeleteCredentialType DELETE /credential-types/{id} — remove a user credential type.
@@ -255,7 +256,7 @@ func (rs *CredentialTypesResource) ListCredentialTypes(w http.ResponseWriter, r 
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, types)
+	render.JSON(w, r, dto.FromCredentialTypes(types))
 }
 
 func (rs *CredentialTypesResource) GetCredentialType(w http.ResponseWriter, r *http.Request) {
@@ -271,5 +272,5 @@ func (rs *CredentialTypesResource) GetCredentialType(w http.ResponseWriter, r *h
 		render.ErrNotFound(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, ct)
+	render.JSON(w, r, dto.FromCredentialType(ct))
 }

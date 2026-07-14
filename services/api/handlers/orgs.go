@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -89,7 +90,7 @@ func (h *OrgsResource) ListOrganizations(w http.ResponseWriter, r *http.Request)
 	}
 
 	render.JSON(w, r, &render.PaginatedResponse{
-		Items:  orgs,
+		Items:  dto.FromOrganizations(orgs),
 		Total:  total,
 		Limit:  pg.Limit,
 		Offset: pg.Offset,
@@ -106,18 +107,19 @@ func (h *OrgsResource) CreateOrganization(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var input models.Organization
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Organization
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	created, err := h.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromOrganization(created))
 }
 
 // GetOrganization GET /api/v1/organizations/{id}
@@ -134,7 +136,7 @@ func (h *OrgsResource) GetOrganization(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
 	}
-	render.JSON(w, r, org)
+	render.JSON(w, r, dto.FromOrganization(org))
 }
 
 // UpdateOrganization PUT /api/v1/organizations/{id}
@@ -146,11 +148,12 @@ func (h *OrgsResource) UpdateOrganization(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var input models.Organization
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Organization
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 	input.ID = id
 
 	updated, err := h.store.Update(r.Context(), input)
@@ -161,7 +164,7 @@ func (h *OrgsResource) UpdateOrganization(w http.ResponseWriter, r *http.Request
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromOrganization(updated))
 }
 
 // DeleteOrganization DELETE /api/v1/organizations/{id}
@@ -202,7 +205,7 @@ func (h *OrgsResource) ListOrganizationUsers(w http.ResponseWriter, r *http.Requ
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, users)
+	render.JSON(w, r, dto.FromUsers(users))
 }
 
 // AddOrganizationUser POST /api/v1/organizations/{id}/users
@@ -268,7 +271,7 @@ func (h *OrgsResource) ListOrganizationAdmins(w http.ResponseWriter, r *http.Req
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, users)
+	render.JSON(w, r, dto.FromUsers(users))
 }
 
 // AddOrganizationAdmin POST /api/v1/organizations/{id}/admins
@@ -327,7 +330,7 @@ func (h *OrgsResource) ListOrganizationTeams(w http.ResponseWriter, r *http.Requ
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, teams)
+	render.JSON(w, r, dto.FromTeams(teams))
 }
 
 // ListOrganizationRoles GET /api/v1/organizations/{id}/object_roles
@@ -360,7 +363,7 @@ func (h *OrgsResource) ListOrganizationProjects(w http.ResponseWriter, r *http.R
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, projects)
+	render.JSON(w, r, dto.FromProjects(projects))
 }
 
 // ListOrganizationInventories GET /api/v1/organizations/{id}/inventories
@@ -376,7 +379,7 @@ func (h *OrgsResource) ListOrganizationInventories(w http.ResponseWriter, r *htt
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, inventories)
+	render.JSON(w, r, dto.FromInventories(inventories))
 }
 
 // Helper to extract org ID from path

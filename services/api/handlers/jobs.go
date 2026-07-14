@@ -20,6 +20,7 @@ import (
 	"github.com/praetordev/launch"
 	"github.com/praetordev/models"
 	"github.com/praetordev/plog"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/store"
 )
@@ -121,7 +122,7 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 			render.Render(w, r, ErrInternal(err))
 			return
 		}
-		render.JSON(w, r, jobs)
+		render.JSON(w, r, dto.FromUnifiedJobs(jobs))
 		return
 	}
 
@@ -136,7 +137,7 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	render.JSON(w, r, jobs)
+	render.JSON(w, r, dto.FromUnifiedJobs(jobs))
 }
 
 // LaunchJob creates a new unified job with status 'pending'
@@ -245,7 +246,7 @@ func (rs *JobsResource) GetExecutionRun(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	render.JSON(w, r, run)
+	render.JSON(w, r, dto.FromExecutionRun(run))
 }
 
 // ListJobEvents returns all events for a specific execution run
@@ -266,7 +267,7 @@ func (rs *JobsResource) ListJobEvents(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	render.JSON(w, r, events)
+	render.JSON(w, r, dto.FromJobEvents(events))
 }
 
 // StreamRunLogs returns a run's full stdout. Bulk playbook output is streamed to
@@ -333,11 +334,12 @@ func (rs *JobsResource) CreateJobEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var evt models.JobEvent
-	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
+	var body dto.JobEvent
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.Render(w, r, ErrInvalidRequest(err))
 		return
 	}
+	evt := body.ToModel()
 
 	// 1. Look up UnifiedJobID from ExecutionRun
 	unifiedJobID, err := rs.store.UnifiedJobIDForRun(r.Context(), runID)
@@ -368,7 +370,7 @@ func (rs *JobsResource) CreateJobEvent(w http.ResponseWriter, r *http.Request) {
 	evt.ID = newID
 
 	render.Status(r, http.StatusCreated)
-	render.JSON(w, r, evt)
+	render.JSON(w, r, dto.FromJobEvent(evt))
 }
 
 // -- Err Helpers (Basic) --

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -106,7 +107,7 @@ func (rs *HostsResource) ListHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.JSON(w, r, hosts)
+	render.JSON(w, r, dto.FromHosts(hosts))
 }
 
 // CreateHost POST /api/v1/inventories/{inventoryId}/hosts
@@ -122,11 +123,12 @@ func (rs *HostsResource) CreateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var input models.Host
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Host
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	if input.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
@@ -146,7 +148,7 @@ func (rs *HostsResource) CreateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromHost(created))
 }
 
 // GetHost GET /api/v1/hosts/{hostId}
@@ -168,7 +170,7 @@ func (rs *HostsResource) GetHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.JSON(w, r, host)
+	render.JSON(w, r, dto.FromHost(host))
 }
 
 // UpdateHost PUT /api/v1/hosts/{hostId}
@@ -192,19 +194,21 @@ func (rs *HostsResource) UpdateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode updates into the existing host struct (Merge)
-	if err := json.NewDecoder(r.Body).Decode(&host); err != nil {
+	// Decode updates onto the existing host (merge): start from the current wire
+	// shape so fields the request omits keep their stored values.
+	body := dto.FromHost(host)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 
-	updated, err := rs.store.Update(r.Context(), hostId, host)
+	updated, err := rs.store.Update(r.Context(), hostId, body.ToModel())
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromHost(updated))
 }
 
 // DeleteHost DELETE /api/v1/hosts/{hostId}
@@ -247,7 +251,7 @@ func (rs *HostsResource) GetHostGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.JSON(w, r, groups)
+	render.JSON(w, r, dto.FromGroups(groups))
 }
 
 // SetRunnerHost POST /api/v1/hosts/{hostId}/set-runner - sets this host as the runner for its inventory
@@ -269,7 +273,7 @@ func (rs *HostsResource) SetRunnerHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	render.JSON(w, r, host)
+	render.JSON(w, r, dto.FromHost(host))
 }
 
 // RunnerHeartbeat POST /api/v1/hosts/{hostId}/runner-heartbeat - called by host-runner agent to report health

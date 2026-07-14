@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -84,7 +85,7 @@ func (rs *CredentialsResource) ListCredentials(w http.ResponseWriter, r *http.Re
 		rs.maskCredentialSecrets(r.Context(), &creds[i])
 	}
 
-	render.JSON(w, r, creds)
+	render.JSON(w, r, dto.FromCredentials(creds))
 }
 
 func (rs *CredentialsResource) GetCredential(w http.ResponseWriter, r *http.Request) {
@@ -106,15 +107,16 @@ func (rs *CredentialsResource) GetCredential(w http.ResponseWriter, r *http.Requ
 	}
 
 	rs.maskCredentialSecrets(r.Context(), &cred)
-	render.JSON(w, r, cred)
+	render.JSON(w, r, dto.FromCredential(cred))
 }
 
 func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.Request) {
-	var input models.Credential
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Credential
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	// Validation
 	if input.Name == "" || input.CredentialTypeID == 0 {
@@ -145,7 +147,7 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 
 	rs.grantCreatorAdmin(r.Context(), rbac.ContentTypeCredential, created.ID, currentUser(r))
 	rs.maskCredentialSecrets(r.Context(), &created)
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromCredential(created))
 }
 
 func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.Request) {
@@ -166,11 +168,12 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var input models.Credential
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Credential
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 	input.ID = id
 	input.CredentialTypeID = existing.CredentialTypeID // Cannot change type
 
@@ -186,7 +189,7 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 	}
 
 	rs.maskCredentialSecrets(r.Context(), &updated)
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromCredential(updated))
 }
 
 func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.Request) {

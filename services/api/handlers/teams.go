@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
@@ -73,7 +74,7 @@ func (h *TeamsResource) ListTeams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.JSON(w, r, &render.PaginatedResponse{
-		Items:  teams,
+		Items:  dto.FromTeams(teams),
 		Total:  total,
 		Limit:  pg.Limit,
 		Offset: pg.Offset,
@@ -82,11 +83,12 @@ func (h *TeamsResource) ListTeams(w http.ResponseWriter, r *http.Request) {
 
 // CreateTeam POST /api/v1/teams
 func (h *TeamsResource) CreateTeam(w http.ResponseWriter, r *http.Request) {
-	var input models.Team
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Team
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 
 	// A team must belong to an explicit organization — never silently default to
 	// org 1, which would place resources in the wrong tenant.
@@ -106,7 +108,7 @@ func (h *TeamsResource) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.grantCreatorAdmin(r.Context(), rbac.ContentTypeTeam, created.ID, currentUser(r))
-	render.Created(w, r, created)
+	render.Created(w, r, dto.FromTeam(created))
 }
 
 // GetTeam GET /api/v1/teams/{id}
@@ -120,7 +122,7 @@ func (h *TeamsResource) GetTeam(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, render.ErrNotFound(nil))
 		return
 	}
-	render.JSON(w, r, team)
+	render.JSON(w, r, dto.FromTeam(team))
 }
 
 // UpdateTeam PUT /api/v1/teams/{id}
@@ -129,11 +131,12 @@ func (h *TeamsResource) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	if !h.authorize(w, r, rbac.ContentTypeTeam, id, actAdmin) {
 		return
 	}
-	var input models.Team
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	var body dto.Team
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	input := body.ToModel()
 	input.ID = id
 
 	updated, err := h.store.Update(r.Context(), input)
@@ -144,7 +147,7 @@ func (h *TeamsResource) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, updated)
+	render.JSON(w, r, dto.FromTeam(updated))
 }
 
 // DeleteTeam DELETE /api/v1/teams/{id}
@@ -200,7 +203,7 @@ func (h *TeamsResource) ListTeamMembers(w http.ResponseWriter, r *http.Request) 
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.JSON(w, r, members)
+	render.JSON(w, r, dto.FromUsers(members))
 }
 
 // RemoveTeamMember DELETE /api/v1/teams/{id}/members/{userID}

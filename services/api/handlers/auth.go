@@ -8,6 +8,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/praetor/pkg/auth"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/models"
 	"github.com/praetordev/render"
@@ -50,8 +51,8 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string      `json:"token"`
-	User  models.User `json:"user"`
+	Token string   `json:"token"`
+	User  dto.User `json:"user"`
 }
 
 type AuthClaims struct {
@@ -137,6 +138,5 @@ func (h *AuthResource) issueToken(w http.ResponseWriter, r *http.Request, user m
 		return
 	}
 
-	user.PasswordHash = ""
-	render.JSON(w, r, LoginResponse{Token: tokenString, User: user})
+	render.JSON(w, r, LoginResponse{Token: tokenString, User: dto.FromUser(user)})
 }

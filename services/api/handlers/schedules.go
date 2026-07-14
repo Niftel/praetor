@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/render"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/models"
+	"github.com/praetordev/praetor/services/api/dto"
 	"github.com/praetordev/rbac"
 	"github.com/praetordev/store"
 	"github.com/teambition/rrule-go"
@@ -65,7 +66,7 @@ func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Reques
 			render.Render(w, r, ErrInternal(err))
 			return
 		}
-		render.JSON(w, r, schedules)
+		render.JSON(w, r, dto.FromSchedules(schedules))
 		return
 	}
 	// Scope to schedules whose target lives in an organization the user can read.
@@ -78,7 +79,7 @@ func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Reques
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	render.JSON(w, r, schedules)
+	render.JSON(w, r, dto.FromSchedules(schedules))
 }
 
 func (rs *SchedulesResource) GetSchedule(w http.ResponseWriter, r *http.Request) {
@@ -98,15 +99,16 @@ func (rs *SchedulesResource) GetSchedule(w http.ResponseWriter, r *http.Request)
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	render.JSON(w, r, sched)
+	render.JSON(w, r, dto.FromSchedule(sched))
 }
 
 func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Request) {
-	var sched models.Schedule
-	if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
+	var body dto.Schedule
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.Render(w, r, ErrInvalidRequest(err))
 		return
 	}
+	sched := body.ToModel()
 
 	// Validation: name + rrule, and exactly one target (job template XOR workflow).
 	if sched.Name == "" || sched.RRule == "" {
@@ -151,7 +153,7 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 	sched.ID = newID
 
 	render.Status(r, http.StatusCreated)
-	render.JSON(w, r, sched)
+	render.JSON(w, r, dto.FromSchedule(sched))
 }
 
 func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
@@ -172,11 +174,12 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var sched models.Schedule
-	if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
+	var body dto.Schedule
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		render.Render(w, r, ErrInvalidRequest(err))
 		return
 	}
+	sched := body.ToModel()
 	sched.ID = id
 	// If the target changed, the caller must also admin the new target's org.
 	if newOrg, ok := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); ok && newOrg != curOrg {
@@ -204,7 +207,7 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	render.JSON(w, r, sched)
+	render.JSON(w, r, dto.FromSchedule(sched))
 }
 
 func (rs *SchedulesResource) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
