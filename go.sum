@@ -7,8 +7,8 @@ github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358/go.mod h1:chxPXzS
 github.com/Microsoft/go-winio v0.5.2/go.mod h1:WpS1mjBmmwHBEWmogvA2mj8546UReBk4v8QkMxJ6pZY=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
-github.com/Niftel/praetor-secrets v0.0.0-20260715162732-b880f370bf06 h1:uDpySYFnlQ+YKOM72bNX3bmSoMtSHgTkefCj/Eg6n2A=
-github.com/Niftel/praetor-secrets v0.0.0-20260715162732-b880f370bf06/go.mod h1:4Uebq91b+eGs23sFa7SbH03CUnLoSzrluFxZ+Q/m7D4=
+github.com/Niftel/praetor-secrets v0.0.0-20260715173907-72d64f40b742 h1:NewnytnLz0a+lpA6GVJmzgBTrDK7frAk1kPpCcF+kkY=
+github.com/Niftel/praetor-secrets v0.0.0-20260715173907-72d64f40b742/go.mod h1:4Uebq91b+eGs23sFa7SbH03CUnLoSzrluFxZ+Q/m7D4=
 github.com/ProtonMail/go-crypto v1.3.0 h1:ILq8+Sf5If5DCpHQp4PbZdS1J7HDFRXz/+xKBiRGFrw=
 github.com/ProtonMail/go-crypto v1.3.0/go.mod h1:9whxjD8Rbs29b4XWbB8irEcE8KHMqaR2e7GWU1R+/PE=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
