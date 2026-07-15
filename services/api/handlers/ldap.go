@@ -121,8 +121,9 @@ func (h *LDAPHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.JSON(w, r, map[string]interface{}{
-		"configured":  true,
-		"config_path": h.ConfigPath,
+		"configured":         true,
+		"config_path":        h.ConfigPath,
+		"authenticator_maps": cfg.AuthenticatorMaps,
 		"server": map[string]interface{}{
 			"url":       cfg.Server.URL,
 			"bind_dn":   cfg.Server.BindDN,
