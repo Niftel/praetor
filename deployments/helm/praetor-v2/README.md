@@ -77,6 +77,7 @@ kubectl -n praetor create secret generic praetor-scheduler-identity \
 
 kubectl -n praetor create secret generic praetor-executor-identity \
   --from-file=ca.crt=scheduler-claim-ca.pem \
+  --from-file=secrets-ca.crt=praetor-secrets-server-ca.pem \
   --from-file=tls.crt=executor-client.pem \
   --from-file=tls.key=executor-client-key.pem
 ```
@@ -88,6 +89,12 @@ requires exactly one URI SAN,
 certificate must cover the in-cluster DNS name
 `<release>-scheduler.<namespace>.svc` (and any fully-qualified cluster suffix
 used by the executor).
+
+The executor Secret deliberately contains two server trust roots: `ca.crt`
+verifies the scheduler claim listener, while `secrets-ca.crt` verifies Praetor
+Secrets. They may contain the same CA, but keeping separate keys avoids silently
+coupling two independent TLS boundaries. The executor presents `tls.crt` and
+`tls.key` to both services.
 
 Enable the integration without placing key material on the Helm command line:
 

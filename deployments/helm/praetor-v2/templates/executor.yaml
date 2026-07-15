@@ -78,6 +78,10 @@ spec:
               value: /var/run/secrets/praetor-secrets/tls.crt
             - name: PRAETOR_EXECUTOR_KEY_FILE
               value: /var/run/secrets/praetor-secrets/tls.key
+            - name: PRAETOR_SECRETS_URL
+              value: {{ .Values.secretsService.url | quote }}
+            - name: PRAETOR_SECRETS_CA_FILE
+              value: /var/run/secrets/praetor-secrets/secrets-ca.crt
             {{- end }}
           {{- end }}
           volumeMounts:
@@ -107,6 +111,15 @@ spec:
         - name: secrets-service-identity
           secret:
             secretName: {{ .Values.secretsService.executorIdentitySecret | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: secrets-ca.crt
+                path: secrets-ca.crt
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
             # The entrypoint drops from root to uid 1000 before starting the
             # executor; projected Secret files remain root-owned.
             defaultMode: 0444

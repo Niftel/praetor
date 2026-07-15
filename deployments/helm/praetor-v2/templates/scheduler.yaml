@@ -9,7 +9,7 @@
 {{- if or (hasPrefix "PRAETOR_SECRETS_" .name) (hasPrefix "PRAETOR_CLAIM_" .name) }}{{ fail (printf "scheduler.extraEnv must not override reserved secrets integration setting %s" .name) }}{{ end }}
 {{- end }}
 {{- range .Values.executor.extraEnv }}
-{{- if or (hasPrefix "PRAETOR_SCHEDULER_" .name) (hasPrefix "PRAETOR_EXECUTOR_" .name) }}{{ fail (printf "executor.extraEnv must not override reserved secrets integration setting %s" .name) }}{{ end }}
+{{- if or (hasPrefix "PRAETOR_SCHEDULER_" .name) (hasPrefix "PRAETOR_EXECUTOR_" .name) (hasPrefix "PRAETOR_SECRETS_" .name) }}{{ fail (printf "executor.extraEnv must not override reserved secrets integration setting %s" .name) }}{{ end }}
 {{- end }}
 {{- end }}
 apiVersion: apps/v1
