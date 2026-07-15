@@ -140,6 +140,40 @@ All nine service pods reach Ready; `ci/values-k3d.yaml` imports images bare
 with `--set bootstrapAdmin.enabled=true --set bootstrapAdmin.username=admin
 --set bootstrapAdmin.password=admin`.
 
+Manage an existing local cluster through the repository lifecycle commands,
+not by starting or stopping its Docker containers individually:
+
+```sh
+make local-cluster-status
+make local-cluster-stop
+make local-cluster-start
+```
+
+If Docker Desktop was restarted while k3s was shutting down, `server-0` can be
+left stopped while `serverlb` loops because Docker restart policies do not model
+that dependency. Recover the cluster as one unit:
+
+```sh
+make local-cluster-recover
+```
+
+Recovery temporarily disables the load balancer's restart policy and stops the
+cluster through k3d. It then bypasses k3d's temporary tools-node startup phase,
+which can hang on affected Docker Desktop builds, and starts the existing k3s
+server before the load balancer. It does not report success until the k3s API is
+ready and the load balancer can resolve the server container. The wrapper also
+gives k3s 60 seconds to stop and unmount pod volumes before k3d handles the
+remaining containers, instead of allowing a one-second Docker Desktop shutdown
+to force-kill the server.
+
+k3d commands are bounded to 45 seconds. If k3d starts the containers but hangs
+while cleaning up its temporary tools node, the wrapper terminates that command,
+removes the orphaned tools node, and accepts recovery only after the independent
+DNS and Kubernetes API readiness checks pass.
+
+`scripts/update-local-cluster.sh` runs this readiness/recovery check before any
+image build or import.
+
 ### Optional: LDAP (in-cluster mock)
 
 Exercise the AAP-style group→role mapping against a seeded OpenLDAP mock that
