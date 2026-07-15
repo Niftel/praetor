@@ -10,9 +10,7 @@ const remaining = (iso: string, now: number) => {
   const hours = Math.floor(total / 3_600_000);
   const minutes = Math.floor((total % 3_600_000) / 60_000);
   const seconds = Math.floor((total % 60_000) / 1_000);
-  const milliseconds = total % 1_000;
-  return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':')
-    + `:${String(milliseconds).padStart(3, '0')}`;
+  return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
 };
 
 const ApprovalsPage = () => {
@@ -48,7 +46,7 @@ const ApprovalsPage = () => {
   }, [load]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 25);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
