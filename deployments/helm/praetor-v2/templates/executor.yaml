@@ -35,10 +35,11 @@ spec:
       labels:
         {{- include "praetor.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: executor
-      {{- with .Values.executor.podAnnotations }}
       annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.executor.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "praetor.serviceAccountName" . }}
       {{- with .Values.image.pullSecrets }}

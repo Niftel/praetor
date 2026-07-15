@@ -16,6 +16,8 @@ spec:
       labels:
         {{- include "praetor.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: reconciler
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       {{- with .Values.reconciler.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
