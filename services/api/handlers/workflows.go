@@ -53,17 +53,66 @@ func NewWorkflowsResource(db *sqlx.DB, authz *Authorizer) *WorkflowsResource {
 type workflowNode = store.WorkflowNode
 type workflowEdge = store.WorkflowEdge
 
+const approvalExpirySeconds = 24 * 60 * 60
+
+// workflowNodeInput is the public create/update contract. Approval expiry is a
+// server policy, deliberately absent here so clients cannot choose or override
+// its duration or outcome.
+type workflowNodeInput struct {
+	NodeKey       string `json:"node_key"`
+	NodeType      string `json:"node_type"`
+	JobTemplateID *int64 `json:"job_template_id"`
+	Name          string `json:"name"`
+	WebhookURL    string `json:"webhook_url"`
+	WebhookBody   string `json:"webhook_body"`
+}
+
+func workflowNodesFromInput(inputs []workflowNodeInput) []workflowNode {
+	nodes := make([]workflowNode, len(inputs))
+	for i, input := range inputs {
+		nodes[i] = workflowNode{
+			NodeKey:       input.NodeKey,
+			NodeType:      input.NodeType,
+			JobTemplateID: input.JobTemplateID,
+			Name:          input.Name,
+			WebhookURL:    input.WebhookURL,
+			WebhookBody:   input.WebhookBody,
+		}
+	}
+	return nodes
+}
+
+func decodeStrictJSON(r *http.Request, dst interface{}) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(dst)
+}
+
+func validateWorkflowNodes(nodes []workflowNode) error {
+	for i := range nodes {
+		n := &nodes[i]
+		n.ApprovalTimeoutSeconds = 0
+		n.ApprovalTimeoutAction = "rejected"
+		if n.NodeType == "approval" {
+			n.ApprovalTimeoutSeconds = approvalExpirySeconds
+		}
+	}
+	return nil
+}
+
 type workflowApproval struct {
-	ID                 int64     `db:"id" json:"id"`
-	WorkflowJobID      int64     `db:"workflow_job_id" json:"workflow_job_id"`
-	WorkflowTemplateID int64     `db:"workflow_template_id" json:"workflow_template_id"`
-	OrganizationID     int64     `db:"organization_id" json:"organization_id"`
-	WorkflowName       string    `db:"workflow_name" json:"workflow_name"`
-	NodeName           string    `db:"node_name" json:"node_name"`
-	NodeKey            string    `db:"node_key" json:"node_key"`
-	RunCreatedAt       time.Time `db:"run_created_at" json:"run_created_at"`
-	AwaitingSince      time.Time `db:"awaiting_since" json:"awaiting_since"`
-	RequestedBy        *string   `db:"requested_by" json:"requested_by,omitempty"`
+	ID                 int64      `db:"id" json:"id"`
+	WorkflowJobID      int64      `db:"workflow_job_id" json:"workflow_job_id"`
+	WorkflowTemplateID int64      `db:"workflow_template_id" json:"workflow_template_id"`
+	OrganizationID     int64      `db:"organization_id" json:"organization_id"`
+	WorkflowName       string     `db:"workflow_name" json:"workflow_name"`
+	NodeName           string     `db:"node_name" json:"node_name"`
+	NodeKey            string     `db:"node_key" json:"node_key"`
+	RunCreatedAt       time.Time  `db:"run_created_at" json:"run_created_at"`
+	AwaitingSince      time.Time  `db:"awaiting_since" json:"awaiting_since"`
+	RequestedBy        *string    `db:"requested_by" json:"requested_by,omitempty"`
+	Deadline           *time.Time `db:"deadline" json:"deadline,omitempty"`
+	TimeoutAction      string     `db:"timeout_action" json:"timeout_action"`
 }
 
 // ListWorkflows GET /api/v1/workflow-templates
@@ -86,17 +135,22 @@ func (rs *WorkflowsResource) ListWorkflows(w http.ResponseWriter, r *http.Reques
 // CreateWorkflow POST /api/v1/workflow-templates
 func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		OrganizationID    int64          `json:"organization_id"`
-		Name              string         `json:"name"`
-		WebhookEnabled    bool           `json:"webhook_enabled"`
-		WebhookService    string         `json:"webhook_service"`
-		WebhookKey        string         `json:"webhook_key"`
-		AllowSimultaneous bool           `json:"allow_simultaneous"`
-		Nodes             []workflowNode `json:"nodes"`
-		Edges             []workflowEdge `json:"edges"`
+		OrganizationID    int64               `json:"organization_id"`
+		Name              string              `json:"name"`
+		WebhookEnabled    bool                `json:"webhook_enabled"`
+		WebhookService    string              `json:"webhook_service"`
+		WebhookKey        string              `json:"webhook_key"`
+		AllowSimultaneous bool                `json:"allow_simultaneous"`
+		Nodes             []workflowNodeInput `json:"nodes"`
+		Edges             []workflowEdge      `json:"edges"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+	if err := decodeStrictJSON(r, &body); err != nil || body.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	nodes := workflowNodesFromInput(body.Nodes)
+	if err := validateWorkflowNodes(nodes); err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 	if !rs.authorizeOrgRole(w, r, body.OrganizationID, rbac.WorkflowAdminRole) {
@@ -109,7 +163,7 @@ func (rs *WorkflowsResource) CreateWorkflow(w http.ResponseWriter, r *http.Reque
 		WebhookService:    body.WebhookService,
 		WebhookKey:        body.WebhookKey,
 		AllowSimultaneous: body.AllowSimultaneous,
-		Nodes:             body.Nodes,
+		Nodes:             nodes,
 		Edges:             body.Edges,
 	})
 	if err != nil {
@@ -137,16 +191,21 @@ func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var body struct {
-		Name              string         `json:"name"`
-		WebhookEnabled    bool           `json:"webhook_enabled"`
-		WebhookService    string         `json:"webhook_service"`
-		WebhookKey        string         `json:"webhook_key"`
-		AllowSimultaneous bool           `json:"allow_simultaneous"`
-		Nodes             []workflowNode `json:"nodes"`
-		Edges             []workflowEdge `json:"edges"`
+		Name              string              `json:"name"`
+		WebhookEnabled    bool                `json:"webhook_enabled"`
+		WebhookService    string              `json:"webhook_service"`
+		WebhookKey        string              `json:"webhook_key"`
+		AllowSimultaneous bool                `json:"allow_simultaneous"`
+		Nodes             []workflowNodeInput `json:"nodes"`
+		Edges             []workflowEdge      `json:"edges"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+	if err := decodeStrictJSON(r, &body); err != nil || body.Name == "" {
 		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+	nodes := workflowNodesFromInput(body.Nodes)
+	if err := validateWorkflowNodes(nodes); err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 	if err := rs.store.Update(r.Context(), id, store.WorkflowSpec{
@@ -155,7 +214,7 @@ func (rs *WorkflowsResource) UpdateWorkflow(w http.ResponseWriter, r *http.Reque
 		WebhookService:    body.WebhookService,
 		WebhookKey:        body.WebhookKey,
 		AllowSimultaneous: body.AllowSimultaneous,
-		Nodes:             body.Nodes,
+		Nodes:             nodes,
 		Edges:             body.Edges,
 	}); err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -296,7 +355,11 @@ func (rs *WorkflowsResource) ListWorkflowApprovals(w http.ResponseWriter, r *htt
 		       COALESCE(NULLIF(wjn.name, ''), wjn.node_key) AS node_name,
 		       wjn.node_key, wj.created_at AS run_created_at,
 		       COALESCE(wjn.awaiting_since, wj.created_at) AS awaiting_since,
-		       launcher.username AS requested_by
+		       launcher.username AS requested_by,
+		       CASE WHEN wjn.approval_timeout_seconds > 0
+		            THEN COALESCE(wjn.awaiting_since, wj.created_at) + make_interval(secs => wjn.approval_timeout_seconds)
+		       END AS deadline,
+		       wjn.approval_timeout_action AS timeout_action
 		FROM workflow_job_nodes wjn
 		JOIN workflow_jobs wj ON wj.id = wjn.workflow_job_id
 		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id

@@ -220,6 +220,8 @@ export interface WorkflowNode {
   name: string;
   webhook_url?: string;   // webhook_out: URL to POST
   webhook_body?: string;  // webhook_out: optional JSON body
+  approval_timeout_seconds?: number;
+  approval_timeout_action?: 'approved' | 'rejected';
 }
 
 export interface WorkflowEdge {
@@ -247,6 +249,11 @@ export interface WorkflowJobNode {
   run_id?: string | null;
   status: string;
   callback_url?: string; // webhook_in: populated while awaiting_event
+  approval_timeout_seconds?: number;
+  approval_timeout_action?: 'approved' | 'rejected';
+  awaiting_since?: string;
+  decided_at?: string;
+  timed_out?: boolean;
 }
 
 export interface WorkflowJob {
@@ -281,6 +288,8 @@ export interface WorkflowApproval {
   run_created_at: string;
   awaiting_since: string;
   requested_by?: string;
+  deadline?: string;
+  timeout_action: 'approved' | 'rejected';
 }
 
 // Infrastructure models

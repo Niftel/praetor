@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -81,6 +82,19 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 
 	r.Get("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		praetorRender.JSON(w, r, map[string]string{"status": "pong"})
+	})
+	r.Get("/api/v1/ready", func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		praetorRender.JSON(w, r, map[string]string{"status": "ready"})
 	})
 
 	// Prometheus scrape endpoint (unauthenticated, like /ping).

@@ -26,17 +26,30 @@ const WorkflowsPage = () => {
 
   // silent=true for background polls so the list stays live without flashing the
   // full-page spinner or disturbing scroll.
-  const load = (silent = false) => {
+  const load = async (silent = false) => {
     if (!silent) setLoading(true);
-    return Promise.all([
-      api.getWorkflows().catch(() => []),
-      api.getWorkflowJobs().catch(() => []),
-      api.getOrganizations().catch(() => ({})),
-    ]).then(([wf, rs, o]) => {
-      setWorkflows(unwrap<Workflow>(wf).filter(w => (w as any).organization_id === orgId));
-      setRuns(rs || []);
-      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
-    }).finally(() => { if (!silent) setLoading(false); });
+    try {
+      const [workflowResult, runResult, organizationResult] = await Promise.allSettled([
+        api.getWorkflows(),
+        api.getWorkflowJobs(),
+        api.getOrganizations(),
+      ]);
+
+      // A background refresh must never replace confirmed data with an empty
+      // state just because one request failed. Update each slice independently
+      // only when its endpoint returned successfully.
+      if (workflowResult.status === 'fulfilled') {
+        setWorkflows(unwrap<Workflow>(workflowResult.value).filter(w => (w as any).organization_id === orgId));
+      }
+      if (runResult.status === 'fulfilled') {
+        setRuns(unwrap<WorkflowRunSummary>(runResult.value));
+      }
+      if (organizationResult.status === 'fulfilled') {
+        setOrgName(unwrap<{ id: number; name: string }>(organizationResult.value).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
+      }
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
   useEffect(() => {
     load();
@@ -55,9 +68,9 @@ const WorkflowsPage = () => {
   }, [runs]);
   const toggleGroup = (id: number) => setCollapsed(c => ({ ...c, [id]: !c[id] }));
 
-  const launch = async (options: WorkflowLaunchOptions) => {
+  const launch = async (options: WorkflowLaunchOptions, signal?: AbortSignal) => {
     if (!launching) return;
-    const res = await api.launchWorkflow(launching.id, options);
+    const res = await api.launchWorkflow(launching.id, options, signal);
     navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
   const remove = async (wf: Workflow) => {
@@ -69,12 +82,18 @@ const WorkflowsPage = () => {
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink overflow-auto scroll-tint">
       <div className="max-w-[1060px] w-full mx-auto px-8 pt-6 pb-16">
-        <div className="flex items-start gap-4 mb-6">
-          <div>
+        <div className="flex flex-wrap items-start gap-4 mb-6">
+          <div className="min-w-0 flex-1">
             <Link to="/workflows" className="inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-acc"><ArrowLeft size={14} /> Organizations</Link>
             <h1 className="text-[21px] font-semibold tracking-tight mt-1.5 flex items-center gap-2"><GitFork size={20} className="text-acc2" /> {orgName} · Workflows</h1>
             <p className="mt-2 text-[12.5px] text-mut max-w-[560px] leading-relaxed">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
           </div>
+          <button
+            onClick={() => navigate(`/workflows/org/${orgId}/builder`)}
+            className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          >
+            <Plus size={15} /> New workflow
+          </button>
         </div>
 
         {/* Catalog */}

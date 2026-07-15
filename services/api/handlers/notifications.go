@@ -220,8 +220,8 @@ func (rs *WorkflowsResource) ListWorkflowNotifications(w http.ResponseWriter, r 
 
 // AttachWorkflowNotification POST /api/v1/workflow-templates/{id}/notifications.
 // A workflow fires 'started' on first advance, 'success'/'error' on terminal
-// state, 'approval' when an approval node starts waiting, and 'approved'/'denied'
-// on the approval outcome.
+// state, 'approval' when an approval node starts waiting, 'approved'/'denied'
+// on a human outcome, and 'timeout' when the scheduler expires a gate.
 func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
 	wtID := render.GetIDParam(r)
 	if !rs.authorize(w, r, rbac.WorkflowTemplate, wtID, actAdmin) {
@@ -236,9 +236,9 @@ func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r
 		return
 	}
 	switch body.Event {
-	case "started", "success", "error", "approval", "approved", "denied":
+	case "started", "success", "error", "approval", "approved", "denied", "timeout":
 	default:
-		render.ErrInvalidRequest(fmt.Errorf("event must be started|success|error|approval|approved|denied")).Render(w, r)
+		render.ErrInvalidRequest(fmt.Errorf("event must be started|success|error|approval|approved|denied|timeout")).Render(w, r)
 		return
 	}
 	if err := rs.notifications.AttachToWorkflowTemplate(r.Context(), wtID, body.NotificationTemplateID, body.Event); err != nil {

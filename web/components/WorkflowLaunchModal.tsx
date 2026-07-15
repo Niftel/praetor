@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Rocket } from 'lucide-react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
@@ -13,7 +13,7 @@ interface Props {
   isOpen: boolean;
   workflowName: string;
   onClose: () => void;
-  onLaunch: (options: WorkflowLaunchOptions) => Promise<void>;
+  onLaunch: (options: WorkflowLaunchOptions, signal?: AbortSignal) => Promise<void>;
 }
 
 const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, onLaunch }) => {
@@ -21,6 +21,7 @@ const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, o
   const [limit, setLimit] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -28,7 +29,15 @@ const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, o
     setLimit('');
     setError('');
     setSubmitting(false);
+    return () => requestRef.current?.abort();
   }, [isOpen]);
+
+  const close = () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setSubmitting(false);
+    onClose();
+  };
 
   const submit = async () => {
     const options: WorkflowLaunchOptions = {};
@@ -49,16 +58,22 @@ const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, o
 
     setError('');
     setSubmitting(true);
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
     try {
-      await onLaunch(options);
+      await onLaunch(options, controller.signal);
     } catch (e: any) {
-      setError(e?.message || 'Workflow launch failed.');
+      setError(controller.signal.aborted ? 'Launch request timed out. Check connectivity and try again.' : (e?.message || 'Workflow launch failed.'));
       setSubmitting(false);
+    } finally {
+      window.clearTimeout(timeout);
+      if (requestRef.current === controller) requestRef.current = null;
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={submitting ? () => {} : onClose} title={`Launch: ${workflowName}`} size="md">
+    <Modal isOpen={isOpen} onClose={close} title={`Launch: ${workflowName}`} size="md">
       <div className="space-y-4">
         <p className="text-sm leading-relaxed text-mut">Inputs are applied to every job node in this workflow. Leave them empty to use each template's saved configuration.</p>
         <Textarea
@@ -82,7 +97,7 @@ const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, o
         />
         {error && <p role="alert" className="text-sm text-err">{error}</p>}
         <div className="flex justify-end gap-3 pt-1">
-          <Button variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button variant="secondary" onClick={close}>{submitting ? 'Cancel launch' : 'Cancel'}</Button>
           <Button onClick={submit} disabled={submitting} icon={<Rocket size={14} />}>
             {submitting ? 'Launching…' : 'Launch'}
           </Button>

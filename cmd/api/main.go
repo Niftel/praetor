@@ -26,9 +26,9 @@ func main() {
 
 	database, err := db.Connect(env.String("DATABASE_URL", db.DefaultDSN))
 	if err != nil {
-		log.Printf("Warning: Failed to connect to DB: %v", err)
-		log.Println("Starting in NO-DB mode (endpoints will fail)")
+		log.Fatalf("database unavailable: %v", err)
 	}
+	defer database.Close()
 
 	refreshInterval, err := time.ParseDuration(env.String("PRAETOR_RBAC_POLICY_REFRESH_INTERVAL", "30s"))
 	if err != nil {
