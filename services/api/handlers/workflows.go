@@ -314,6 +314,27 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// A workflow execute grant does not implicitly grant use of inventories
+	// attached to its job nodes. Authorize every distinct inventory before
+	// snapshotting the run. This also scopes a client-supplied limit: Ansible can
+	// select hosts only from these inventories, and each inventory has passed the
+	// caller's use check (host authorization inherits from the inventory).
+	var inventoryIDs []int64
+	if err := rs.DB.SelectContext(r.Context(), &inventoryIDs, `
+		SELECT DISTINCT jt.inventory_id
+		FROM workflow_nodes wn
+		JOIN job_templates jt ON jt.id=wn.job_template_id
+		WHERE wn.workflow_template_id=$1 AND jt.inventory_id IS NOT NULL
+		ORDER BY jt.inventory_id`, id); err != nil {
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	for _, inventoryID := range inventoryIDs {
+		if !rs.authorize(w, r, rbac.Inventory, inventoryID, actUse) {
+			return
+		}
+	}
+
 	// Concurrency guard: unless the workflow opts into simultaneous runs, refuse a
 	// launch while a prior run is still active (prevents accidental double-triggers).
 	if !rs.store.AllowSimultaneous(r.Context(), id) {
