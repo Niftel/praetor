@@ -306,10 +306,18 @@ func applyTeamMap(ctx context.Context, tx *sqlx.Tx, cfg *LDAPConfig, userID int6
 			if err := grantRole(ctx, tx, "team", teamID, "member_role", userID); err != nil {
 				return fmt.Errorf("team_map %q: %w", name, err)
 			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO team_members (team_id,user_id)
+				VALUES ($1,$2) ON CONFLICT (team_id,user_id) DO NOTHING`, teamID, userID); err != nil {
+				return fmt.Errorf("team_map %q canonical membership: %w", name, err)
+			}
 		}
 		if revoke {
 			if err := revokeRole(ctx, tx, "team", teamID, "member_role", userID); err != nil {
 				return fmt.Errorf("team_map %q: %w", name, err)
+			}
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM team_members WHERE team_id=$1 AND user_id=$2`, teamID, userID); err != nil {
+				return fmt.Errorf("team_map %q canonical membership revoke: %w", name, err)
 			}
 		}
 	}

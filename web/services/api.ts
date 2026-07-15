@@ -138,7 +138,7 @@ export const api = {
     createWorkflow: (data: any) => fetchWithAuth('/workflow-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     updateWorkflow: (id: number, data: any) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'DELETE' }),
-    launchWorkflow: (id: number, options: { extra_vars?: Record<string, unknown>; limit?: string } = {}, signal?: AbortSignal) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: JSON.stringify(options), signal }).then(r => r.json()),
+    launchWorkflow: (id: number, options: { extra_vars?: Record<string, unknown>; limit?: string; approval_team_id?: number } = {}, signal?: AbortSignal) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: JSON.stringify(options), signal }).then(r => r.json()),
     getWorkflowJobs: () => fetchWithAuth('/workflow-jobs').then(r => r.json()),
     getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
     getWorkflowApprovals: () => fetchWithAuth('/workflow-approvals', { cache: 'no-store' }).then(r => r.json()),

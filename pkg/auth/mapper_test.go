@@ -299,6 +299,10 @@ func TestAuthenticatorMapIntegration(t *testing.T) {
 	if objRoleMemberCount(t, db, "team", teamID, u.ID, "member_role") != 1 {
 		t.Fatal("expected mapped team membership")
 	}
+	var membershipCount int
+	if err := db.Get(&membershipCount, `SELECT count(*) FROM team_members WHERE team_id=$1 AND user_id=$2`, teamID, u.ID); err != nil || membershipCount != 1 {
+		t.Fatalf("expected canonical team membership: count=%d err=%v", membershipCount, err)
+	}
 
 	id.Groups = normalizeDNSet([]string{operatorGroup, suspendedGroup})
 	if _, err := Authenticate(ctx, db, cfg, fakeResolver{id: id}, userName, "pw"); err != nil {
@@ -306,6 +310,9 @@ func TestAuthenticatorMapIntegration(t *testing.T) {
 	}
 	if objRoleMemberCount(t, db, "team", teamID, u.ID, "member_role") != 0 {
 		t.Fatal("expected authoritative team revocation")
+	}
+	if err := db.Get(&membershipCount, `SELECT count(*) FROM team_members WHERE team_id=$1 AND user_id=$2`, teamID, u.ID); err != nil || membershipCount != 0 {
+		t.Fatalf("expected canonical team membership revocation: count=%d err=%v", membershipCount, err)
 	}
 
 	id.Groups = map[string]struct{}{}

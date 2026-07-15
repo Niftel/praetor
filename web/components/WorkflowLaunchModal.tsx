@@ -3,24 +3,31 @@ import { Rocket } from 'lucide-react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 import { Input, Textarea } from './ui/Input';
+import { api, getCurrentUser, unwrap } from '../services/api';
 
 export interface WorkflowLaunchOptions {
   extra_vars?: Record<string, unknown>;
   limit?: string;
+  approval_team_id?: number;
 }
+
+interface Team { id: number; organization_id: number; name: string; }
 
 interface Props {
   isOpen: boolean;
   workflowName: string;
+  organizationId?: number;
   onClose: () => void;
   onLaunch: (options: WorkflowLaunchOptions, signal?: AbortSignal) => Promise<void>;
 }
 
-const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, onLaunch }) => {
+const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, organizationId, onClose, onLaunch }) => {
   const [variables, setVariables] = useState('');
   const [limit, setLimit] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [approvalTeamId, setApprovalTeamId] = useState('');
   const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -29,8 +36,21 @@ const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, o
     setLimit('');
     setError('');
     setSubmitting(false);
+    setTeams([]);
+    setApprovalTeamId('');
+    const user = getCurrentUser();
+    if (user && organizationId) {
+      const teamsRequest = user.is_superuser ? api.getTeams() : api.getUserTeams(user.user_id);
+      teamsRequest
+        .then(data => {
+          const eligible = unwrap<Team>(data).filter(team => team.organization_id === organizationId);
+          setTeams(eligible);
+          if (eligible.length === 1) setApprovalTeamId(String(eligible[0].id));
+        })
+        .catch(() => setTeams([]));
+    }
     return () => requestRef.current?.abort();
-  }, [isOpen]);
+  }, [isOpen, organizationId]);
 
   const close = () => {
     requestRef.current?.abort();
@@ -55,6 +75,11 @@ const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, o
       }
     }
     if (limit.trim()) options.limit = limit.trim();
+    if (teams.length > 1 && !approvalTeamId) {
+      setError('Choose which of your teams will receive approval requests.');
+      return;
+    }
+    if (approvalTeamId) options.approval_team_id = Number(approvalTeamId);
 
     setError('');
     setSubmitting(true);
@@ -95,6 +120,28 @@ const WorkflowLaunchModal: React.FC<Props> = ({ isOpen, workflowName, onClose, o
           onChange={e => setLimit(e.target.value)}
           disabled={submitting}
         />
+        {teams.length > 0 && (
+          <div>
+            <label htmlFor="approval-team" className="block text-[12px] text-mut mb-2 font-medium">Approval team</label>
+            {teams.length === 1 ? (
+              <div className="h-10 rounded-lg border border-line2 bg-panel px-3 flex items-center text-[13px] text-ink">
+                {teams[0].name}
+              </div>
+            ) : (
+              <select
+                id="approval-team"
+                value={approvalTeamId}
+                onChange={event => setApprovalTeamId(event.target.value)}
+                disabled={submitting}
+                className="h-10 w-full rounded-lg border border-line2 bg-panel px-3 text-[13px] text-ink outline-none focus:border-acc/60 disabled:opacity-60"
+              >
+                <option value="">Choose a team</option>
+                {teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+            )}
+            <p className="mt-1.5 text-[11px] leading-relaxed text-dim">Only this team's members can approve gates in the run. You cannot approve your own request.</p>
+          </div>
+        )}
         {error && <p role="alert" className="text-sm text-err">{error}</p>}
         <div className="flex justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={close}>{submitting ? 'Cancel launch' : 'Cancel'}</Button>

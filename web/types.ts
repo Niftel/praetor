@@ -259,6 +259,7 @@ export interface WorkflowJobNode {
 export interface WorkflowJob {
   id: number;
   workflow_template_id?: number;
+  organization_id?: number;
   name?: string;
   status: string;
   created_at?: string;

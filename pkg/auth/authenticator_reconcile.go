@@ -108,6 +108,26 @@ func applyAuthenticatorMaps(ctx context.Context, tx *sqlx.Tx, cfg *LDAPConfig, u
 			if err != nil {
 				return fmt.Errorf("authenticator map team %q/%q: %w", g.Organization, g.Team, err)
 			}
+			// team_members is the canonical membership relation used by team
+			// principal RBAC and team-scoped workflow approvals. Keep it in sync
+			// with LDAP-created Team Member / Team Admin assignments.
+			if decision.on {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO team_members (team_id,user_id)
+					VALUES ($1,$2) ON CONFLICT (team_id,user_id) DO NOTHING`, teamID, userID); err != nil {
+					return fmt.Errorf("authenticator map team membership %q/%q: %w", g.Organization, g.Team, err)
+				}
+			} else {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM team_members tm
+					WHERE tm.team_id=$1 AND tm.user_id=$2 AND NOT EXISTS (
+						SELECT 1 FROM role_user_assignments rua
+						JOIN object_roles orl ON orl.id=rua.object_role_id
+						JOIN role_definitions rd ON rd.id=rua.role_definition_id
+						WHERE rua.user_id=$2 AND orl.content_type='team' AND orl.object_id=$1
+						  AND rd.name IN ('Team Member','Team Admin')
+					)`, teamID, userID); err != nil {
+					return fmt.Errorf("authenticator unmap team membership %q/%q: %w", g.Organization, g.Team, err)
+				}
+			}
 		}
 	}
 	return nil

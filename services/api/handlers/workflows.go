@@ -113,6 +113,44 @@ type workflowApproval struct {
 	RequestedBy        *string    `db:"requested_by" json:"requested_by,omitempty"`
 	Deadline           *time.Time `db:"deadline" json:"deadline,omitempty"`
 	TimeoutAction      string     `db:"timeout_action" json:"timeout_action"`
+	ApprovalTeamID     *int64     `db:"approval_team_id" json:"approval_team_id,omitempty"`
+	ApprovalTeam       *string    `db:"approval_team" json:"approval_team,omitempty"`
+}
+
+func (rs *WorkflowsResource) resolveApprovalTeam(ctx context.Context, workflowID, organizationID, userID, requestedTeamID int64, isSuperuser bool) (int64, error) {
+	var hasApproval bool
+	if err := rs.DB.GetContext(ctx, &hasApproval, `SELECT EXISTS (
+		SELECT 1 FROM workflow_nodes WHERE workflow_template_id=$1 AND node_type='approval'
+	)`, workflowID); err != nil {
+		return 0, err
+	}
+	if !hasApproval && requestedTeamID == 0 {
+		return 0, nil
+	}
+
+	teamIDs := []int64{}
+	teamQuery := `SELECT t.id FROM teams t
+		WHERE t.organization_id=$2 AND ($3 OR EXISTS (
+			SELECT 1 FROM team_members tm WHERE tm.team_id=t.id AND tm.user_id=$1
+		)) ORDER BY t.name, t.id`
+	if err := rs.DB.SelectContext(ctx, &teamIDs, teamQuery, userID, organizationID, isSuperuser); err != nil {
+		return 0, err
+	}
+	if requestedTeamID != 0 {
+		for _, teamID := range teamIDs {
+			if teamID == requestedTeamID {
+				return teamID, nil
+			}
+		}
+		return 0, fmt.Errorf("approval team must be one of your teams in this organization")
+	}
+	if len(teamIDs) == 0 {
+		return 0, fmt.Errorf("an approval workflow can only be launched by a member of a team in this organization")
+	}
+	if len(teamIDs) > 1 {
+		return 0, fmt.Errorf("approval_team_id is required because you belong to multiple teams in this organization")
+	}
+	return teamIDs[0], nil
 }
 
 // ListWorkflows GET /api/v1/workflow-templates
@@ -289,13 +327,22 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 	// EDA triggers. An empty body remains valid for existing clients and relaunch
 	// actions, while operators can supply variables and a host limit when needed.
 	var body struct {
-		ExtraVars map[string]interface{} `json:"extra_vars,omitempty"`
-		Limit     *string                `json:"limit,omitempty"`
+		ExtraVars      map[string]interface{} `json:"extra_vars,omitempty"`
+		Limit          *string                `json:"limit,omitempty"`
+		ApprovalTeamID int64                  `json:"approval_team_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
+	organizationID, _ := rs.store.OrgOf(r.Context(), id)
+	caller := currentUser(r)
+	approvalTeamID, err := rs.resolveApprovalTeam(r.Context(), id, organizationID, caller.UserID, body.ApprovalTeamID, caller.IsSuperuser)
+	if err != nil {
+		render.ErrInvalidRequest(err).Render(w, r)
+		return
+	}
+
 	tx, err := rs.DB.BeginTxx(r.Context(), nil)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -311,7 +358,8 @@ func (rs *WorkflowsResource) LaunchWorkflow(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if _, err := tx.ExecContext(r.Context(),
-		`UPDATE workflow_jobs SET launched_by_user_id=$1 WHERE id=$2`, currentUser(r).UserID, wjID); err != nil {
+		`UPDATE workflow_jobs SET launched_by_user_id=$1, approval_team_id=NULLIF($2, 0) WHERE id=$3`,
+		currentUser(r).UserID, approvalTeamID, wjID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -338,18 +386,11 @@ func (rs *WorkflowsResource) ListWorkflowJobs(w http.ResponseWriter, r *http.Req
 }
 
 // ListWorkflowApprovals GET /api/v1/workflow-approvals — pending approval
-// nodes scoped to workflows on which the caller holds the approve capability.
+// nodes assigned to the caller's team. System administrators retain a
+// break-glass view, but requesters never see their own approval request.
 func (rs *WorkflowsResource) ListWorkflowApprovals(w http.ResponseWriter, r *http.Request) {
-	ids, err := rs.authz.VisibleIDs(r.Context(), rs.subject(r), rbac.Approve, rbac.WorkflowTemplate)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
-	if len(ids) == 0 {
-		render.JSON(w, r, []workflowApproval{})
-		return
-	}
-	query, args, err := sqlx.In(`
+	caller := currentUser(r)
+	query := `
 		SELECT wjn.id, wjn.workflow_job_id, wj.workflow_template_id,
 		       wt.organization_id, wt.name AS workflow_name,
 		       COALESCE(NULLIF(wjn.name, ''), wjn.node_key) AS node_name,
@@ -359,19 +400,22 @@ func (rs *WorkflowsResource) ListWorkflowApprovals(w http.ResponseWriter, r *htt
 		       CASE WHEN wjn.approval_timeout_seconds > 0
 		            THEN COALESCE(wjn.awaiting_since, wj.created_at) + make_interval(secs => wjn.approval_timeout_seconds)
 		       END AS deadline,
-		       wjn.approval_timeout_action AS timeout_action
+		       wjn.approval_timeout_action AS timeout_action,
+		       wj.approval_team_id, team.name AS approval_team
 		FROM workflow_job_nodes wjn
 		JOIN workflow_jobs wj ON wj.id = wjn.workflow_job_id
 		JOIN workflow_templates wt ON wt.id = wj.workflow_template_id
+		LEFT JOIN teams team ON team.id = wj.approval_team_id
 		LEFT JOIN users launcher ON launcher.id = wj.launched_by_user_id
-		WHERE wjn.status = 'awaiting_approval' AND wt.id IN (?)
-		ORDER BY wj.created_at ASC, wjn.id ASC`, ids)
-	if err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
-	}
+		WHERE wjn.status = 'awaiting_approval'
+		  AND (wj.launched_by_user_id IS NULL OR wj.launched_by_user_id <> $2)
+		  AND ($1 OR EXISTS (
+		      SELECT 1 FROM team_members tm
+		      WHERE tm.team_id=wj.approval_team_id AND tm.user_id=$2
+		  ))
+		ORDER BY wj.created_at ASC, wjn.id ASC`
 	rows := []workflowApproval{}
-	if err := rs.DB.SelectContext(r.Context(), &rows, rs.DB.Rebind(query), args...); err != nil {
+	if err := rs.DB.SelectContext(r.Context(), &rows, query, caller.IsSuperuser, caller.UserID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
@@ -403,24 +447,52 @@ func (rs *WorkflowsResource) GetWorkflowJob(w http.ResponseWriter, r *http.Reque
 	edges, _ := rs.store.JobEdges(r.Context(), id)
 	render.JSON(w, r, map[string]interface{}{
 		"id": id, "workflow_template_id": meta.TemplateID, "name": meta.Name,
-		"status": meta.Status, "created_at": meta.CreatedAt, "finished_at": meta.FinishedAt,
+		"organization_id": func() int64 { orgID, _ := rs.store.OrgOf(r.Context(), meta.TemplateID); return orgID }(),
+		"status":          meta.Status, "created_at": meta.CreatedAt, "finished_at": meta.FinishedAt,
 		"nodes": nodes, "edges": edges,
 	})
 }
 
 func (rs *WorkflowsResource) setNodeApproval(w http.ResponseWriter, r *http.Request, status string) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	// Gate on the workflow's own approval_role (parented to the org approval_role,
-	// so org approvers still pass). A workflow_admin (manage) is deliberately NOT
-	// an approver unless also granted approval_role — approving a gate is a
-	// distinct authority from editing the workflow (AWX manage-vs-approve), and is
-	// now delegable per-workflow.
-	tplID, err := rs.store.NodeApprovalTemplate(r.Context(), id)
+	var assignment struct {
+		TemplateID     int64  `db:"workflow_template_id"`
+		RequesterID    *int64 `db:"launched_by_user_id"`
+		ApprovalTeamID *int64 `db:"approval_team_id"`
+	}
+	err := rs.DB.GetContext(r.Context(), &assignment, `
+		SELECT wj.workflow_template_id, wj.launched_by_user_id, wj.approval_team_id
+		FROM workflow_job_nodes wjn
+		JOIN workflow_jobs wj ON wj.id=wjn.workflow_job_id
+		WHERE wjn.id=$1`, id)
 	if err != nil {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
-	if !rs.authorize(w, r, rbac.WorkflowTemplate, tplID, actApprove) {
+	caller := currentUser(r)
+	if assignment.RequesterID != nil && *assignment.RequesterID == caller.UserID {
+		render.ErrForbidden(fmt.Errorf("requesters cannot decide their own approval")).Render(w, r)
+		return
+	}
+	if !caller.IsSuperuser {
+		if assignment.ApprovalTeamID == nil {
+			render.ErrForbidden(fmt.Errorf("this approval has no assigned team")).Render(w, r)
+			return
+		}
+		var member bool
+		if err := rs.DB.GetContext(r.Context(), &member, `SELECT EXISTS (
+			SELECT 1 FROM team_members WHERE team_id=$1 AND user_id=$2
+		)`, *assignment.ApprovalTeamID, caller.UserID); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if !member {
+			render.ErrForbidden(fmt.Errorf("this approval is assigned to another team")).Render(w, r)
+			return
+		}
+	}
+	if assignment.TemplateID == 0 {
+		render.ErrInvalidRequest(nil).Render(w, r)
 		return
 	}
 	result, err := rs.DB.ExecContext(r.Context(), `
