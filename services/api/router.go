@@ -19,6 +19,9 @@ import (
 // Config holds the API's externally-supplied configuration, resolved from env in
 // cmd/api/main.go and passed in so handlers receive plain values.
 type Config struct {
+	// CredentialSecrets enables service-backed credential creation. When nil,
+	// the legacy local encryption path remains available during migration.
+	CredentialSecrets handlers.CredentialSecrets
 	// IngestionURL is the base URL the API proxies run-log reads to.
 	IngestionURL string
 	// InternalToken is the shared cluster secret the API presents to ingestion's
@@ -304,7 +307,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		credTypes := handlers.NewCredentialTypesResource(db, authz)
 		r.Mount("/credential-types", credTypes.Routes())
 
-		creds := handlers.NewCredentialsResource(db, authz)
+		creds := handlers.NewCredentialsResourceWithSecrets(db, authz, cfg.CredentialSecrets)
 		r.Mount("/credentials", creds.Routes())
 
 		// =======================================================================

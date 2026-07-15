@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 
+	secretsclient "github.com/Niftel/praetor-secrets/client"
+	secretscredential "github.com/Niftel/praetor-secrets/credential"
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/crypto"
@@ -27,14 +29,26 @@ type CredentialStore interface {
 	CredentialTypeInputs(ctx context.Context, typeID int64) (json.RawMessage, error)
 }
 
+// CredentialSecrets is the narrow secrets-service contract used by the API.
+// Keeping it as an interface makes the HTTP handler testable without exposing a
+// generic client capable of retrieving secret material.
+type CredentialSecrets interface {
+	CreateCredential(context.Context, secretsclient.CreateCredentialRequest) (secretscredential.Metadata, error)
+}
+
 type CredentialsResource struct {
 	DB *sqlx.DB
 	*Authorizer
-	store CredentialStore
+	store   CredentialStore
+	secrets CredentialSecrets
 }
 
 func NewCredentialsResource(db *sqlx.DB, authz *Authorizer) *CredentialsResource {
 	return &CredentialsResource{DB: db, Authorizer: authz, store: store.NewCredentialStore(db)}
+}
+
+func NewCredentialsResourceWithSecrets(db *sqlx.DB, authz *Authorizer, secrets CredentialSecrets) *CredentialsResource {
+	return &CredentialsResource{DB: db, Authorizer: authz, store: store.NewCredentialStore(db), secrets: secrets}
 }
 
 func (rs *CredentialsResource) Routes() chi.Router {
@@ -134,12 +148,15 @@ func (rs *CredentialsResource) CreateCredential(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := rs.processSecrets(r.Context(), &input, nil); err != nil {
-		render.ErrInternal(err).Render(w, r)
-		return
+	var created models.Credential
+	var err error
+	if rs.secrets != nil {
+		created, err = rs.createServiceBackedCredential(r, input)
+	} else {
+		if err = rs.processSecrets(r.Context(), &input, nil); err == nil {
+			created, err = rs.store.Create(r.Context(), input)
+		}
 	}
-
-	created, err := rs.store.Create(r.Context(), input)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
@@ -160,6 +177,17 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 
 	if !rs.authorize(w, r, rbac.Credential, id, actAdmin) {
 		return
+	}
+	if rs.secrets != nil {
+		serviceBacked, err := rs.isServiceBackedCredential(r.Context(), id)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if serviceBacked {
+			http.Error(w, "service-backed credential replacement is not available yet; existing secret values were not changed", http.StatusConflict)
+			return
+		}
 	}
 
 	existing, err := rs.store.Get(r.Context(), id)
@@ -202,6 +230,17 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 
 	if !rs.authorize(w, r, rbac.Credential, id, actAdmin) {
 		return
+	}
+	if rs.secrets != nil {
+		serviceBacked, err := rs.isServiceBackedCredential(r.Context(), id)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if serviceBacked {
+			http.Error(w, "service-backed credential deletion requires secrets-service revocation support", http.StatusConflict)
+			return
+		}
 	}
 
 	if err := rs.store.Delete(r.Context(), id); err != nil {
