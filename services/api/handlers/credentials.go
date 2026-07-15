@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -34,6 +35,9 @@ type CredentialStore interface {
 // generic client capable of retrieving secret material.
 type CredentialSecrets interface {
 	CreateCredential(context.Context, secretsclient.CreateCredentialRequest) (secretscredential.Metadata, error)
+	ReplaceInputs(context.Context, secretsclient.ReplaceInputsRequest) (secretscredential.Metadata, error)
+	UpdateMetadata(context.Context, secretsclient.UpdateMetadataRequest) (secretscredential.Metadata, error)
+	RetireCredential(context.Context, secretsclient.RetireCredentialRequest) (secretscredential.Metadata, error)
 }
 
 type CredentialsResource struct {
@@ -178,18 +182,6 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 	if !rs.authorize(w, r, rbac.Credential, id, actAdmin) {
 		return
 	}
-	if rs.secrets != nil {
-		serviceBacked, err := rs.isServiceBackedCredential(r.Context(), id)
-		if err != nil {
-			render.ErrInternal(err).Render(w, r)
-			return
-		}
-		if serviceBacked {
-			http.Error(w, "service-backed credential replacement is not available yet; existing secret values were not changed", http.StatusConflict)
-			return
-		}
-	}
-
 	existing, err := rs.store.Get(r.Context(), id)
 	if err != nil {
 		render.ErrNotFound(err).Render(w, r)
@@ -204,6 +196,27 @@ func (rs *CredentialsResource) UpdateCredential(w http.ResponseWriter, r *http.R
 	input := body.ToModel()
 	input.ID = id
 	input.CredentialTypeID = existing.CredentialTypeID // Cannot change type
+	if rs.secrets != nil {
+		serviceBacked, err := rs.isServiceBackedCredential(r.Context(), id)
+		if err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if serviceBacked {
+			updated, err := rs.updateServiceBackedCredential(r, existing, input)
+			if errors.Is(err, errAmbiguousCredentialUpdate) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			if err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+			rs.maskCredentialSecrets(r.Context(), &updated)
+			render.JSON(w, r, dto.FromCredential(updated))
+			return
+		}
+	}
 
 	if err := rs.processSecrets(r.Context(), &input, &existing); err != nil {
 		render.ErrInternal(err).Render(w, r)
@@ -238,7 +251,11 @@ func (rs *CredentialsResource) DeleteCredential(w http.ResponseWriter, r *http.R
 			return
 		}
 		if serviceBacked {
-			http.Error(w, "service-backed credential deletion requires secrets-service revocation support", http.StatusConflict)
+			if err := rs.retireServiceBackedCredential(r, id); err != nil {
+				render.ErrInternal(err).Render(w, r)
+				return
+			}
+			render.NoContent(w, r)
 			return
 		}
 	}
