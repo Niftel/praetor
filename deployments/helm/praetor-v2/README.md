@@ -16,7 +16,8 @@ chart under [`../praetor/`](../praetor/); the design rationale lives in
 | Workload | Kind | Notes |
 |---|---|---|
 | api, ingestion, ui | Deployment + Service | HTTP; api probes `/api/v1/ping`, ingestion `/health` |
-| scheduler, consumer, reconciler | Deployment | no HTTP server; scheduler/consumer scale horizontally |
+| scheduler | Deployment + optional Service | mTLS claim listener Service exists only when secrets integration is enabled |
+| consumer, reconciler | Deployment | no HTTP server; consumer scales horizontally |
 | executor | **StatefulSet** | per-replica PVCs (WAL `/var/lib/praetor`, packs, `~/.ssh`) + `/dev/shm`; safe to scale >1 |
 | migrator | Job (revisioned) | runs schema migrations; services gate on it via an init container |
 | postgresql, nats | StatefulSet | bundled datastores (optional; override with external) |
@@ -58,6 +59,52 @@ The seven service images must be reachable from the cluster (built + pushed to
   datastore here, not just a bus).
 - **Ingress** is off by default. Enable with `ingress.enabled=true` and set `host`
   (ui) + `ingestionHost` (callbacks). The ui pod proxies `/api/` to the api Service.
+
+## Praetor Secrets Service
+
+The provider-independent secrets service is opt-in. The chart does not accept
+certificate or private-key contents in values and does not generate a private
+CA. Create two Kubernetes Secrets from files issued by your workload PKI:
+
+```sh
+kubectl -n praetor create secret generic praetor-scheduler-identity \
+  --from-file=ca.crt=secrets-service-ca.pem \
+  --from-file=tls.crt=scheduler-client.pem \
+  --from-file=tls.key=scheduler-client-key.pem \
+  --from-file=claim.crt=scheduler-claim-server.pem \
+  --from-file=claim.key=scheduler-claim-server-key.pem \
+  --from-file=executor-ca.crt=executor-workload-ca.pem
+
+kubectl -n praetor create secret generic praetor-executor-identity \
+  --from-file=ca.crt=scheduler-claim-ca.pem \
+  --from-file=tls.crt=executor-client.pem \
+  --from-file=tls.key=executor-client-key.pem
+```
+
+The scheduler client certificate requires the URI SAN
+`spiffe://<trust-domain>/workload/praetor-scheduler`. The executor certificate
+requires exactly one URI SAN,
+`spiffe://<trust-domain>/workload/praetor-executor/<instance>`. The claim-server
+certificate must cover the in-cluster DNS name
+`<release>-scheduler.<namespace>.svc` (and any fully-qualified cluster suffix
+used by the executor).
+
+Enable the integration without placing key material on the Helm command line:
+
+```sh
+helm upgrade praetor deployments/helm/praetor-v2 -n praetor \
+  --set secretsService.enabled=true \
+  --set secretsService.url=https://praetor-secrets.praetor-secrets.svc:8443 \
+  --set secretsService.trustDomain=praetor.internal \
+  --set secretsService.schedulerIdentitySecret=praetor-scheduler-identity \
+  --set secretsService.executorIdentitySecret=praetor-executor-identity
+```
+
+Static Kubernetes Secrets provide one executor identity, so this chart mode
+requires `executor.replicas=1`. Scaling requires a workload-identity issuer that
+mounts a different certificate into each StatefulSet pod; sharing one private
+key across replicas would let any replica resolve credentials claimed by another.
+The chart fails rendering instead of allowing that weakened configuration.
 
 ## Authentication
 

@@ -1,3 +1,17 @@
+{{- if .Values.secretsService.enabled }}
+{{- if not .Values.secretsService.url }}{{ fail "secretsService.url is required when secretsService.enabled=true" }}{{ end }}
+{{- if not (hasPrefix "https://" .Values.secretsService.url) }}{{ fail "secretsService.url must use https://" }}{{ end }}
+{{- if not .Values.secretsService.trustDomain }}{{ fail "secretsService.trustDomain is required when secretsService.enabled=true" }}{{ end }}
+{{- if not .Values.secretsService.schedulerIdentitySecret }}{{ fail "secretsService.schedulerIdentitySecret is required when secretsService.enabled=true" }}{{ end }}
+{{- if not .Values.secretsService.executorIdentitySecret }}{{ fail "secretsService.executorIdentitySecret is required when secretsService.enabled=true" }}{{ end }}
+{{- if gt (int .Values.executor.replicas) 1 }}{{ fail "secretsService static executor identity requires executor.replicas=1; use per-pod workload certificates before scaling" }}{{ end }}
+{{- range .Values.scheduler.extraEnv }}
+{{- if or (hasPrefix "PRAETOR_SECRETS_" .name) (hasPrefix "PRAETOR_CLAIM_" .name) }}{{ fail (printf "scheduler.extraEnv must not override reserved secrets integration setting %s" .name) }}{{ end }}
+{{- end }}
+{{- range .Values.executor.extraEnv }}
+{{- if or (hasPrefix "PRAETOR_SCHEDULER_" .name) (hasPrefix "PRAETOR_EXECUTOR_" .name) }}{{ fail (printf "executor.extraEnv must not override reserved secrets integration setting %s" .name) }}{{ end }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,11 +55,72 @@ spec:
                 name: {{ include "praetor.configMapName" . }}
             - secretRef:
                 name: {{ include "praetor.secretName" . }}
-          {{- with .Values.scheduler.extraEnv }}
+          {{- if or .Values.scheduler.extraEnv .Values.secretsService.enabled }}
           env:
+            {{- with .Values.scheduler.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.secretsService.enabled }}
+            - name: PRAETOR_SECRETS_URL
+              value: {{ .Values.secretsService.url | quote }}
+            - name: PRAETOR_SECRETS_CA_FILE
+              value: /var/run/secrets/praetor-secrets/ca.crt
+            - name: PRAETOR_SECRETS_CERT_FILE
+              value: /var/run/secrets/praetor-secrets/tls.crt
+            - name: PRAETOR_SECRETS_KEY_FILE
+              value: /var/run/secrets/praetor-secrets/tls.key
+            - name: PRAETOR_SECRETS_TRUST_DOMAIN
+              value: {{ .Values.secretsService.trustDomain | quote }}
+            - name: PRAETOR_CLAIM_ADDR
+              value: {{ printf ":%v" .Values.secretsService.claimPort | quote }}
+            - name: PRAETOR_CLAIM_CERT_FILE
+              value: /var/run/secrets/praetor-secrets/claim.crt
+            - name: PRAETOR_CLAIM_KEY_FILE
+              value: /var/run/secrets/praetor-secrets/claim.key
+            - name: PRAETOR_CLAIM_CLIENT_CA_FILE
+              value: /var/run/secrets/praetor-secrets/executor-ca.crt
+            {{- end }}
+          {{- end }}
+          {{- if .Values.secretsService.enabled }}
+          ports:
+            - name: claims
+              containerPort: {{ .Values.secretsService.claimPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: secrets-service-identity
+              mountPath: /var/run/secrets/praetor-secrets
+              readOnly: true
           {{- end }}
           {{- with .Values.scheduler.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- if .Values.secretsService.enabled }}
+      volumes:
+        - name: secrets-service-identity
+          secret:
+            secretName: {{ .Values.secretsService.schedulerIdentitySecret | quote }}
+            # Secret volumes are read-only and this pod has one container. 0444
+            # is required because the scheduler image runs as uid 1000 while
+            # Kubernetes projects Secret files as root-owned.
+            defaultMode: 0444
+      {{- end }}
+{{- if .Values.secretsService.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "praetor.fullname" . }}-scheduler
+  labels:
+    {{- include "praetor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  selector:
+    {{- include "praetor.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+  ports:
+    - name: claims
+      port: {{ .Values.secretsService.claimPort }}
+      targetPort: claims
+      protocol: TCP
+{{- end }}
