@@ -6,11 +6,13 @@ import { WorkflowApproval } from '../types';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
 const remaining = (iso: string, now: number) => {
-  const seconds = Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 1000));
-  if (seconds < 60) return `${seconds}s left`;
-  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m left`;
-  if (seconds < 86400) return `${Math.ceil(seconds / 3600)}h left`;
-  return `${Math.ceil(seconds / 86400)}d left`;
+  const total = Math.max(0, new Date(iso).getTime() - now);
+  const hours = Math.floor(total / 3_600_000);
+  const minutes = Math.floor((total % 3_600_000) / 60_000);
+  const seconds = Math.floor((total % 60_000) / 1_000);
+  const milliseconds = total % 1_000;
+  return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':')
+    + `:${String(milliseconds).padStart(3, '0')}`;
 };
 
 const ApprovalsPage = () => {
@@ -46,7 +48,7 @@ const ApprovalsPage = () => {
   }, [load]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), 25);
     return () => clearInterval(timer);
   }, []);
 
