@@ -16,6 +16,8 @@ spec:
       labels:
         {{- include "praetor.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       {{- with .Values.api.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}

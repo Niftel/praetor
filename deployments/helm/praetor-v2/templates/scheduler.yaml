@@ -34,6 +34,8 @@ spec:
       labels:
         {{- include "praetor.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: scheduler
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       {{- with .Values.scheduler.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
