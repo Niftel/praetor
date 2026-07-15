@@ -263,6 +263,7 @@ const WorkflowRunPage = () => {
       <WorkflowLaunchModal
         isOpen={showRelaunch}
         workflowName={job?.name || 'Workflow'}
+        organizationId={job?.organization_id}
         onClose={() => setShowRelaunch(false)}
         onLaunch={relaunch}
       />

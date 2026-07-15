@@ -157,7 +157,7 @@ const WorkflowsPage = () => {
             );
           })}
         </div>
-        <WorkflowLaunchModal isOpen={!!launching} workflowName={launching?.name || 'Workflow'} onClose={() => setLaunching(null)} onLaunch={launch} />
+        <WorkflowLaunchModal isOpen={!!launching} workflowName={launching?.name || 'Workflow'} organizationId={orgId} onClose={() => setLaunching(null)} onLaunch={launch} />
       </div>
     </div>
   );

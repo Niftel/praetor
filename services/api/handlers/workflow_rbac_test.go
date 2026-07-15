@@ -30,11 +30,12 @@ func TestWorkflowRBAC(t *testing.T) {
 	orgExec := createUser(t, db, fmt.Sprintf("wf-orgexec-%d", uniq))    // org execute_role
 	approver := createUser(t, db, fmt.Sprintf("wf-approver-%d", uniq))  // only wfA approval_role
 	nobody := createUser(t, db, fmt.Sprintf("wf-nobody-%d", uniq))
+	otherTeamUser := createUser(t, db, fmt.Sprintf("wf-other-team-%d", uniq))
 	grantObjectRole(t, access, rbac.Organization, org, rbac.WorkflowAdminRole, creator)
 	grantObjectRole(t, access, rbac.Organization, org, rbac.ExecuteRole, orgExec)
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, org)
-		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4,$5,$6)`, creator, perWfAdmin, execOnly, orgExec, approver, nobody)
+		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4,$5,$6,$7)`, creator, perWfAdmin, execOnly, orgExec, approver, nobody, otherTeamUser)
 	})
 
 	creatorUC := middleware.UserContext{UserID: creator}
@@ -48,6 +49,20 @@ func TestWorkflowRBAC(t *testing.T) {
 		t.Fatalf("create wfA: want 201, got %d (%s)", rec.Code, rec.Body)
 	}
 	wfA := extractID(t, rec.Body.String())
+	if _, err := db.Exec(`INSERT INTO workflow_nodes (workflow_template_id,node_key,node_type,name)
+		VALUES ($1,'team-gate','approval','Team gate')`, wfA); err != nil {
+		t.Fatalf("add approval node: %v", err)
+	}
+	var approvalTeam, otherTeam int64
+	if err := db.Get(&approvalTeam, `INSERT INTO teams (organization_id,name) VALUES ($1,$2) RETURNING id`, org, fmt.Sprintf("approvers-%d", uniq)); err != nil {
+		t.Fatalf("create approval team: %v", err)
+	}
+	if err := db.Get(&otherTeam, `INSERT INTO teams (organization_id,name) VALUES ($1,$2) RETURNING id`, org, fmt.Sprintf("other-%d", uniq)); err != nil {
+		t.Fatalf("create other team: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO team_members (team_id,user_id) VALUES ($1,$2),($1,$3),($4,$5)`, approvalTeam, execOnly, approver, otherTeam, otherTeamUser); err != nil {
+		t.Fatalf("seed team members: %v", err)
+	}
 	rec = callJSON(t, wf.CreateWorkflow, http.MethodPost, body(fmt.Sprintf("wfB-%d", uniq)), creatorUC, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create wfB: want 201, got %d", rec.Code)
@@ -117,6 +132,10 @@ func TestWorkflowRBAC(t *testing.T) {
 	if err := db.Get(&launchedBy, `SELECT launched_by_user_id FROM workflow_jobs WHERE id=$1`, launched.WorkflowJobID); err != nil || launchedBy != execOnly {
 		t.Fatalf("workflow requester was not recorded: got=%d err=%v", launchedBy, err)
 	}
+	var assignedTeam int64
+	if err := db.Get(&assignedTeam, `SELECT approval_team_id FROM workflow_jobs WHERE id=$1`, launched.WorkflowJobID); err != nil || assignedTeam != approvalTeam {
+		t.Fatalf("requester's only team should own approvals: got=%d want=%d err=%v", assignedTeam, approvalTeam, err)
+	}
 
 	// 4. The approval inbox contains only pending nodes on workflows the caller
 	// may approve, and a second decision receives a stale-state conflict.
@@ -139,9 +158,25 @@ func TestWorkflowRBAC(t *testing.T) {
 	if approvals[0]["requested_by"] != fmt.Sprintf("wf-exec-%d", uniq) || approvals[0]["awaiting_since"] == nil {
 		t.Fatalf("approval audit context missing from inbox: %s", rec.Body)
 	}
+	if approvals[0]["approval_team"] != fmt.Sprintf("approvers-%d", uniq) {
+		t.Fatalf("approval team missing from inbox: %s", rec.Body)
+	}
 	rec = callJSON(t, wf.ListWorkflowApprovals, http.MethodGet, "", execUC, nil)
 	if rec.Code != http.StatusOK || rec.Body.String() != "[]\n" {
 		t.Fatalf("execute-only user must not see approvals: code=%d body=%s", rec.Code, rec.Body)
+	}
+	otherUC := middleware.UserContext{UserID: otherTeamUser}
+	rec = callJSON(t, wf.ListWorkflowApprovals, http.MethodGet, "", otherUC, nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "[]\n" {
+		t.Fatalf("another team must not see approvals: code=%d body=%s", rec.Code, rec.Body)
+	}
+	rec = callJSON(t, wf.ApproveNode, http.MethodPost, "", otherUC, map[string]string{"id": fmt.Sprint(approvalID)})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("another team must not approve: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+	rec = callJSON(t, wf.ApproveNode, http.MethodPost, "", execUC, map[string]string{"id": fmt.Sprint(approvalID)})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("requester must not self-approve: want 403, got %d (%s)", rec.Code, rec.Body)
 	}
 	rec = callJSON(t, wf.ApproveNode, http.MethodPost, "", approverUC, map[string]string{"id": fmt.Sprint(approvalID)})
 	if rec.Code != http.StatusNoContent {
