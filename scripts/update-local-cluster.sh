@@ -24,10 +24,9 @@ for command in docker k3d kubectl helm; do
   need "$command"
 done
 
-if ! k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fxq "$CLUSTER"; then
-  echo "error: k3d cluster '$CLUSTER' is not running" >&2
-  exit 1
-fi
+# Recover a partial Docker/k3d restart before building. In particular, never
+# leave serverlb crash-looping while server-0 is stopped.
+"$ROOT/scripts/local-cluster.sh" start
 
 echo "==> Building local images"
 docker build -f "$ROOT/build/package/Dockerfile.api" \
