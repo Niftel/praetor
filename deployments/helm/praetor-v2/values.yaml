@@ -34,7 +34,7 @@ imageTags:
   scheduler: 0.1.1
   consumer: 0.1.1
   reconciler: 0.1.0
-  executor: 0.1.0
+  executor: 0.1.1
   ui: 0.1.0
   migrator: 0.1.0
 
@@ -82,7 +82,7 @@ secretsService:
   trustDomain: ""           # SPIFFE trust domain encoded in workload URI SANs
   claimPort: 8443
   schedulerIdentitySecret: "" # keys: ca.crt, tls.crt, tls.key, claim.crt, claim.key, executor-ca.crt
-  executorIdentitySecret: ""  # keys: ca.crt, tls.crt, tls.key; static mode requires executor.replicas=1
+  executorIdentitySecret: ""  # keys: ca.crt (claim server), secrets-ca.crt, tls.crt, tls.key; static mode requires executor.replicas=1
 
 database:
   # External managed Postgres wins when url is set (recommended for production).
