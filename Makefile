@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart
+.PHONY: build compat-check contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -92,6 +92,23 @@ test:
 # containers. This intentionally pauses PostgreSQL and restarts NATS.
 chaos-test:
 	./scripts/chaos-test.sh
+
+# Manage the local k3d cluster as one dependency-aware unit. These targets avoid
+# Docker's restart-policy race where serverlb loops after server-0 was stopped.
+local-cluster-status:
+	./scripts/local-cluster.sh status
+
+local-cluster-start:
+	./scripts/local-cluster.sh start
+
+local-cluster-stop:
+	./scripts/local-cluster.sh stop
+
+local-cluster-recover:
+	./scripts/local-cluster.sh recover
+
+local-cluster-update:
+	./scripts/update-local-cluster.sh
 
 # Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
 # tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run
