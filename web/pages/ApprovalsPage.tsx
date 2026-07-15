@@ -86,7 +86,7 @@ const ApprovalsPage = () => {
 
       <div className="flex-1">
         {items.map(item => (
-          <div key={item.id} className="grid min-h-[58px] grid-cols-[minmax(220px,1.3fr)_minmax(180px,1fr)_130px_130px_250px] items-center border-b border-line px-8 py-3 hover:bg-white/[0.02] max-[920px]:grid-cols-[1fr_130px] max-[920px]:gap-y-3">
+          <div key={item.id} className="grid min-h-[58px] grid-cols-[minmax(220px,1.3fr)_minmax(180px,1fr)_130px_130px_250px] items-center border-b border-line px-8 py-3 hover:bg-white/[0.02] max-[920px]:grid-cols-[1fr_130px] max-[920px]:gap-y-5 max-[920px]:pt-7 max-[920px]:pb-5">
             <button onClick={() => navigate(`/workflows/runs/${item.workflow_job_id}`)} className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60">
               <span className="block truncate text-[13.5px] font-medium text-ink">{item.workflow_name}</span>
               <span className="mt-0.5 block font-mono text-[10.5px] text-dim">run #{item.workflow_job_id}</span>
