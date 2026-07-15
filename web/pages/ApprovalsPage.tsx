@@ -86,7 +86,7 @@ const ApprovalsPage = () => {
 
       <div className="flex-1">
         {items.map(item => (
-          <div key={item.id} className="grid min-h-[58px] grid-cols-[minmax(220px,1.3fr)_minmax(180px,1fr)_130px_130px_250px] items-center border-b border-line px-8 hover:bg-white/[0.02] max-[920px]:grid-cols-[1fr_130px]">
+          <div key={item.id} className="grid min-h-[58px] grid-cols-[minmax(220px,1.3fr)_minmax(180px,1fr)_130px_130px_250px] items-center border-b border-line px-8 py-3 hover:bg-white/[0.02] max-[920px]:grid-cols-[1fr_130px] max-[920px]:gap-y-3">
             <button onClick={() => navigate(`/workflows/runs/${item.workflow_job_id}`)} className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60">
               <span className="block truncate text-[13.5px] font-medium text-ink">{item.workflow_name}</span>
               <span className="mt-0.5 block font-mono text-[10.5px] text-dim">run #{item.workflow_job_id}</span>
@@ -99,7 +99,7 @@ const ApprovalsPage = () => {
             <span className="font-mono text-[11px] tabular-nums text-mut" title={`Waiting since ${new Date(item.awaiting_since).toLocaleString()}`}>
               <span className={item.deadline ? 'text-changed' : 'text-dim'}>{item.deadline ? remaining(item.deadline, now) : 'No timeout'}</span>
             </span>
-            <div className="flex justify-end gap-2 max-[920px]:col-span-2 max-[920px]:mt-2 max-[920px]:pb-3">
+            <div className="flex justify-end gap-2 max-[920px]:col-span-2">
               <button onClick={() => navigate(`/workflows/runs/${item.workflow_job_id}`)} className="grid h-8 w-8 place-items-center rounded-md border border-line2 text-mut hover:border-white/25 hover:text-ink" title="Open workflow run"><ExternalLink size={13} /></button>
               <button disabled={acting === item.id} onClick={() => decide(item, false)} className="flex h-8 items-center gap-1.5 rounded-md border border-err/40 px-3 text-[12px] font-semibold text-err hover:bg-err/10 disabled:opacity-50"><X size={13} /> Deny</button>
               <button disabled={acting === item.id} onClick={() => decide(item, true)} className="flex h-8 items-center gap-1.5 rounded-md bg-acc px-3 text-[12px] font-semibold text-[#04211d] hover:bg-acc2 disabled:opacity-50"><Check size={13} /> Approve</button>
