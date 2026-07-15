@@ -34,6 +34,30 @@ group_type:
   search_filter: "(objectClass=groupOfNames)"
   member_attribute: "member"
 
+# Provider-neutral login policy. Start denied, then allow users who belong to at
+# least one platform-managed group. demo-denied belongs to none of these groups.
+authenticator_maps:
+  - name: "deny login by default"
+    order: 0
+    revoke: true
+    when: { always: false }
+    map: { type: allow }
+  - name: "allow mapped directory groups"
+    order: 10
+    when:
+      any:
+        - { group: "cn=platform-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=backend-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=frontend-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=sre-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=network-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=admins,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=security-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=compliance-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=data-engineering-team,ou=teams,dc=praetor,dc=local" }
+        - { group: "cn=qa-team,ou=teams,dc=praetor,dc=local" }
+    map: { type: allow }
+
 # Platform flags granted by group membership. The Praetor superuser is a local
 # break-glass account (not in the directory); cn=admins here grants is_superuser to
 # directory users such as `opark`.

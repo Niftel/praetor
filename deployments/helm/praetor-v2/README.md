@@ -156,9 +156,17 @@ helm upgrade praetor deployments/helm/praetor-v2 \
 ```
 
 `values-k3d-ldap.yaml` points `ldap.config` at the in-cluster `praetor-openldap`
-Service. Log in as `opark`/`praetor123` (→ superuser via `cn=admins`) or
-`scho`/`praetor123` (→ system auditor via `cn=compliance-team`); orgs/teams are
-created from group membership on first login.
+Service. The purpose-named demo accounts all use the demo-only password
+`praetor123`:
+
+| LDAP username | Expected Praetor access |
+|---|---|
+| `demo-admin` | Full platform administrator |
+| `demo-auditor` | Read-only platform auditor |
+| `demo-operator` | Engineering organization and non-admin `backend-team` member |
+| `demo-denied` | Login rejected because it belongs to no allowed LDAP group |
+
+Organizations and teams are created from group membership on first login.
 
 ### Optional: Gitea pack registry (external)
 
