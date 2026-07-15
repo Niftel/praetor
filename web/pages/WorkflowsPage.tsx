@@ -26,17 +26,30 @@ const WorkflowsPage = () => {
 
   // silent=true for background polls so the list stays live without flashing the
   // full-page spinner or disturbing scroll.
-  const load = (silent = false) => {
+  const load = async (silent = false) => {
     if (!silent) setLoading(true);
-    return Promise.all([
-      api.getWorkflows().catch(() => []),
-      api.getWorkflowJobs().catch(() => []),
-      api.getOrganizations().catch(() => ({})),
-    ]).then(([wf, rs, o]) => {
-      setWorkflows(unwrap<Workflow>(wf).filter(w => (w as any).organization_id === orgId));
-      setRuns(rs || []);
-      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
-    }).finally(() => { if (!silent) setLoading(false); });
+    try {
+      const [workflowResult, runResult, organizationResult] = await Promise.allSettled([
+        api.getWorkflows(),
+        api.getWorkflowJobs(),
+        api.getOrganizations(),
+      ]);
+
+      // A background refresh must never replace confirmed data with an empty
+      // state just because one request failed. Update each slice independently
+      // only when its endpoint returned successfully.
+      if (workflowResult.status === 'fulfilled') {
+        setWorkflows(unwrap<Workflow>(workflowResult.value).filter(w => (w as any).organization_id === orgId));
+      }
+      if (runResult.status === 'fulfilled') {
+        setRuns(unwrap<WorkflowRunSummary>(runResult.value));
+      }
+      if (organizationResult.status === 'fulfilled') {
+        setOrgName(unwrap<{ id: number; name: string }>(organizationResult.value).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
+      }
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
   useEffect(() => {
     load();
