@@ -35,3 +35,15 @@ func TestAPISkeletonPing(t *testing.T) {
 		t.Errorf("Expected pong, got %v", data["status"])
 	}
 }
+
+func TestAPIReadinessRequiresDatabase(t *testing.T) {
+	router := api.NewRouter(nil, api.Config{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness without database: want 503, got %d (%s)", rec.Code, rec.Body)
+	}
+}

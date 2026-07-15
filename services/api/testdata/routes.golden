@@ -66,6 +66,7 @@ GET     /api/v1/organizations/{id}/users
 GET     /api/v1/ping
 GET     /api/v1/projects
 GET     /api/v1/rbac/policy
+GET     /api/v1/ready
 GET     /api/v1/role-definitions
 GET     /api/v1/schedules/
 GET     /api/v1/schedules/{id}/
