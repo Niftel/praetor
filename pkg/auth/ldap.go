@@ -18,13 +18,33 @@ type LDAPConfig struct {
 	UserFlags       LDAPUserFlagsConfig         `yaml:"user_flags_by_group"`
 	OrganizationMap map[string]LDAPOrgMapEntry  `yaml:"organization_map"` // key = Praetor org NAME
 	TeamMap         map[string]LDAPTeamMapEntry `yaml:"team_map"`         // key = Praetor team NAME
+
+	// AuthenticatorMaps is the provider-neutral successor to the legacy LDAP-
+	// specific maps above. It evaluates normalized groups and attributes and maps
+	// them only to platform organizations, teams, and global roles.
+	AuthenticatorMaps []AuthenticatorMap `yaml:"authenticator_maps"`
 }
 
 // UsesLoginMapping reports whether any AAP-style mapping is configured, i.e. the
 // new model is in use for this config.
 func (c *LDAPConfig) UsesLoginMapping() bool {
 	return len(c.OrganizationMap) > 0 || len(c.TeamMap) > 0 ||
-		c.UserFlags.IsSuperuser.Configured() || c.UserFlags.IsSystemAuditor.Configured()
+		len(c.AuthenticatorMaps) > 0 || c.UserFlags.IsSuperuser.Configured() || c.UserFlags.IsSystemAuditor.Configured()
+}
+
+// UsesGroupMapping reports whether configuration actually needs external group
+// resolution. Attribute-only authenticator maps do not require group_type.
+func (c *LDAPConfig) UsesGroupMapping() bool {
+	if len(c.OrganizationMap) > 0 || len(c.TeamMap) > 0 ||
+		c.UserFlags.IsSuperuser.Configured() || c.UserFlags.IsSystemAuditor.Configured() {
+		return true
+	}
+	for _, m := range c.AuthenticatorMaps {
+		if predicateUsesGroup(m.When) {
+			return true
+		}
+	}
+	return false
 }
 
 // LDAPServerConfig contains LDAP server connection settings.

@@ -114,10 +114,10 @@ hostRunner:
 
 ldap:
   enabled: false
-  # AAP-style login-time group→role mapping, rendered verbatim into
+  # Provider-neutral authenticator rules and legacy LDAP login mappings, rendered verbatim into
   # /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml for a full
-  # example: server, users, group_type, user_flags_by_group, organization_map,
-  # team_map). Leave empty to disable LDAP entirely (local auth only).
+  # LDAP example and docs/AUTHENTICATOR_MAPPING.md for ordered all/any/not
+  # rules). Leave empty to disable LDAP entirely (local auth only).
   config: {}
 
 api:
