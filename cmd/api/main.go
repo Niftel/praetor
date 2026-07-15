@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	secretsclient "github.com/Niftel/praetor-secrets/client"
 	"github.com/praetordev/crypto"
 	"github.com/praetordev/db"
 	"github.com/praetordev/env"
@@ -38,7 +39,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid PRAETOR_RBAC_DECISION_AUDIT: %v", err)
 	}
+	credentialSecrets, err := newCredentialSecretsClient()
+	if err != nil {
+		log.Fatalf("secrets service misconfigured: %v", err)
+	}
 	router := api.NewRouter(database, api.Config{
+		CredentialSecrets:         credentialSecrets,
 		IngestionURL:              env.String("INGESTION_URL", ""),
 		InternalToken:             env.String("PRAETOR_INTERNAL_TOKEN", ""),
 		LDAPConfigPath:            env.String("PRAETOR_LDAP_CONFIG", ""),
@@ -52,4 +58,25 @@ func main() {
 	if err := http.ListenAndServe(":"+port, router); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+// newCredentialSecretsClient deliberately accepts the workload private key
+// only as a file path. Setting the URL opts into the integration and makes every
+// mTLS setting mandatory; partial configuration fails startup.
+func newCredentialSecretsClient() (*secretsclient.Client, error) {
+	baseURL := env.String("PRAETOR_SECRETS_URL", "")
+	if baseURL == "" {
+		return nil, nil
+	}
+	timeout, err := time.ParseDuration(env.String("PRAETOR_SECRETS_TIMEOUT", "10s"))
+	if err != nil {
+		return nil, err
+	}
+	return secretsclient.New(secretsclient.Config{
+		BaseURL:         baseURL,
+		CAFile:          env.String("PRAETOR_SECRETS_CA_FILE", ""),
+		CertificateFile: env.String("PRAETOR_SECRETS_CERT_FILE", ""),
+		PrivateKeyFile:  env.String("PRAETOR_SECRETS_KEY_FILE", ""),
+		Timeout:         timeout,
+	})
 }
