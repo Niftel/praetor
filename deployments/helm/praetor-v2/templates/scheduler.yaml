@@ -2,6 +2,7 @@
 {{- if not .Values.secretsService.url }}{{ fail "secretsService.url is required when secretsService.enabled=true" }}{{ end }}
 {{- if not (hasPrefix "https://" .Values.secretsService.url) }}{{ fail "secretsService.url must use https://" }}{{ end }}
 {{- if not .Values.secretsService.trustDomain }}{{ fail "secretsService.trustDomain is required when secretsService.enabled=true" }}{{ end }}
+{{- if not .Values.secretsService.apiIdentitySecret }}{{ fail "secretsService.apiIdentitySecret is required when secretsService.enabled=true" }}{{ end }}
 {{- if not .Values.secretsService.schedulerIdentitySecret }}{{ fail "secretsService.schedulerIdentitySecret is required when secretsService.enabled=true" }}{{ end }}
 {{- if not .Values.secretsService.executorIdentitySecret }}{{ fail "secretsService.executorIdentitySecret is required when secretsService.enabled=true" }}{{ end }}
 {{- if gt (int .Values.executor.replicas) 1 }}{{ fail "secretsService static executor identity requires executor.replicas=1; use per-pod workload certificates before scaling" }}{{ end }}
@@ -10,6 +11,9 @@
 {{- end }}
 {{- range .Values.executor.extraEnv }}
 {{- if or (hasPrefix "PRAETOR_SCHEDULER_" .name) (hasPrefix "PRAETOR_EXECUTOR_" .name) (hasPrefix "PRAETOR_SECRETS_" .name) }}{{ fail (printf "executor.extraEnv must not override reserved secrets integration setting %s" .name) }}{{ end }}
+{{- end }}
+{{- range .Values.api.extraEnv }}
+{{- if hasPrefix "PRAETOR_SECRETS_" .name }}{{ fail (printf "api.extraEnv must not override reserved secrets integration setting %s" .name) }}{{ end }}
 {{- end }}
 {{- end }}
 apiVersion: apps/v1

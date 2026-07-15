@@ -29,14 +29,14 @@ images:
 # platform-compatibility.yaml and take precedence over image.tag. The shared tag
 # remains a convenient override for local/k3d development.
 imageTags:
-  api: 0.1.0
+  api: 0.1.1
   ingestion: 0.1.1
   scheduler: 0.1.1
   consumer: 0.1.1
   reconciler: 0.1.0
   executor: 0.1.1
-  ui: 0.1.0
-  migrator: 0.1.0
+  ui: 0.1.1
+  migrator: 0.1.1
 
 serviceAccount:
   create: true
@@ -81,6 +81,7 @@ secretsService:
   url: ""                   # required HTTPS service URL, e.g. https://praetor-secrets.praetor-secrets.svc:8443
   trustDomain: ""           # SPIFFE trust domain encoded in workload URI SANs
   claimPort: 8443
+  apiIdentitySecret: ""       # keys: ca.crt, tls.crt, tls.key
   schedulerIdentitySecret: "" # keys: ca.crt, tls.crt, tls.key, claim.crt, claim.key, executor-ca.crt
   executorIdentitySecret: ""  # keys: ca.crt (claim server), secrets-ca.crt, tls.crt, tls.key; static mode requires executor.replicas=1
 

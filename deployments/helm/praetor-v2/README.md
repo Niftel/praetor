@@ -75,6 +75,11 @@ kubectl -n praetor create secret generic praetor-scheduler-identity \
   --from-file=claim.key=scheduler-claim-server-key.pem \
   --from-file=executor-ca.crt=executor-workload-ca.pem
 
+kubectl -n praetor create secret generic praetor-api-identity \
+  --from-file=ca.crt=secrets-service-ca.pem \
+  --from-file=tls.crt=api-client.pem \
+  --from-file=tls.key=api-client-key.pem
+
 kubectl -n praetor create secret generic praetor-executor-identity \
   --from-file=ca.crt=scheduler-claim-ca.pem \
   --from-file=secrets-ca.crt=praetor-secrets-server-ca.pem \
@@ -103,6 +108,7 @@ helm upgrade praetor deployments/helm/praetor-v2 -n praetor \
   --set secretsService.enabled=true \
   --set secretsService.url=https://praetor-secrets.praetor-secrets.svc:8443 \
   --set secretsService.trustDomain=praetor.internal \
+  --set secretsService.apiIdentitySecret=praetor-api-identity \
   --set secretsService.schedulerIdentitySecret=praetor-scheduler-identity \
   --set secretsService.executorIdentitySecret=praetor-executor-identity
 ```
