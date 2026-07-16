@@ -113,6 +113,18 @@ func RequireHuman(next http.Handler) http.Handler {
 	})
 }
 
+// RequireService admits only non-human service credentials to delegated routes.
+func RequireService(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := r.Context().Value(UserContextKey).(UserContext)
+		if !ok || principal.Kind != ServicePrincipal {
+			render.ErrForbidden(nil).Render(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // authenticatePAT resolves a personal access token to its user, enforcing
 // expiry, and stamps last_used_at (throttled) for auditing.
 func authenticatePAT(db *sqlx.DB, ctx context.Context, token string) (UserContext, bool) {
