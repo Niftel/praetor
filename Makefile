@@ -41,6 +41,7 @@ secrets-execution-contract-test:
 	grep -q 'credential plaintext was stored' ./scripts/test-secrets-execution-e2e.sh
 	grep -q 'exactly one credential resolution attempt' ./scripts/test-secrets-execution-e2e.sh
 	grep -q 'JOB_COMPLETED' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'PRAETOR_E2E_EVIDENCE_FILE' ./scripts/test-secrets-execution-e2e.sh
 
 secrets-execution-e2e:
 	./scripts/test-secrets-execution-e2e.sh
