@@ -26,7 +26,7 @@ jobs:
     if: github.event_name == 'issues'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Validate issue
         if: github.event.action == 'opened' || github.event.action == 'edited'
         run: ./scripts/development-flow.sh validate-issue
@@ -40,7 +40,7 @@ jobs:
     if: github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Synchronize linked issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,7 +51,7 @@ jobs:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Complete verified issues
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,7 +64,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Bootstrap development management
         env:
           GH_TOKEN: ${{ github.token }}
