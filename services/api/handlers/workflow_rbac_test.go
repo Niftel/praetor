@@ -42,6 +42,9 @@ func TestWorkflowRBAC(t *testing.T) {
 	body := func(name string) string {
 		return fmt.Sprintf(`{"organization_id":%d,"name":%q}`, org, name)
 	}
+	updateBody := func(name string) string {
+		return fmt.Sprintf(`{"name":%q,"nodes":[{"node_key":"team-gate","node_type":"approval","name":"Team gate"}]}`, name)
+	}
 
 	// 1. Org workflow_admin creates two workflows -> 201; creator becomes admin.
 	rec := callJSON(t, wf.CreateWorkflow, http.MethodPost, body(fmt.Sprintf("wfA-%d", uniq)), creatorUC, nil)
@@ -49,8 +52,9 @@ func TestWorkflowRBAC(t *testing.T) {
 		t.Fatalf("create wfA: want 201, got %d (%s)", rec.Code, rec.Body)
 	}
 	wfA := extractID(t, rec.Body.String())
-	if _, err := db.Exec(`INSERT INTO workflow_nodes (workflow_template_id,node_key,node_type,name)
-		VALUES ($1,'team-gate','approval','Team gate')`, wfA); err != nil {
+	if _, err := db.Exec(`INSERT INTO workflow_nodes
+		(workflow_template_id,node_key,node_type,name,approval_timeout_seconds,approval_timeout_action)
+		VALUES ($1,'team-gate','approval','Team gate',86400,'rejected')`, wfA); err != nil {
 		t.Fatalf("add approval node: %v", err)
 	}
 	var approvalTeam, otherTeam int64
@@ -76,11 +80,11 @@ func TestWorkflowRBAC(t *testing.T) {
 	// 2. Per-workflow admin (only wfA.admin_role) edits wfA but not wfB.
 	grantObjectRole(t, access, rbac.WorkflowTemplate, wfA, rbac.AdminRole, perWfAdmin)
 	pwaUC := middleware.UserContext{UserID: perWfAdmin}
-	rec = callJSON(t, wf.UpdateWorkflow, http.MethodPut, body("wfA-edited"), pwaUC, map[string]string{"id": fmt.Sprint(wfA)})
+	rec = callJSON(t, wf.UpdateWorkflow, http.MethodPut, updateBody("wfA-edited"), pwaUC, map[string]string{"id": fmt.Sprint(wfA)})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("per-wf admin edit own: want 200, got %d (%s)", rec.Code, rec.Body)
 	}
-	rec = callJSON(t, wf.UpdateWorkflow, http.MethodPut, body("wfB-edited"), pwaUC, map[string]string{"id": fmt.Sprint(wfB)})
+	rec = callJSON(t, wf.UpdateWorkflow, http.MethodPut, updateBody("wfB-edited"), pwaUC, map[string]string{"id": fmt.Sprint(wfB)})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("per-wf admin edit sibling: want 403, got %d", rec.Code)
 	}
@@ -97,7 +101,7 @@ func TestWorkflowRBAC(t *testing.T) {
 		t.Fatalf("execute-only must NOT admin wfA")
 	}
 	execUC := middleware.UserContext{UserID: execOnly}
-	rec = callJSON(t, wf.UpdateWorkflow, http.MethodPut, body("nope"), execUC, map[string]string{"id": fmt.Sprint(wfA)})
+	rec = callJSON(t, wf.UpdateWorkflow, http.MethodPut, updateBody("nope"), execUC, map[string]string{"id": fmt.Sprint(wfA)})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("execute-only edit: want 403, got %d", rec.Code)
 	}

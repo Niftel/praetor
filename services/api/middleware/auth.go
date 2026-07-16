@@ -29,6 +29,10 @@ func getJWTSecret() string {
 // strings; only their SHA-256 hash is stored server-side.
 const PATPrefix = "prtr_pat_"
 
+// ServiceTokenPrefix distinguishes non-human application credentials from
+// personal access tokens. The two credential classes are never interchangeable.
+const ServiceTokenPrefix = "prtr_sp_"
+
 // HashToken returns the hex SHA-256 of a token — what's stored and looked up, so
 // the plaintext never touches the database.
 func HashToken(token string) string {
@@ -41,15 +45,26 @@ type AuthContextKey string
 const UserContextKey AuthContextKey = "user"
 
 type UserContext struct {
-	UserID          int64
-	Username        string
-	IsSuperuser     bool
-	IsSystemAuditor bool
+	Kind                PrincipalKind
+	UserID              int64
+	Username            string
+	IsSuperuser         bool
+	IsSystemAuditor     bool
+	ServicePrincipalID  int64
+	ServiceCredentialID int64
+	OrganizationID      int64
 }
 
-// AuthMiddleware authenticates each request by either a personal access token
-// (Bearer prtr_pat_…, looked up in api_tokens) or a login JWT. Both resolve to
-// the same UserContext, so a PAT acts exactly as its owning user.
+type PrincipalKind string
+
+const (
+	HumanPrincipal   PrincipalKind = "human"
+	ServicePrincipal PrincipalKind = "service"
+)
+
+// AuthMiddleware authenticates a personal token, login JWT, or service
+// credential and records its typed principal. Route-specific middleware decides
+// which principal kinds are admitted.
 func AuthMiddleware(db *sqlx.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +82,9 @@ func AuthMiddleware(db *sqlx.DB) func(http.Handler) http.Handler {
 
 			var userCtx UserContext
 			var ok bool
-			if strings.HasPrefix(tokenString, PATPrefix) {
+			if strings.HasPrefix(tokenString, ServiceTokenPrefix) {
+				userCtx, ok = authenticateServiceCredential(db, r.Context(), tokenString)
+			} else if strings.HasPrefix(tokenString, PATPrefix) {
 				userCtx, ok = authenticatePAT(db, r.Context(), tokenString)
 			} else {
 				userCtx, ok = authenticateJWT(tokenString)
@@ -83,16 +100,29 @@ func AuthMiddleware(db *sqlx.DB) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireHuman rejects service credentials from the existing human API. A
+// service principal is admitted only by dedicated delegated endpoints.
+func RequireHuman(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := r.Context().Value(UserContextKey).(UserContext)
+		if !ok || principal.Kind != HumanPrincipal {
+			render.ErrForbidden(nil).Render(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // authenticatePAT resolves a personal access token to its user, enforcing
 // expiry, and stamps last_used_at (throttled) for auditing.
 func authenticatePAT(db *sqlx.DB, ctx context.Context, token string) (UserContext, bool) {
 	var row struct {
-		TokenID   int64  `db:"token_id"`
-		UserID    int64  `db:"id"`
-		Username  string `db:"username"`
-		Super     bool   `db:"is_superuser"`
-		Auditor   bool   `db:"is_system_auditor"`
-		Expired   bool   `db:"expired"`
+		TokenID  int64  `db:"token_id"`
+		UserID   int64  `db:"id"`
+		Username string `db:"username"`
+		Super    bool   `db:"is_superuser"`
+		Auditor  bool   `db:"is_system_auditor"`
+		Expired  bool   `db:"expired"`
 	}
 	err := db.GetContext(ctx, &row, `
 		SELECT t.id AS token_id, u.id, u.username, u.is_superuser, u.is_system_auditor,
@@ -106,7 +136,37 @@ func authenticatePAT(db *sqlx.DB, ctx context.Context, token string) (UserContex
 	_, _ = db.ExecContext(ctx, `
 		UPDATE api_tokens SET last_used_at = now()
 		WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`, row.TokenID)
-	return UserContext{UserID: row.UserID, Username: row.Username, IsSuperuser: row.Super, IsSystemAuditor: row.Auditor}, true
+	return UserContext{Kind: HumanPrincipal, UserID: row.UserID, Username: row.Username, IsSuperuser: row.Super, IsSystemAuditor: row.Auditor}, true
+}
+
+func authenticateServiceCredential(db *sqlx.DB, ctx context.Context, token string) (UserContext, bool) {
+	var row struct {
+		CredentialID   int64  `db:"credential_id"`
+		PrincipalID    int64  `db:"principal_id"`
+		OrganizationID int64  `db:"organization_id"`
+		Name           string `db:"name"`
+	}
+	err := db.GetContext(ctx, &row, `
+		SELECT c.id AS credential_id, p.id AS principal_id, p.organization_id, p.name
+		FROM service_credentials c
+		JOIN service_principals p ON p.id = c.service_principal_id
+		WHERE c.token_hash = $1
+		  AND c.revoked_at IS NULL
+		  AND c.expires_at > now()
+		  AND p.enabled`, HashToken(token))
+	if err != nil {
+		return UserContext{}, false
+	}
+	_, _ = db.ExecContext(ctx, `
+		UPDATE service_credentials SET last_used_at = now()
+		WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`, row.CredentialID)
+	return UserContext{
+		Kind:                ServicePrincipal,
+		Username:            row.Name,
+		ServicePrincipalID:  row.PrincipalID,
+		ServiceCredentialID: row.CredentialID,
+		OrganizationID:      row.OrganizationID,
+	}, true
 }
 
 // authenticateJWT validates a login JWT and extracts its claims.
@@ -129,6 +189,7 @@ func authenticateJWT(tokenString string) (UserContext, bool) {
 	isSuperuser, _ := claims["is_superuser"].(bool)
 	isSystemAuditor, _ := claims["is_system_auditor"].(bool)
 	return UserContext{
+		Kind:            HumanPrincipal,
 		UserID:          int64(userIDFloat),
 		Username:        username,
 		IsSuperuser:     isSuperuser,

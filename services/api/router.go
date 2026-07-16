@@ -76,6 +76,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	users := handlers.NewUsersResource(db, authz)
 	teams := handlers.NewTeamsResource(db, authz)
 	access := handlers.NewAccessResource(db, authz)
+	servicePrincipals := handlers.NewServicePrincipalsResource(db, authz)
 
 	// Auth Routes (Public). Login is rate-limited per IP to blunt password
 	// brute-forcing (20 attempts/minute).
@@ -125,6 +126,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware(db))
+		r.Use(modelAuth.RequireHuman)
 		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
 
 		// Active RBAC v4 policy provenance and an operator-triggered refresh.
@@ -168,6 +170,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 				r.Get("/projects", orgs.ListOrganizationProjects)
 				r.Get("/inventories", orgs.ListOrganizationInventories)
 				r.Get("/object_roles", orgs.ListOrganizationRoles)
+				r.Mount("/service-principals", servicePrincipals.OrganizationRoutes())
 
 				// Galaxy / Automation Hub credentials for the org
 				r.Get("/galaxy-credentials", orgs.ListOrgGalaxyCredentials)
@@ -175,6 +178,8 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 				r.Delete("/galaxy-credentials/{credId}", orgs.RemoveOrgGalaxyCredential)
 			})
 		})
+
+		r.Mount("/service-principals", servicePrincipals.Routes())
 
 		// =======================================================================
 		// Users
