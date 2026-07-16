@@ -12,22 +12,16 @@ import (
 func TestAPISkeletonPing(t *testing.T) {
 	// Pass nil DB for skeleton test (ping doesn't need DB)
 	router := api.NewRouter(nil, api.Config{})
-	ts := httptest.NewServer(router)
-	defer ts.Close()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
 
-	// Test Ping
-	resp, err := http.Get(ts.URL + "/api/v1/ping")
-	if err != nil {
-		t.Fatalf("Failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
 	}
 
 	var data map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(rec.Body).Decode(&data); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
