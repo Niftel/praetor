@@ -7,8 +7,8 @@ require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/cors v1.2.2
 	github.com/go-chi/render v1.0.3
-	github.com/go-ldap/ldap/v3 v3.4.12
-	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/hyperjumptech/grule-rule-engine v1.20.4
 	github.com/jmoiron/sqlx v1.4.0
@@ -24,7 +24,7 @@ require (
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
-	github.com/praetordev/scheduler v0.1.1
+	github.com/praetordev/scheduler v0.1.2
 	github.com/praetordev/store v0.1.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
@@ -46,7 +46,7 @@ require (
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
-	github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358 // indirect
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/ajg/form v1.5.1 // indirect
@@ -58,7 +58,7 @@ require (
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
+	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-git/v5 v5.19.1 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
@@ -74,7 +74,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/praetordev/crypto v0.1.0
 	github.com/praetordev/env v0.1.0
-	github.com/praetordev/events v0.1.0
+	github.com/praetordev/events v0.1.1-0.20260715180212-73a43baa18fc
 	github.com/praetordev/metrics v0.1.1
 	github.com/praetordev/objectstore v0.1.2
 	github.com/praetordev/packspec v0.1.0
@@ -91,7 +91,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
