@@ -1,6 +1,7 @@
 # Delegated API users
 
-Status: design proposal; implementation not yet complete.
+Status: implemented in migrations 66–68 and exposed through the human
+administration UI at `/service-principals`.
 
 ## Goal
 
@@ -133,6 +134,75 @@ Authorization is the intersection of the service credential, the delegated
 grant, and current resource state. A permissive result from only one layer is
 never sufficient.
 
+## Administrator workflow
+
+Open **Service Principals** from Praetor's command palette. Select the owning
+organization, then:
+
+1. create a service principal for one application or integration;
+2. create an expiring credential and copy its plaintext immediately;
+3. store that credential in the consuming application's secret store;
+4. create one or more delegated launch grants;
+5. select exactly one workflow and inventory per grant;
+6. optionally restrict the grant to specific hosts or inventory groups;
+7. set a maximum host count and the allowed extra-variable keys;
+8. select an approval team when the workflow contains approval nodes; and
+9. set an activation time and expiry no more than 366 days apart.
+
+An empty host and group allowlist means every enabled host in the selected
+inventory is eligible. The application must still submit explicit host IDs for
+every launch. Use a non-empty allowlist when the application should reach only
+part of an inventory.
+
+Credential plaintext is shown once. Praetor cannot display it later because
+only its SHA-256 digest is stored. Rotation atomically revokes the selected
+credential and creates a replacement; copy and deploy the replacement before
+dismissing it.
+
+Disabling a service principal immediately prevents all of its credentials from
+authenticating. Revoking an individual grant prevents new launches through that
+grant without changing other grants or credentials.
+
+## Application integration example
+
+The application stores the `prtr_sp_...` credential as a secret. For each
+external request it generates a unique idempotency key and submits the
+requester's application-level identifier plus explicit inventory and host IDs:
+
+```sh
+curl --fail-with-body \
+  -X POST "${PRAETOR_URL}/api/v1/delegated/workflow-templates/42/launch" \
+  -H "Authorization: Bearer ${PRAETOR_SERVICE_TOKEN}" \
+  -H "Idempotency-Key: 93c9b824-33fd-4ce8-a829-c2cc4dfc12d0" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "external_requester": "customer-user-1842",
+    "inventory_id": 27,
+    "host_ids": [301, 302],
+    "extra_vars": {
+      "change_ticket": "CHG-1042"
+    }
+  }'
+```
+
+A successful first request returns `201 Created`:
+
+```json
+{
+  "workflow_job_id": 817,
+  "status": "running",
+  "replayed": false
+}
+```
+
+Repeating the exact request with the same idempotency key returns the same run
+with `200 OK` and `"replayed": true`. Reusing the key for a different payload
+returns `409 Conflict`.
+
+Do not send a Praetor user ID, roles, approval team, organization ID, or an
+Ansible `limit` expression. Those values are either irrelevant to authorization
+or are resolved exclusively from the server-side grant.
+
 ## Data model
 
 ### `service_principals`
@@ -262,13 +332,12 @@ conflict, and concurrency conflict.
 
 ## Implementation sequence
 
-1. Add typed authenticated principals without changing current human behavior.
-2. Add service-principal and credential administration with expiry, rotation,
-   revocation, and audit.
-3. Add delegated grant storage and administration with cross-resource
-   validation.
-4. Add the dedicated launch endpoint, server-resolved host limit, attribution,
-   and idempotency.
-5. Add end-to-end tests covering service authentication, delegated launch,
-   team approval, execution, denial, revocation, and audit.
-6. Add the administration UI only after the API security contract is stable.
+All six planned phases are implemented:
+
+1. typed human and service authentication;
+2. service-principal and expiring credential administration;
+3. bounded delegated launch grants;
+4. the dedicated launch endpoint with server-resolved limits and idempotency;
+5. database-backed authentication, authorization, launch, denial, and audit
+   tests; and
+6. the human administration UI.
