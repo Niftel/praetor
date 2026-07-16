@@ -125,6 +125,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware(db))
+		r.Use(modelAuth.RequireHuman)
 		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
 
 		// Active RBAC v4 policy provenance and an operator-triggered refresh.
