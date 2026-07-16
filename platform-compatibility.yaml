@@ -8,8 +8,8 @@ platformVersion: 0.1.1
 releaseStatus: development
 wireContracts: v1
 
-# praetor-v2 currently applies one tag to every first-party image. Keep component
-# releases aligned with this tag until the chart supports per-component tags.
+# The chart uses each component version below through imageTags. image.tag is
+# retained as the chart/appVersion fallback and platform release identifier.
 image:
   registry: ghcr.io/niftel
   tag: 0.1.1
