@@ -123,6 +123,12 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	events := handlers.NewEventsResource(db, authz)
 	r.Post("/api/v1/events/{source}", events.Intake)
 
+	// Delegated application launches authenticate as a non-human service
+	// principal and never enter the human API router below.
+	delegatedLaunch := handlers.NewDelegatedLaunchResource(db)
+	r.With(modelAuth.AuthMiddleware(db), modelAuth.RequireService).
+		Post("/api/v1/delegated/workflow-templates/{id}/launch", delegatedLaunch.LaunchWorkflow)
+
 	// Protected Routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware(db))
