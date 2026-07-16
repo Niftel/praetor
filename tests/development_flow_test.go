@@ -49,11 +49,29 @@ func TestDevelopmentFlowIsRepositoryDriven(t *testing.T) {
 		"Workflow Status",
 		"set_project_status",
 		"PROJECT_AUTOMATION_TOKEN",
+		"PROJECT_GH_TOKEN",
+		"GH_TOKEN: ${{ github.token }}",
 	} {
 		if !strings.Contains(script, required) &&
 			!workflowContains(t, root, required) {
 			t.Fatalf("development pipeline must contain %q", required)
 		}
+	}
+}
+
+func TestDevelopmentFlowSeparatesRepositoryAndProjectTokens(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "development-flow.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	if !strings.Contains(script, `GH_TOKEN="$PROJECT_GH_TOKEN" gh "$@"`) {
+		t.Fatal("project commands must explicitly use PROJECT_GH_TOKEN")
+	}
+	if strings.Contains(script, `GH_TOKEN="$PROJECT_GH_TOKEN" gh label`) ||
+		strings.Contains(script, `GH_TOKEN="$PROJECT_GH_TOKEN" gh issue`) {
+		t.Fatal("repository labels and issues must not use the organization project token")
 	}
 }
 

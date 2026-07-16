@@ -24,7 +24,13 @@ usage: $0 <bootstrap|validate-issue|sync-issue|sync-pr|verify-main>
 EOF
 }
 
-graphql() { gh api graphql "$@"; }
+project_gh() {
+  if [[ -z "${PROJECT_GH_TOKEN:-}" ]]; then
+    echo "warning: project synchronization requires PROJECT_AUTOMATION_TOKEN" >&2
+    return 1
+  fi
+  GH_TOKEN="$PROJECT_GH_TOKEN" gh "$@"
+}
 
 ensure_label() {
   local name="$1" description="$2"
@@ -38,7 +44,7 @@ ensure_milestone() {
 }
 
 project_number() {
-  gh project list --owner "$OWNER" --format json --limit 100 |
+  project_gh project list --owner "$OWNER" --format json --limit 100 |
     jq -r --arg title "$(jq -r .project_title "$CONFIG")" \
       '.projects[] | select(.title == $title) | .number' | head -n1
 }
@@ -51,19 +57,19 @@ bootstrap() {
   local number
   number="$(project_number)"
   if [[ -z "$number" ]]; then
-    gh project create --owner "$OWNER" --title "$(jq -r .project_title "$CONFIG")" >/dev/null
+    project_gh project create --owner "$OWNER" --title "$(jq -r .project_title "$CONFIG")" >/dev/null
     number="$(project_number)"
   fi
-  gh project field-create "$number" --owner "$OWNER" --name "Priority" --data-type SINGLE_SELECT \
+  project_gh project field-create "$number" --owner "$OWNER" --name "Priority" --data-type SINGLE_SELECT \
     --single-select-options "P0,P1,P2,P3" >/dev/null 2>&1 || true
-  gh project field-create "$number" --owner "$OWNER" --name "Security gate" --data-type SINGLE_SELECT \
+  project_gh project field-create "$number" --owner "$OWNER" --name "Security gate" --data-type SINGLE_SELECT \
     --single-select-options "Required,Recommended,Not blocking" >/dev/null 2>&1 || true
-  gh project field-create "$number" --owner "$OWNER" --name "Workflow Status" --data-type SINGLE_SELECT \
+  project_gh project field-create "$number" --owner "$OWNER" --name "Workflow Status" --data-type SINGLE_SELECT \
     --single-select-options "$(jq -r '.statuses | join(",")' "$CONFIG")" >/dev/null 2>&1 || true
 
   local project_id field_json
-  project_id="$(gh project view "$number" --owner "$OWNER" --format json --jq .id)"
-  field_json="$(gh project field-list "$number" --owner "$OWNER" --format json |
+  project_id="$(project_gh project view "$number" --owner "$OWNER" --format json --jq .id)"
+  field_json="$(project_gh project field-list "$number" --owner "$OWNER" --format json |
     jq '.fields[] | select(.name == "Workflow Status")')"
   [[ -n "$field_json" ]] || { echo "error: Workflow Status field was not created" >&2; exit 1; }
   jq -n \
@@ -112,14 +118,14 @@ set_flow_label() {
 add_to_project() {
   local url="$1" number
   number="$(state_project_number)"
-  gh project item-add "$number" --owner "$OWNER" --url "$url" >/dev/null 2>&1 || true
+  project_gh project item-add "$number" --owner "$OWNER" --url "$url" >/dev/null 2>&1 || true
 }
 
 set_project_status() {
   local url="$1" status="$2" number item_id field_id option_id project_id items
   number="$(state_project_number)"
   add_to_project "$url"
-  if ! items="$(gh project item-list "$number" --owner "$OWNER" --format json --limit 500 2>/dev/null)"; then
+  if ! items="$(project_gh project item-list "$number" --owner "$OWNER" --format json --limit 500 2>/dev/null)"; then
     echo "warning: project synchronization requires PROJECT_AUTOMATION_TOKEN" >&2
     return 0
   fi
@@ -129,7 +135,7 @@ set_project_status() {
   field_id="$(jq -r .workflow_status.field_id "$STATE_FILE")"
   option_id="$(jq -r --arg status "$status" '.workflow_status.options[$status] // empty' "$STATE_FILE")"
   [[ -n "$option_id" ]] || { echo "error: project has no Workflow Status option '$status'" >&2; return 1; }
-  gh project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" \
+  project_gh project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" \
     --single-select-option-id "$option_id" >/dev/null 2>&1 ||
     echo "warning: project synchronization requires PROJECT_AUTOMATION_TOKEN" >&2
 }
