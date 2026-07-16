@@ -6,6 +6,7 @@ This directory contains the core documentation for the Praetor backend.
 - [Repository Topology and Ownership](repository-topology.md) - Poly-repo boundaries, development modes, and ownership rules.
 - [Extracted Repository Health](repository-health.md) - Standalone build/CI baseline for deployable services.
 - [Platform Releases](releasing.md) - Compatibility promotion and artifact preflight procedure.
+- [Database Compatibility](database-compatibility.md) - Executable upgrade and reversible-boundary migration tests.
 - [Wire Contracts](wire-contracts.md) - Versioned cross-service payloads and compatibility rules.
 - [Execution State Machine](execution-state-machine.md) - Authoritative state ownership and monotonic projection rules.
 - [RBAC](RBAC.md) - Persisted grants, the RBAC v4 decision engine, and API enforcement boundaries.
