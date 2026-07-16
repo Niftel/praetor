@@ -1,0 +1,15 @@
+{
+  "project_number": 3,
+  "project_id": "PVT_kwDOEi4j2c4BdlP3",
+  "workflow_status": {
+    "field_id": "PVTSSF_lADOEi4j2c4BdlP3zhYFybA",
+    "options": {
+      "Backlog": "343b2839",
+      "Ready": "5c613629",
+      "In Progress": "161cc529",
+      "In Review": "539a44d5",
+      "Verification": "9f4c343c",
+      "Done": "4c774f5b"
+    }
+  }
+}
