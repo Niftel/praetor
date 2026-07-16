@@ -62,7 +62,7 @@ type chartValues struct {
 
 func main() {
 	release := flag.Bool("release", false, "enforce stable-release invariants")
-	output := flag.String("output", "summary", "output format: summary, images, contracts, modules, or repositories")
+	output := flag.String("output", "summary", "output format: summary, images, helm-values, contracts, modules, or repositories")
 	flag.Parse()
 
 	var problems []string
@@ -199,6 +199,23 @@ func main() {
 		sort.Strings(names)
 		for _, name := range names {
 			fmt.Printf("%s/%s:%s\n", strings.TrimSuffix(m.Image.Registry, "/"), m.Components[name].Image, m.Components[name].Version)
+		}
+	case "helm-values":
+		// image.tag must be empty so the chart's per-component imageTags take
+		// precedence. This output is consumed by the local release deploy script
+		// and can also be inspected directly during release troubleshooting.
+		fmt.Println("image:")
+		fmt.Println("  pullPolicy: IfNotPresent")
+		fmt.Printf("  registry: %q\n", strings.TrimSuffix(m.Image.Registry, "/"))
+		fmt.Println(`  tag: ""`)
+		fmt.Println("imageTags:")
+		names := make([]string, 0, len(m.Components))
+		for name := range m.Components {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Printf("  %s: %q\n", name, m.Components[name].Version)
 		}
 	case "contracts":
 		modules := make([]string, 0, len(m.Contracts))

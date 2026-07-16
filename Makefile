@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -30,6 +30,10 @@ contract-test:
 # Keep deployable health probes synchronized with routes registered by the API.
 deployment-contract-test:
 	go test ./tests -run '^TestHelmAPIProbeRoutes$$'
+
+# Keep both local deployment paths immutable and manifest-driven.
+local-deploy-contract-test:
+	go test ./tests -run '^TestLocalDeployment'
 
 # A release preflight intentionally fails while the manifest is marked
 # development. The remote form also verifies GHCR images and Go module tags.
@@ -88,6 +92,7 @@ execpack:
 test:
 	@echo "Running tests..."
 	$(MAKE) deployment-contract-test
+	$(MAKE) local-deploy-contract-test
 	go test -v ./tests/...
 	@echo "Running unit tests (incl. #39 no-wildcard-SELECT gate + column-drift checks)..."
 	go test ./services/... ./pkg/...
@@ -114,6 +119,10 @@ local-cluster-recover:
 
 local-cluster-update:
 	./scripts/update-local-cluster.sh
+
+# Deploy the exact image set declared by platform-compatibility.yaml.
+local-cluster-release:
+	./scripts/deploy-local-release.sh
 
 # Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
 # tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run

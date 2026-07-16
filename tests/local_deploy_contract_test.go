@@ -1,0 +1,96 @@
+package tests
+
+import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+type localDeployManifest struct {
+	Image struct {
+		Registry string `yaml:"registry"`
+	} `yaml:"image"`
+	Components map[string]struct {
+		Version string `yaml:"version"`
+	} `yaml:"components"`
+}
+
+type generatedHelmValues struct {
+	Image struct {
+		Registry string `yaml:"registry"`
+		Tag      string `yaml:"tag"`
+	} `yaml:"image"`
+	ImageTags map[string]string `yaml:"imageTags"`
+}
+
+func TestLocalDeploymentReleaseValuesMatchCompatibilityManifest(t *testing.T) {
+	root := repositoryRoot(t)
+
+	raw, err := os.ReadFile(filepath.Join(root, "platform-compatibility.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest localDeployManifest
+	if err := yaml.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("go", "run", "./cmd/compatcheck", "-output", "helm-values")
+	cmd.Dir = root
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generate Helm values: %v\n%s", err, output)
+	}
+
+	var values generatedHelmValues
+	if err := yaml.Unmarshal(output, &values); err != nil {
+		t.Fatalf("decode generated Helm values: %v\n%s", err, output)
+	}
+	if values.Image.Registry != manifest.Image.Registry {
+		t.Fatalf("registry = %q, want %q", values.Image.Registry, manifest.Image.Registry)
+	}
+	if values.Image.Tag != "" {
+		t.Fatalf("global image tag must be empty so component tags win, got %q", values.Image.Tag)
+	}
+	if len(values.ImageTags) != len(manifest.Components) {
+		t.Fatalf("generated %d image tags, want %d", len(values.ImageTags), len(manifest.Components))
+	}
+	for name, component := range manifest.Components {
+		if values.ImageTags[name] != component.Version {
+			t.Errorf("imageTags.%s = %q, want %q", name, values.ImageTags[name], component.Version)
+		}
+	}
+}
+
+func TestLocalDeploymentScriptsRejectMutableDefaults(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{"update-local-cluster.sh", "deploy-local-release.sh"} {
+		raw, err := os.ReadFile(filepath.Join(root, "scripts", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(`PRAETOR_IMAGE_TAG:-dev`)) {
+			t.Errorf("%s defaults to mutable dev tag", name)
+		}
+		if strings.Contains(string(raw), "kubectl rollout restart") {
+			t.Errorf("%s compensates for a mutable tag with rollout restart", name)
+		}
+	}
+}
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "platform-compatibility.yaml")); err != nil {
+		t.Fatalf("locate repository root: %v", err)
+	}
+	return root
+}
