@@ -20,10 +20,10 @@ The active fixture level is pinned by `wireContracts` in
 | Heartbeat v1 | HTTP JSON response | Ingestion | Host runner | Repeated POST is idempotent; `cancel` is level-triggered |
 | Runnable gate v1 | HTTP JSON response | Ingestion | Executor | `false` prevents a stale/terminal run from bootstrapping |
 | Credential resolution v1 | Internal HTTP JSON | Ingestion | Executor | Run-scoped; response must never be persisted or logged |
-
-Inventory rendering, fact-cache exchange, and inventory-sync payloads are known
-HTTP contracts but are not yet frozen in the v1 fixture set. They should be added
-before those formats evolve independently.
+| Rendered inventory v1 | Internal HTTP INI | Ingestion | Executor | Inventory ID selects the current enabled host/group snapshot |
+| Inventory facts v1 | Internal HTTP JSON | Ingestion | Executor | Host name keys each cached fact object |
+| Fact-cache upload v1 | Run-scoped HTTP JSON | Host runner | Ingestion | Run ID scopes host facts to the launched inventory |
+| Inventory sync v1 | Internal HTTP JSON | Executor | Ingestion | Inventory ID selects the upsert target; body matches `ansible-inventory --list` |
 
 ## Compatibility rules
 
@@ -48,11 +48,10 @@ The shared `events` module already freezes the complete execution-request shape
 with a golden test. The integration fixtures add job-event, log-index, and key
 HTTP response boundaries.
 
-The ingestion service now owns an explicit `JobEventRequest` HTTP DTO with
-snake_case JSON tags and converts it to the shared event-stream type. It no
-longer decodes host-runner payloads through `models.JobEvent`. Its service tests
-pin the v1 batch shape, additive-field tolerance, authenticated run-ID override,
-and preservation of host/task observability fields.
+The ingestion service owns explicit HTTP DTOs for job events and fact-cache
+uploads. Its service tests pin the v1 event batch, fact-cache, rendered
+inventory, and inventory-sync shapes. Rendered host variables are sorted so the
+same inventory always produces identical INI bytes.
 
 This adoption was released as `praetordev/ingestion` v0.1.1 and is pinned by the
 current development compatibility manifest.
@@ -66,6 +65,11 @@ its real boundary:
 - Executor and host runner decode execution request v1 plus unknown fields.
 - Ingestion decodes job-event batch v1 into an explicit wire DTO. Released in
   ingestion v0.1.1.
+- Ingestion renders inventory v1 and consumes fact-cache upload and inventory
+  sync v1 through golden boundary tests.
+- Executor consumes rendered inventory and inventory facts v1, and posts
+  inventory sync v1 through golden boundary tests.
+- Host runner posts fact-cache upload v1 through a golden boundary test.
 - Consumer decodes job-event and log-chunk v1 fixtures.
 - Reconciler posts event batches and log chunks matching the ingestion contract.
 
