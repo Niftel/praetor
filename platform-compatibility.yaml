@@ -64,6 +64,124 @@ contracts:
   github.com/praetordev/rbac/v4: v4.0.0
   github.com/praetordev/store: v0.1.2
 
+# Independently released reusable modules. This is the authoritative health and
+# release inventory; local go.work entries are development conveniences only.
+sharedModules:
+  credentials:
+    module: github.com/praetordev/credentials
+    repository: Niftel/credentials
+    version: v0.1.0
+    owner: security
+    securitySensitive: true
+  crypto:
+    module: github.com/praetordev/crypto
+    repository: Niftel/crypto
+    version: v0.1.0
+    owner: security
+    securitySensitive: true
+  db:
+    module: github.com/praetordev/db
+    repository: Niftel/db
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  env:
+    module: github.com/praetordev/env
+    repository: Niftel/env
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  eventbus:
+    module: github.com/praetordev/eventbus
+    repository: Niftel/eventbus
+    version: v0.1.0
+    owner: execution
+    securitySensitive: false
+  events:
+    module: github.com/praetordev/events
+    repository: Niftel/events
+    version: v0.1.0
+    owner: execution
+    securitySensitive: true
+  hostconn:
+    module: github.com/praetordev/hostconn
+    repository: Niftel/hostconn
+    version: v0.1.0
+    owner: execution
+    securitySensitive: false
+  launch:
+    module: github.com/praetordev/launch
+    repository: Niftel/launch
+    version: v0.1.1
+    owner: control-plane
+    securitySensitive: true
+  metrics:
+    module: github.com/praetordev/metrics
+    repository: Niftel/metrics
+    version: v0.1.1
+    owner: platform
+    securitySensitive: false
+  models:
+    module: github.com/praetordev/models
+    repository: Niftel/models
+    version: v0.2.0
+    owner: control-plane
+    securitySensitive: false
+  notify:
+    module: github.com/praetordev/notify
+    repository: Niftel/notify
+    version: v0.1.0
+    owner: integrations
+    securitySensitive: true
+  objectstore:
+    module: github.com/praetordev/objectstore
+    repository: Niftel/objectstore
+    version: v0.1.2
+    owner: execution
+    securitySensitive: false
+  packspec:
+    module: github.com/praetordev/packspec
+    repository: Niftel/packspec
+    version: v0.1.0
+    owner: execution
+    securitySensitive: true
+  plog:
+    module: github.com/praetordev/plog
+    repository: Niftel/plog
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  rbac:
+    module: github.com/praetordev/rbac/v4
+    repository: Niftel/rbac
+    version: v4.0.0
+    owner: security
+    securitySensitive: true
+  registry:
+    module: github.com/praetordev/registry
+    repository: Niftel/registry
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  render:
+    module: github.com/praetordev/render
+    repository: Niftel/render
+    version: v0.1.0
+    owner: control-plane
+    securitySensitive: false
+  runtoken:
+    module: github.com/praetordev/runtoken
+    repository: Niftel/runtoken
+    version: v0.1.0
+    owner: security
+    securitySensitive: true
+  store:
+    module: github.com/praetordev/store
+    repository: Niftel/store
+    version: v0.1.2
+    owner: control-plane
+    securitySensitive: true
+
 database:
   minimumMigration: 1
   maximumMigration: 68

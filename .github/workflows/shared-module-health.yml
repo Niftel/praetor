@@ -1,0 +1,30 @@
+name: Shared module health
+
+on:
+  pull_request:
+    paths:
+      - platform-compatibility.yaml
+      - cmd/compatcheck/**
+      - scripts/check-workspace-health.sh
+      - scripts/release-preflight.sh
+      - .github/workflows/shared-module-health.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-module-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  released-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate released shared modules
+        run: ./scripts/check-workspace-health.sh --modules --remote
