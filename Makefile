@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update
+.PHONY: build compat-check contract-test deployment-contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -26,6 +26,10 @@ compat-check:
 
 contract-test:
 	GOWORK=off go test ./tests/contracts
+
+# Keep deployable health probes synchronized with routes registered by the API.
+deployment-contract-test:
+	go test ./tests -run '^TestHelmAPIProbeRoutes$$'
 
 # A release preflight intentionally fails while the manifest is marked
 # development. The remote form also verifies GHCR images and Go module tags.
@@ -83,6 +87,7 @@ execpack:
 
 test:
 	@echo "Running tests..."
+	$(MAKE) deployment-contract-test
 	go test -v ./tests/...
 	@echo "Running unit tests (incl. #39 no-wildcard-SELECT gate + column-drift checks)..."
 	go test ./services/... ./pkg/...
