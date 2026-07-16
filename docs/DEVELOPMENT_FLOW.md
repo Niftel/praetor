@@ -16,18 +16,20 @@ Project is a generated view, not an independently maintained roadmap.
 
 ## Bootstrap
 
-Create a fine-grained token with repository Issues and organization Projects
-read/write access. Store it as the repository secret
+Create a fine-grained token owned by `Niftel` with organization **Projects:
+read and write** access. Store it as the repository secret
 `PROJECT_AUTOMATION_TOKEN`, then run the **Development flow** workflow with
 `bootstrap=true`. Commit the generated `.github/development-flow-state.json`.
 
-Without that secret, issue labels still synchronize through the built-in
-workflow token, but organization Project updates are skipped with a warning.
+Repository labels, milestones, and issues always use GitHub's built-in
+repository workflow token. The separate secret is used only for organization
+Project operations. Without that secret, repository state still synchronizes,
+but organization Project updates are skipped with a warning.
 
 The bootstrap command is safe to rerun:
 
 ```sh
-GH_TOKEN=... ./scripts/development-flow.sh bootstrap
+GH_TOKEN=... PROJECT_GH_TOKEN=... ./scripts/development-flow.sh bootstrap
 ```
 
 Configuration lives in `.github/development-flow.json`. Do not hard-code project
