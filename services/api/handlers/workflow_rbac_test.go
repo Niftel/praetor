@@ -20,6 +20,7 @@ func TestWorkflowRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 	wf := handlers.NewWorkflowsResource(db, handlers.NewAuthorizer(db))
+	tmpl := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
 	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
@@ -72,6 +73,36 @@ func TestWorkflowRBAC(t *testing.T) {
 		t.Fatalf("create wfB: want 201, got %d", rec.Code)
 	}
 	wfB := extractID(t, rec.Body.String())
+
+	// A workflow execute grant does not confer use of inventories attached to
+	// job nodes. This remains true when the client supplies a host limit.
+	var inventoryID, projectID int64
+	if err := db.Get(&inventoryID, `INSERT INTO inventories (organization_id,name) VALUES ($1,$2) RETURNING id`, org, fmt.Sprintf("wf-inventory-%d", uniq)); err != nil {
+		t.Fatalf("create workflow inventory: %v", err)
+	}
+	if err := db.Get(&projectID, `INSERT INTO projects (organization_id,name,scm_type,scm_url) VALUES ($1,$2,'git','https://example.invalid/workflow.git') RETURNING id`, org, fmt.Sprintf("wf-project-%d", uniq)); err != nil {
+		t.Fatalf("create workflow project: %v", err)
+	}
+	rec = callJSON(t, tmpl.CreateTemplate, http.MethodPost,
+		fmt.Sprintf(`{"organization_id":%d,"name":"wf-job-%d","inventory_id":%d,"project_id":%d,"playbook":"site.yml"}`, org, uniq, inventoryID, projectID),
+		middleware.UserContext{UserID: creator, IsSuperuser: true}, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create workflow job template: want 201, got %d (%s)", rec.Code, rec.Body)
+	}
+	jobTemplateID := extractID(t, rec.Body.String())
+	if _, err := db.Exec(`INSERT INTO workflow_nodes (workflow_template_id,node_key,node_type,job_template_id,name) VALUES ($1,'deploy','job',$2,'Deploy')`, wfB, jobTemplateID); err != nil {
+		t.Fatalf("add workflow job node: %v", err)
+	}
+	orgExecUC := middleware.UserContext{UserID: orgExec}
+	rec = callJSON(t, wf.LaunchWorkflow, http.MethodPost, `{"limit":"web-*"}`, orgExecUC, map[string]string{"id": fmt.Sprint(wfB)})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("workflow launch without inventory use: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+	grantObjectRole(t, access, rbac.Inventory, inventoryID, rbac.UseRole, orgExec)
+	rec = callJSON(t, wf.LaunchWorkflow, http.MethodPost, `{"limit":"web-*"}`, orgExecUC, map[string]string{"id": fmt.Sprint(wfB)})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("workflow launch with inventory use: want 201, got %d (%s)", rec.Code, rec.Body)
+	}
 
 	if ok, err := capCheck(access, creator, rbac.WorkflowTemplate, wfA, rbac.Manage); err != nil || !ok {
 		t.Fatalf("creator should administer wfA (creator-admin grant): ok=%v err=%v", ok, err)

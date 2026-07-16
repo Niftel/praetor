@@ -169,6 +169,23 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Execute access on a template is deliberately not enough to use the
+	// inventory attached to it. Re-check inventory use at launch time because a
+	// user's grants may have changed since the template was created, and because
+	// ask_limit_on_launch must never become a way to bypass inventory scope.
+	// Hosts do not have independent roles in Praetor: their authorization is
+	// inherited from the parent inventory. Ansible evaluates any supplied limit
+	// only against that already-authorized inventory.
+	var inventoryID *int64
+	if err := rs.DB.GetContext(r.Context(), &inventoryID,
+		`SELECT inventory_id FROM job_templates WHERE id=$1`, jt.ID); err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	if inventoryID != nil && !rs.authorize(w, r, rbac.Inventory, *inventoryID, actUse) {
+		return
+	}
+
 	// Concurrency guard: unless the template opts into simultaneous runs, refuse a
 	// launch while a prior run of the same template is still active. Stops
 	// accidental double-triggers from queuing a second overlapping run.
