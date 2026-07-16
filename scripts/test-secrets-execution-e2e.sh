@@ -109,7 +109,7 @@ api_post() {
 }
 
 STAMP="$(date -u +%Y%m%d%H%M%S)-$$"
-SENTINEL="praetor-e2e-$(openssl rand -hex 16)"
+SENTINEL="${PRAETOR_E2E_SENTINEL:-praetor-e2e-$(openssl rand -hex 16)}"
 
 echo "==> Creating a fresh service-backed Machine credential"
 CREDENTIAL="$(
@@ -247,6 +247,22 @@ COMPLETED="$(
 if [[ "$COMPLETED" != "1" ]]; then
   echo "error: successful run is missing its JOB_COMPLETED event" >&2
   exit 1
+fi
+
+if [[ -n "${PRAETOR_E2E_EVIDENCE_FILE:-}" ]]; then
+  jq -n \
+    --argjson credential_id "$CREDENTIAL_ID" \
+    --argjson project_id "$PROJECT_ID" \
+    --argjson job_id "$JOB_ID" \
+    --arg run_id "$RUN_ID" \
+    --arg status "$STATUS" \
+    '{
+      credential_id:$credential_id,
+      project_id:$project_id,
+      job_id:$job_id,
+      run_id:$run_id,
+      status:$status
+    }' >"$PRAETOR_E2E_EVIDENCE_FILE"
 fi
 
 echo "PASS: credential $CREDENTIAL_ID stayed encrypted; run $RUN_ID resolved once and completed successfully"
