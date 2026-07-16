@@ -8,7 +8,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER="${PRAETOR_K3D_CLUSTER:-praetor-test}"
 RELEASE="${PRAETOR_HELM_RELEASE:-praetor}"
 NAMESPACE="${PRAETOR_NAMESPACE:-praetor}"
-TAG="${PRAETOR_IMAGE_TAG:-dev}"
 CHART="$ROOT/deployments/helm/praetor-v2"
 VALUES="$CHART/ci/values-k3d-local.yaml"
 SCHEDULER_ROOT="${PRAETOR_SCHEDULER_ROOT:-$ROOT/../scheduler}"
@@ -24,23 +23,37 @@ for command in docker k3d kubectl helm; do
   need "$command"
 done
 
-if ! k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fxq "$CLUSTER"; then
-  echo "error: k3d cluster '$CLUSTER' is not running" >&2
+if [[ ! -f "$SCHEDULER_ROOT/Dockerfile" ]]; then
+  echo "error: scheduler checkout not found at '$SCHEDULER_ROOT'" >&2
+  echo "set PRAETOR_SCHEDULER_ROOT to its location" >&2
   exit 1
 fi
 
-echo "==> Building local images"
+# A unique tag makes every local deployment immutable, including builds with
+# uncommitted changes. The two revisions keep it traceable; the UTC build ID
+# prevents collisions. Helm sees the image reference change and rolls workloads
+# itself, so no forced restart is needed.
+if [[ -n "${PRAETOR_IMAGE_TAG:-}" ]]; then
+  TAG="$PRAETOR_IMAGE_TAG"
+else
+  need git
+  PRAETOR_REV="$(git -C "$ROOT" rev-parse --short=12 HEAD)"
+  SCHEDULER_REV="$(git -C "$SCHEDULER_ROOT" rev-parse --short=12 HEAD)"
+  BUILD_ID="$(date -u +%Y%m%d%H%M%S)"
+  TAG="local-${PRAETOR_REV}-${SCHEDULER_REV}-${BUILD_ID}"
+fi
+
+# Recover a partial Docker/k3d restart before building. In particular, never
+# leave serverlb crash-looping while server-0 is stopped.
+"$ROOT/scripts/local-cluster.sh" start
+
+echo "==> Building local images with immutable tag '$TAG'"
 docker build -f "$ROOT/build/package/Dockerfile.api" \
   -t "praetor-api:$TAG" "$ROOT"
 docker build -f "$ROOT/build/package/Dockerfile.migrator" \
   -t "praetor-migrator:$TAG" "$ROOT"
 docker build -f "$ROOT/web/Dockerfile" \
   -t "praetor-ui:$TAG" "$ROOT/web"
-if [[ ! -f "$SCHEDULER_ROOT/Dockerfile" ]]; then
-  echo "error: scheduler checkout not found at '$SCHEDULER_ROOT'" >&2
-  echo "set PRAETOR_SCHEDULER_ROOT to its location" >&2
-  exit 1
-fi
 docker build -f "$SCHEDULER_ROOT/Dockerfile" \
   -t "praetor-scheduler:$TAG" "$SCHEDULER_ROOT"
 
@@ -54,19 +67,11 @@ k3d image import -c "$CLUSTER" \
 echo "==> Upgrading Helm release '$RELEASE' in namespace '$NAMESPACE'"
 helm upgrade --install "$RELEASE" "$CHART" \
   -f "$VALUES" \
+  --set-string image.tag="$TAG" \
   -n "$NAMESPACE" \
   --create-namespace \
   --wait \
   --timeout 10m
-
-# The local deployment deliberately reuses the mutable :dev tag. Restart the
-# long-running workloads after import so containerd resolves the new image.
-echo "==> Restarting API, UI, and scheduler"
-kubectl rollout restart \
-  "deployment/$RELEASE-api" \
-  "deployment/$RELEASE-ui" \
-  "deployment/$RELEASE-scheduler" \
-  -n "$NAMESPACE"
 
 kubectl rollout status "deployment/$RELEASE-api" -n "$NAMESPACE" --timeout=5m
 kubectl rollout status "deployment/$RELEASE-ui" -n "$NAMESPACE" --timeout=5m

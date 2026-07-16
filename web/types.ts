@@ -66,6 +66,45 @@ export interface Group {
   modified_at: string;
 }
 
+export interface ServicePrincipal {
+  id: number;
+  organization_id: number;
+  name: string;
+  description: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  disabled_at?: string | null;
+}
+
+export interface ServiceCredential {
+  id: number;
+  service_principal_id: number;
+  name: string;
+  expires_at: string;
+  last_used_at?: string | null;
+  created_at: string;
+  revoked_at?: string | null;
+}
+
+export interface DelegatedLaunchGrant {
+  id: number;
+  organization_id: number;
+  service_principal_id: number;
+  workflow_template_id: number;
+  inventory_id: number;
+  allowed_host_ids: number[];
+  allowed_group_ids: number[];
+  max_hosts?: number | null;
+  allowed_extra_var_keys: string[];
+  approval_team_id?: number | null;
+  not_before: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  revoked_at?: string | null;
+}
+
 export interface CredentialType {
   id: number;
   name: string;

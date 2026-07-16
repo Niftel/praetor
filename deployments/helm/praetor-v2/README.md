@@ -16,7 +16,8 @@ chart under [`../praetor/`](../praetor/); the design rationale lives in
 | Workload | Kind | Notes |
 |---|---|---|
 | api, ingestion, ui | Deployment + Service | HTTP; api probes `/api/v1/ping`, ingestion `/health` |
-| scheduler, consumer, reconciler | Deployment | no HTTP server; scheduler/consumer scale horizontally |
+| scheduler | Deployment + optional Service | mTLS claim listener Service exists only when secrets integration is enabled |
+| consumer, reconciler | Deployment | no HTTP server; consumer scales horizontally |
 | executor | **StatefulSet** | per-replica PVCs (WAL `/var/lib/praetor`, packs, `~/.ssh`) + `/dev/shm`; safe to scale >1 |
 | migrator | Job (revisioned) | runs schema migrations; services gate on it via an init container |
 | postgresql, nats | StatefulSet | bundled datastores (optional; override with external) |
@@ -58,6 +59,77 @@ The seven service images must be reachable from the cluster (built + pushed to
   datastore here, not just a bus).
 - **Ingress** is off by default. Enable with `ingress.enabled=true` and set `host`
   (ui) + `ingestionHost` (callbacks). The ui pod proxies `/api/` to the api Service.
+
+## Praetor Secrets Service
+
+The provider-independent secrets service is opt-in. The chart does not accept
+certificate or private-key contents in values and does not generate a private
+CA. Create two Kubernetes Secrets from files issued by your workload PKI:
+
+```sh
+kubectl -n praetor create secret generic praetor-scheduler-identity \
+  --from-file=ca.crt=secrets-service-ca.pem \
+  --from-file=tls.crt=scheduler-client.pem \
+  --from-file=tls.key=scheduler-client-key.pem \
+  --from-file=claim.crt=scheduler-claim-server.pem \
+  --from-file=claim.key=scheduler-claim-server-key.pem \
+  --from-file=executor-ca.crt=executor-workload-ca.pem
+
+kubectl -n praetor create secret generic praetor-api-identity \
+  --from-file=ca.crt=secrets-service-ca.pem \
+  --from-file=tls.crt=api-client.pem \
+  --from-file=tls.key=api-client-key.pem
+
+kubectl -n praetor create secret generic praetor-executor-identity \
+  --from-file=ca.crt=scheduler-claim-ca.pem \
+  --from-file=secrets-ca.crt=praetor-secrets-server-ca.pem \
+  --from-file=tls.crt=executor-client.pem \
+  --from-file=tls.key=executor-client-key.pem
+```
+
+The scheduler client certificate requires the URI SAN
+`spiffe://<trust-domain>/workload/praetor-scheduler`. The executor certificate
+requires exactly one URI SAN,
+`spiffe://<trust-domain>/workload/praetor-executor/<instance>`. The claim-server
+certificate must cover the in-cluster DNS name
+`<release>-scheduler.<namespace>.svc` (and any fully-qualified cluster suffix
+used by the executor).
+
+The executor Secret deliberately contains two server trust roots: `ca.crt`
+verifies the scheduler claim listener, while `secrets-ca.crt` verifies Praetor
+Secrets. They may contain the same CA, but keeping separate keys avoids silently
+coupling two independent TLS boundaries. The executor presents `tls.crt` and
+`tls.key` to both services.
+
+Enable the integration without placing key material on the Helm command line:
+
+```sh
+helm upgrade praetor deployments/helm/praetor-v2 -n praetor \
+  --set secretsService.enabled=true \
+  --set secretsService.url=https://praetor-secrets.praetor-secrets.svc:8443 \
+  --set secretsService.trustDomain=praetor.internal \
+  --set secretsService.apiIdentitySecret=praetor-api-identity \
+  --set secretsService.schedulerIdentitySecret=praetor-scheduler-identity \
+  --set secretsService.executorIdentitySecret=praetor-executor-identity
+```
+
+Static Kubernetes Secrets provide one executor identity, so this chart mode
+requires `executor.replicas=1`. Scaling requires a workload-identity issuer that
+mounts a different certificate into each StatefulSet pod; sharing one private
+key across replicas would let any replica resolve credentials claimed by another.
+The chart fails rendering instead of allowing that weakened configuration.
+
+After deploying the integrated local stack and building the ARM64 Execution Pack,
+run the live credential-path gate from the Praetor repository:
+
+```sh
+make secrets-execution-e2e
+```
+
+The gate creates a fresh Machine credential through the Praetor API, verifies
+that Praetor stores only a placeholder, launches a real SCM-backed playbook,
+and confirms that the Secrets Service recorded exactly one run-scoped executor
+resolution before the binding was canceled at terminal success.
 
 ## Authentication
 
@@ -139,6 +211,40 @@ All nine service pods reach Ready; `ci/values-k3d.yaml` imports images bare
 (`registry: ""`) rather than pulling from a registry. Add a break-glass login
 with `--set bootstrapAdmin.enabled=true --set bootstrapAdmin.username=admin
 --set bootstrapAdmin.password=admin`.
+
+Manage an existing local cluster through the repository lifecycle commands,
+not by starting or stopping its Docker containers individually:
+
+```sh
+make local-cluster-status
+make local-cluster-stop
+make local-cluster-start
+```
+
+If Docker Desktop was restarted while k3s was shutting down, `server-0` can be
+left stopped while `serverlb` loops because Docker restart policies do not model
+that dependency. Recover the cluster as one unit:
+
+```sh
+make local-cluster-recover
+```
+
+Recovery temporarily disables the load balancer's restart policy and stops the
+cluster through k3d. It then bypasses k3d's temporary tools-node startup phase,
+which can hang on affected Docker Desktop builds, and starts the existing k3s
+server before the load balancer. It does not report success until the k3s API is
+ready and the load balancer can resolve the server container. The wrapper also
+gives k3s 60 seconds to stop and unmount pod volumes before k3d handles the
+remaining containers, instead of allowing a one-second Docker Desktop shutdown
+to force-kill the server.
+
+k3d commands are bounded to 45 seconds. If k3d starts the containers but hangs
+while cleaning up its temporary tools node, the wrapper terminates that command,
+removes the orphaned tools node, and accepts recovery only after the independent
+DNS and Kubernetes API readiness checks pass.
+
+`scripts/update-local-cluster.sh` runs this readiness/recovery check before any
+image build or import.
 
 ### Optional: LDAP (in-cluster mock)
 

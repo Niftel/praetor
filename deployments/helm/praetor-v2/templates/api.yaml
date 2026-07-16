@@ -16,6 +16,8 @@ spec:
       labels:
         {{- include "praetor.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       {{- with .Values.api.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
@@ -44,9 +46,21 @@ spec:
                 name: {{ include "praetor.configMapName" . }}
             - secretRef:
                 name: {{ include "praetor.secretName" . }}
-          {{- with .Values.api.extraEnv }}
+          {{- if or .Values.api.extraEnv .Values.secretsService.enabled }}
           env:
+            {{- with .Values.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.secretsService.enabled }}
+            - name: PRAETOR_SECRETS_URL
+              value: {{ .Values.secretsService.url | quote }}
+            - name: PRAETOR_SECRETS_CA_FILE
+              value: /var/run/secrets/praetor-secrets/ca.crt
+            - name: PRAETOR_SECRETS_CERT_FILE
+              value: /var/run/secrets/praetor-secrets/tls.crt
+            - name: PRAETOR_SECRETS_KEY_FILE
+              value: /var/run/secrets/praetor-secrets/tls.key
+            {{- end }}
           {{- end }}
           readinessProbe:
             httpGet:
@@ -60,22 +74,44 @@ spec:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20
-          {{- if .Values.ldap.enabled }}
+          {{- if or .Values.ldap.enabled .Values.secretsService.enabled }}
           volumeMounts:
+            {{- if .Values.ldap.enabled }}
             - name: ldap-config
               mountPath: /etc/praetor/ldap.yaml
               subPath: ldap.yaml
               readOnly: true
+            {{- end }}
+            {{- if .Values.secretsService.enabled }}
+            - name: secrets-service-identity
+              mountPath: /var/run/secrets/praetor-secrets
+              readOnly: true
+            {{- end }}
           {{- end }}
           {{- with .Values.api.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.ldap.enabled }}
+      {{- if or .Values.ldap.enabled .Values.secretsService.enabled }}
       volumes:
+        {{- if .Values.ldap.enabled }}
         - name: ldap-config
           configMap:
             name: {{ include "praetor.fullname" . }}-ldap
+        {{- end }}
+        {{- if .Values.secretsService.enabled }}
+        - name: secrets-service-identity
+          secret:
+            secretName: {{ .Values.secretsService.apiIdentitySecret | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+            defaultMode: 0444
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1

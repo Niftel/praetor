@@ -6,6 +6,7 @@ import {
   Package, GitBranch, Building2, Users, UsersRound, KeyRound, KeySquare,
   ScrollText, Settings as SettingsIcon, LogOut,
   ShieldCheck,
+  Bot,
 } from 'lucide-react';
 
 // The command palette IS the control panel: no persistent sidebar. ⌘K opens one
@@ -39,6 +40,7 @@ const FUNCTIONS: { group: string; items: Fn[] }[] = [
       { label: 'Teams', path: '/teams', icon: UsersRound, keywords: 'groups' },
       { label: 'Credentials', path: '/credentials', icon: KeyRound, keywords: 'secrets ssh vault' },
       { label: 'API Tokens', path: '/tokens', icon: KeySquare, keywords: 'pat bearer' },
+      { label: 'Service Principals', path: '/service-principals', icon: Bot, keywords: 'application api delegated grants credentials' },
       { label: 'Activity', path: '/activity', icon: ScrollText, keywords: 'audit log' },
       { label: 'Settings', path: '/settings', icon: SettingsIcon, keywords: 'auth ldap config' },
     ]

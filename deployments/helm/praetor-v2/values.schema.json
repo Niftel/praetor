@@ -35,6 +35,18 @@
         "ldapBindPassword": { "type": "string" }
       }
     },
+    "secretsService": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "url": { "type": "string" },
+        "trustDomain": { "type": "string" },
+        "claimPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "apiIdentitySecret": { "type": "string" },
+        "schedulerIdentitySecret": { "type": "string" },
+        "executorIdentitySecret": { "type": "string" }
+      }
+    },
     "database": {
       "type": "object",
       "properties": {

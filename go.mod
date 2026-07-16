@@ -3,6 +3,7 @@ module github.com/praetordev/praetor
 go 1.26.5
 
 require (
+	github.com/Niftel/praetor-secrets v0.0.0-20260715173907-72d64f40b742
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/cors v1.2.2
 	github.com/go-chi/render v1.0.3
@@ -33,8 +34,14 @@ require (
 
 require (
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/pgx/v5 v5.10.0 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/praetordev/credentials v0.1.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 )
 
 require (

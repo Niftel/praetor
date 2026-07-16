@@ -14,6 +14,7 @@ import InventoriesPage from './pages/InventoriesPage';
 import CredentialsPage from './pages/CredentialsPage';
 import ExecutionPacksPage from './pages/ExecutionPacksPage';
 import TokensPage from './pages/TokensPage';
+import ServicePrincipalsPage from './pages/ServicePrincipalsPage';
 import SchedulesPage from './pages/SchedulesPage';
 import UsersPage from './pages/UsersPage';
 import TeamsPage from './pages/TeamsPage';
@@ -75,6 +76,7 @@ const App = () => {
           <Route path="credentials" element={<CredentialsLanding />} />
           <Route path="credentials/org/:orgId" element={<CredentialsPage />} />
           <Route path="tokens" element={<TokensPage />} />
+          <Route path="service-principals" element={<ServicePrincipalsPage />} />
           <Route path="execution-packs" element={<ExecutionPacksPage />} />
           <Route path="schedules" element={<SchedulesLanding />} />
           <Route path="schedules/org/:orgId" element={<SchedulesPage />} />
