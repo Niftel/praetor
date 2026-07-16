@@ -73,6 +73,11 @@ func (rs *ServicePrincipalsResource) Routes() chi.Router {
 	r.Post("/{id}/credentials", rs.CreateCredential)
 	r.Post("/{id}/credentials/{credentialID}/rotate", rs.RotateCredential)
 	r.Delete("/{id}/credentials/{credentialID}", rs.RevokeCredential)
+	r.Get("/{id}/grants", rs.ListGrants)
+	r.Post("/{id}/grants", rs.CreateGrant)
+	r.Get("/{id}/grants/{grantID}", rs.GetGrant)
+	r.Put("/{id}/grants/{grantID}", rs.UpdateGrant)
+	r.Delete("/{id}/grants/{grantID}", rs.RevokeGrant)
 	return r
 }
 

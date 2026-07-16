@@ -19,6 +19,7 @@ DELETE  /api/v1/organizations/{id}/users/{userId}
 DELETE  /api/v1/schedules/{id}/
 DELETE  /api/v1/service-principals/{id}
 DELETE  /api/v1/service-principals/{id}/credentials/{credentialID}
+DELETE  /api/v1/service-principals/{id}/grants/{grantID}
 DELETE  /api/v1/teams/{id}/
 DELETE  /api/v1/teams/{id}/members/{userID}
 DELETE  /api/v1/tokens/{id}
@@ -75,6 +76,8 @@ GET     /api/v1/schedules/
 GET     /api/v1/schedules/{id}/
 GET     /api/v1/service-principals/{id}
 GET     /api/v1/service-principals/{id}/credentials
+GET     /api/v1/service-principals/{id}/grants
+GET     /api/v1/service-principals/{id}/grants/{grantID}
 GET     /api/v1/teams/
 GET     /api/v1/teams/{id}/
 GET     /api/v1/teams/{id}/members
@@ -133,6 +136,7 @@ POST    /api/v1/rbac/policy/refresh
 POST    /api/v1/schedules/
 POST    /api/v1/service-principals/{id}/credentials
 POST    /api/v1/service-principals/{id}/credentials/{credentialID}/rotate
+POST    /api/v1/service-principals/{id}/grants
 POST    /api/v1/teams/
 POST    /api/v1/teams/{id}/members
 POST    /api/v1/tokens/
@@ -157,6 +161,7 @@ PUT     /api/v1/inventories/{inventoryId}/
 PUT     /api/v1/job-templates/{id}
 PUT     /api/v1/organizations/{id}/
 PUT     /api/v1/schedules/{id}/
+PUT     /api/v1/service-principals/{id}/grants/{grantID}
 PUT     /api/v1/teams/{id}/
 PUT     /api/v1/triggers/event/{id}
 PUT     /api/v1/users/{id}/
