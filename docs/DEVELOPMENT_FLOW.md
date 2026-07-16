@@ -21,6 +21,9 @@ read/write access. Store it as the repository secret
 `PROJECT_AUTOMATION_TOKEN`, then run the **Development flow** workflow with
 `bootstrap=true`. Commit the generated `.github/development-flow-state.json`.
 
+Without that secret, issue labels still synchronize through the built-in
+workflow token, but organization Project updates are skipped with a warning.
+
 The bootstrap command is safe to rerun:
 
 ```sh

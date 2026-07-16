@@ -116,18 +116,22 @@ add_to_project() {
 }
 
 set_project_status() {
-  local url="$1" status="$2" number item_id field_id option_id project_id
+  local url="$1" status="$2" number item_id field_id option_id project_id items
   number="$(state_project_number)"
   add_to_project "$url"
-  item_id="$(gh project item-list "$number" --owner "$OWNER" --format json --limit 500 \
-    --jq ".items[] | select(.content.url == $(jq -Rsa . <<<"$url")) | .id" | head -n1)"
-  [[ -n "$item_id" ]] || { echo "error: could not locate project item for $url" >&2; return 1; }
+  if ! items="$(gh project item-list "$number" --owner "$OWNER" --format json --limit 500 2>/dev/null)"; then
+    echo "warning: project synchronization requires PROJECT_AUTOMATION_TOKEN" >&2
+    return 0
+  fi
+  item_id="$(jq -r --arg url "$url" '.items[] | select(.content.url == $url) | .id' <<<"$items" | head -n1)"
+  [[ -n "$item_id" ]] || { echo "warning: project item for $url is not visible yet" >&2; return 0; }
   project_id="$(jq -r .project_id "$STATE_FILE")"
   field_id="$(jq -r .workflow_status.field_id "$STATE_FILE")"
   option_id="$(jq -r --arg status "$status" '.workflow_status.options[$status] // empty' "$STATE_FILE")"
   [[ -n "$option_id" ]] || { echo "error: project has no Workflow Status option '$status'" >&2; return 1; }
   gh project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" \
-    --single-select-option-id "$option_id" >/dev/null
+    --single-select-option-id "$option_id" >/dev/null 2>&1 ||
+    echo "warning: project synchronization requires PROJECT_AUTOMATION_TOKEN" >&2
 }
 
 sync_issue() {

@@ -32,7 +32,7 @@ jobs:
         run: ./scripts/development-flow.sh validate-issue
       - name: Synchronize issue
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN || github.token }}
         run: ./scripts/development-flow.sh sync-issue
 
   pull-request:
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Synchronize linked issue
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN || github.token }}
         run: ./scripts/development-flow.sh sync-pr
 
   verify-main:
@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Complete verified issues
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN || github.token }}
           VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
           WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: ./scripts/development-flow.sh verify-main
