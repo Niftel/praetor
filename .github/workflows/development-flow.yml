@@ -1,0 +1,68 @@
+name: Development flow
+
+on:
+  issues:
+    types: [opened, edited, reopened, closed, labeled]
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, closed]
+  workflow_run:
+    workflows: ["CI", "CodeQL", "Go vulnerability scan", "Image"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: Bootstrap labels, milestones, and project
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  issue:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Validate issue
+        if: github.event.action == 'opened' || github.event.action == 'edited'
+        run: ./scripts/development-flow.sh validate-issue
+      - name: Synchronize issue
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN || github.token }}
+        run: ./scripts/development-flow.sh sync-issue
+
+  pull-request:
+    if: github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Synchronize linked issue
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN || github.token }}
+        run: ./scripts/development-flow.sh sync-pr
+
+  verify-main:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Complete verified issues
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN || github.token }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: ./scripts/development-flow.sh verify-main
+
+  bootstrap:
+    if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Bootstrap development management
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+        run: ./scripts/development-flow.sh bootstrap
