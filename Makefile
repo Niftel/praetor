@@ -145,7 +145,7 @@ local-cluster-release:
 # everything with TEST_DATABASE_URL, then tears it down. Needs docker.
 TESTDB_PORT ?= 5434
 TESTDB_URL  := postgres://postgres:postgres@localhost:$(TESTDB_PORT)/praetor?sslmode=disable
-.PHONY: test-db
+.PHONY: test-db database-compatibility-test
 test-db:
 	@echo "Starting isolated test DB on :$(TESTDB_PORT)..."
 	@docker rm -f praetor-testdb >/dev/null 2>&1 || true
@@ -158,6 +158,12 @@ test-db:
 	@TEST_DATABASE_URL="$(TESTDB_URL)" go test -count=1 ./... ; status=$$? ; \
 		echo "Tearing down test DB..." ; docker rm -f praetor-testdb >/dev/null 2>&1 || true ; \
 		exit $$status
+
+# Exercise representative historical schemas with the real migrator, then prove
+# the latest explicitly reversible migration can be rolled back and reapplied.
+# Requires an isolated Postgres; CI provides one as a service container.
+database-compatibility-test:
+	@DATABASE_URL="$(TESTDB_URL)" ./scripts/database-compatibility.sh
 
 clean:
 	rm -rf $(BINARY_DIR)
