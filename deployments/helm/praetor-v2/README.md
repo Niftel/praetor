@@ -195,10 +195,11 @@ above; rotate it by changing the value and upgrading.
 
 ## Local validation (k3d)
 
-The chart is smoke-tested end-to-end on k3d with locally-built images:
+The supported Praetor development cluster always includes k3s Traefik, the k3d
+load balancer, and host ports 80/443. Create it through the repository command:
 
 ```sh
-k3d cluster create praetor-test
+make local-cluster-create
 for s in api ingestion scheduler consumer reconciler executor ui migrator; do
   docker build -f build/package/Dockerfile.$s -t praetor-$s:dev .   # ui uses web/Dockerfile
 done
@@ -211,6 +212,10 @@ All nine service pods reach Ready; `ci/values-k3d.yaml` imports images bare
 (`registry: ""`) rather than pulling from a registry. Add a break-glass login
 with `--set bootstrapAdmin.enabled=true --set bootstrapAdmin.username=admin
 --set bootstrapAdmin.password=admin`.
+
+Do not create the development cluster with raw `k3d cluster create` flags.
+The lifecycle wrapper rejects clusters with Traefik disabled, a missing load
+balancer, or missing host mappings for ports 80 and 443.
 
 Manage an existing local cluster through the repository lifecycle commands,
 not by starting or stopping its Docker containers individually:
@@ -290,24 +295,20 @@ kubectl -n praetor rollout restart statefulset/praetor-executor   # pick up the 
 The executor fetches `{gitea.internalUrl}/api/packages/{owner}/generic/execpack-<pack>/current/<pack>-linux-<arch>.tar.gz`
 with no token (only publishing needs one).
 
-### Optional: URLs via ingress + trusted TLS
+### URLs via ingress + trusted TLS
 
-By default the k3d values disable ingress (reach the UI with a port-forward).
-To serve the stack on real URLs (`https://praetor.localhost`) through k3s's
-built-in Traefik — with a browser-trusted cert, exactly like the compose env:
+The local Praetor values enable ingress by default. The supported cluster
+creation command maps host ports 80/443 through k3s's built-in Traefik. Load the
+browser-trusted development certificate before deploying:
 
 ```sh
-# 1. Map host 80/443 into the cluster (at create time, or edit a live cluster):
-k3d cluster edit praetor-test \
-  --port-add "80:80@loadbalancer" --port-add "443:443@loadbalancer"
-
-# 2. Load the machine's mkcert cert as a TLS secret (private key is NOT in git).
+# Load the machine's mkcert cert as a TLS secret (private key is NOT in git).
 #    Run `mkcert -install` once so the local CA is trusted by your browser.
 kubectl -n praetor create secret tls praetor-localhost-tls \
   --cert=deployments/traefik/certs/localhost.pem \
   --key=deployments/traefik/certs/localhost-key.pem
 
-# 3. Enable ingress with the mkcert cert:
+# Deploy with ingress and the mkcert certificate:
 helm upgrade praetor deployments/helm/praetor-v2 \
   -f deployments/helm/praetor-v2/ci/values-k3d.yaml \
   -f deployments/helm/praetor-v2/ci/values-k3d-ingress.yaml -n praetor

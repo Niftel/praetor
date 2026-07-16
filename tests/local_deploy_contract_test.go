@@ -83,6 +83,36 @@ func TestLocalDeploymentScriptsRejectMutableDefaults(t *testing.T) {
 	}
 }
 
+func TestLocalClusterRequiresBrowserIngress(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "local-cluster.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	for _, required := range []string{
+		`create|status|start|stop|recover`,
+		`--port "80:80@loadbalancer"`,
+		`--port "443:443@loadbalancer"`,
+		`validate_ingress_topology`,
+		`Traefik disabled`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("local-cluster.sh must enforce %q", required)
+		}
+	}
+
+	raw, err = os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	makefile := string(raw)
+	if !strings.Contains(makefile, "local-cluster-create:") ||
+		!strings.Contains(makefile, "./scripts/local-cluster.sh create") {
+		t.Fatal("Makefile must expose the supported ingress-enabled cluster creation command")
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("..")

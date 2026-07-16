@@ -14,8 +14,9 @@ K3D_COMMAND_TIMEOUT="${PRAETOR_K3D_COMMAND_TIMEOUT:-45}"
 
 usage() {
   cat <<EOF
-usage: $0 <status|start|stop|recover>
+usage: $0 <create|status|start|stop|recover>
 
+  create   create the supported ingress-enabled local cluster
   status   show k3d component state and fail if the cluster is split/unhealthy
   start    start a healthy stopped cluster, or recover a partial cluster
   stop     stop the entire cluster with a graceful k3s shutdown allowance
@@ -101,7 +102,39 @@ discover() {
   SERVER="$(component_for_role server)"
   LOAD_BALANCER="$(component_for_role loadbalancer)"
   [[ -n "$SERVER" ]] || die "k3d server container for '$CLUSTER' was not found"
-  [[ -n "$LOAD_BALANCER" ]] || die "k3d load-balancer container for '$CLUSTER' was not found"
+  [[ -n "$LOAD_BALANCER" ]] ||
+    die "k3d load-balancer container for '$CLUSTER' was not found; recreate it with '$0 create'"
+}
+
+traefik_disabled() {
+  docker inspect --format '{{json .Config.Cmd}}' "$SERVER" 2>/dev/null |
+    grep -Eq '"--disable(=|","?)traefik"'
+}
+
+load_balancer_exposes() {
+  local container_port="$1"
+  docker inspect --format "{{with index .HostConfig.PortBindings \"$container_port/tcp\"}}{{range .}}{{.HostPort}}{{end}}{{end}}" \
+    "$LOAD_BALANCER" 2>/dev/null | grep -Fxq "$container_port"
+}
+
+validate_ingress_topology() {
+  local invalid=0
+  if traefik_disabled; then
+    echo "error: cluster '$CLUSTER' was created with Traefik disabled" >&2
+    invalid=1
+  fi
+  if ! load_balancer_exposes 80; then
+    echo "error: cluster '$CLUSTER' does not expose host port 80 through its load balancer" >&2
+    invalid=1
+  fi
+  if ! load_balancer_exposes 443; then
+    echo "error: cluster '$CLUSTER' does not expose host port 443 through its load balancer" >&2
+    invalid=1
+  fi
+  if (( invalid )); then
+    echo "error: recreate it with '$0 create'; the supported Praetor dev cluster always includes Traefik and ports 80/443" >&2
+    return 1
+  fi
 }
 
 split_cluster() {
@@ -238,6 +271,7 @@ stop_cluster() {
 
 start_cluster() {
   discover
+  validate_ingress_topology
   if split_cluster; then
     echo "==> Partial cluster detected; running ordered recovery"
     recover_cluster
@@ -248,6 +282,20 @@ start_cluster() {
   k3d_start
   wait_for_cluster
   remove_orphaned_tools_nodes
+}
+
+create_cluster() {
+  if cluster_exists; then
+    die "k3d cluster '$CLUSTER' already exists; creation never replaces existing data"
+  fi
+  echo "==> Creating ingress-enabled k3d cluster '$CLUSTER'"
+  run_bounded "$K3D_COMMAND_TIMEOUT" k3d cluster create "$CLUSTER" \
+    --port "80:80@loadbalancer" \
+    --port "443:443@loadbalancer" ||
+    die "could not create k3d cluster '$CLUSTER'"
+  discover
+  validate_ingress_topology
+  wait_for_cluster
 }
 
 recover_cluster() {
@@ -267,11 +315,14 @@ recover_cluster() {
   remove_orphaned_tools_nodes
 }
 
-cluster_exists || die "k3d cluster '$CLUSTER' does not exist"
-discover
-
 case "${1:-}" in
+  create)
+    create_cluster
+    ;;
   status)
+    cluster_exists || die "k3d cluster '$CLUSTER' does not exist; run '$0 create'"
+    discover
+    validate_ingress_topology
     print_status
     if split_cluster; then
       die "partial cluster: '$SERVER' is stopped while '$LOAD_BALANCER' is active"
@@ -281,12 +332,17 @@ case "${1:-}" in
     fi
     ;;
   start)
+    cluster_exists || die "k3d cluster '$CLUSTER' does not exist; run '$0 create'"
     start_cluster
     ;;
   stop)
+    cluster_exists || die "k3d cluster '$CLUSTER' does not exist; run '$0 create'"
     stop_cluster
     ;;
   recover)
+    cluster_exists || die "k3d cluster '$CLUSTER' does not exist; run '$0 create'"
+    discover
+    validate_ingress_topology
     recover_cluster
     ;;
   *)
