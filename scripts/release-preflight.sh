@@ -67,4 +67,8 @@ while IFS= read -r module; do
     GOMODCACHE="$cache_root/go-mod" go mod download "$module"
 done < <(go run ./cmd/compatcheck "${compat_args[@]}" -output modules)
 
+printf '\nChecking released shared modules independently...\n'
+PRAETOR_HEALTH_CACHE="$cache_root/shared-health" \
+    ./scripts/check-workspace-health.sh --modules --remote
+
 printf '\nRemote release preflight passed.\n'

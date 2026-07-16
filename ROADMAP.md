@@ -40,6 +40,7 @@ roadmap is reviewed.
 | Delegated API launches | Service principals, bounded launch grants, host/inventory scope enforcement, idempotency, concurrency controls, and attributable audit records |
 | Platform release automation | Compatibility manifest, release preflight, protected-environment promotion, component image gates, and GitHub release orchestration |
 | Database and wire compatibility | Executable migration matrix and versioned cross-service fixtures with producer/consumer boundary tests |
+| Shared-module release health | Authoritative 19-module inventory; clean-tag formatting, vet, build, test, and security-test gates with isolated caches |
 
 Detailed operational and security contracts live in:
 
@@ -57,17 +58,9 @@ repository. This repository owns only the integration boundary.
 
 ## Committed next work
 
-### Shared-module standalone health
-
-Track: [#121 — Extend standalone health checks to shared Praetor modules](https://github.com/Niftel/praetor/issues/121)
-
-Every independently released shared module must pass formatting, vet, build,
-tests, dependency-isolation checks, and release-metadata validation with
-`GOWORK=off`. The result will become part of platform release preflight.
-
-This is the only currently committed roadmap item. New work must first become a
-scoped issue with outcome, acceptance criteria, tests, security impact, and
-dependencies.
+There is no committed roadmap item after the shared-module health baseline.
+New work must first become a scoped issue with outcome, acceptance criteria,
+tests, security impact, and dependencies.
 
 ## Demand-gated ideas
 

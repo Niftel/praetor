@@ -18,7 +18,8 @@ func TestRoadmapReflectsShippedCapabilities(t *testing.T) {
 		"Praetor Secrets integration",
 		"Delegated API launches",
 		"Platform release automation",
-		"#121 — Extend standalone health checks",
+		"Shared-module release health",
+		"There is no committed roadmap item",
 	}
 	for _, text := range required {
 		if !strings.Contains(roadmap, text) {

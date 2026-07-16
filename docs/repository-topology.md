@@ -46,6 +46,11 @@ Shared modules fall into four broad groups:
 - Security: `crypto`, `credentials`, `runtoken`, `rbac`
 - Application utilities: `env`, `plog`, `render`, `registry`, `notify`, `store`
 
+The authoritative module/repository/version/owner inventory is
+`sharedModules` in `platform-compatibility.yaml`. `make shared-module-health`
+checks local sibling sources; `make shared-module-health-remote` checks clean
+clones of the declared released tags.
+
 Shared modules must not import deployable services. Cross-process payloads need
 explicit compatibility rules; ordinary implementation details should not be
 promoted into shared modules merely to avoid a small amount of duplication.

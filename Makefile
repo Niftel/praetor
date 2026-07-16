@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -62,6 +62,12 @@ release-plan:
 # are expected beside this one; override their parent with PRAETOR_WORKSPACE_DIR.
 workspace-health:
 	./scripts/check-workspace-health.sh
+
+shared-module-health:
+	./scripts/check-workspace-health.sh --modules
+
+shared-module-health-remote:
+	./scripts/check-workspace-health.sh --modules --remote
 
 # Cross-compile the host-runner daemon locally (dev convenience). NOTE: this is
 # NOT how a target gets its daemon — the daemon ships inside the Execution Pack,
