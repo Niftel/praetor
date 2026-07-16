@@ -119,6 +119,18 @@ mounts a different certificate into each StatefulSet pod; sharing one private
 key across replicas would let any replica resolve credentials claimed by another.
 The chart fails rendering instead of allowing that weakened configuration.
 
+After deploying the integrated local stack and building the ARM64 Execution Pack,
+run the live credential-path gate from the Praetor repository:
+
+```sh
+make secrets-execution-e2e
+```
+
+The gate creates a fresh Machine credential through the Praetor API, verifies
+that Praetor stores only a placeholder, launches a real SCM-backed playbook,
+and confirms that the Secrets Service recorded exactly one run-scoped executor
+resolution before the binding was canceled at terminal success.
+
 ## Authentication
 
 Praetor authenticates users against an **LDAP/Active Directory** directory the

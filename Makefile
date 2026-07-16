@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e release-preflight release-preflight-remote release-plan workspace-health host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -34,6 +34,16 @@ deployment-contract-test:
 # Keep both local deployment paths immutable and manifest-driven.
 local-deploy-contract-test:
 	go test ./tests -run '^TestLocalDeployment'
+
+# Live integration gate for the deployed Praetor + Secrets Service stack.
+secrets-execution-contract-test:
+	bash -n ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'credential plaintext was stored' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'exactly one credential resolution attempt' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'JOB_COMPLETED' ./scripts/test-secrets-execution-e2e.sh
+
+secrets-execution-e2e:
+	./scripts/test-secrets-execution-e2e.sh
 
 # A release preflight intentionally fails while the manifest is marked
 # development. The remote form also verifies GHCR images and Go module tags.
@@ -93,6 +103,7 @@ test:
 	@echo "Running tests..."
 	$(MAKE) deployment-contract-test
 	$(MAKE) local-deploy-contract-test
+	$(MAKE) secrets-execution-contract-test
 	go test -v ./tests/...
 	@echo "Running unit tests (incl. #39 no-wildcard-SELECT gate + column-drift checks)..."
 	go test ./services/... ./pkg/...
