@@ -160,6 +160,16 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
 	}
+	bootstrapRaw, err := os.ReadFile(filepath.Join(root, "scripts", "bootstrap-product-validation-base.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := string(bootstrapRaw)
+	for _, required := range []string{"docker build", "k3d image import", "praetor-secrets:validation", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository"} {
+		if !strings.Contains(bootstrap, required) {
+			t.Fatalf("clean fixture bootstrap must contain %q", required)
+		}
+	}
 }
 
 func repositoryRoot(t *testing.T) string {

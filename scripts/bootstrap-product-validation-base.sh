@@ -5,12 +5,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SECRETS_ROOT="${PRAETOR_SECRETS_ROOT:-$ROOT/../praetor-secrets}"
 NAMESPACE="${PRAETOR_VALIDATION_NAMESPACE:-praetor-secrets}"
 TRUST_DOMAIN="${PRAETOR_VALIDATION_TRUST_DOMAIN:-praetor.local}"
+CLUSTER="${PRAETOR_K3D_CLUSTER:-praetor-validation}"
+SECRETS_IMAGE="${PRAETOR_VALIDATION_SECRETS_IMAGE:-praetor-secrets:validation}"
 CHART="$ROOT/deployments/helm/praetor-v2"
 SECRETS_CHART="$SECRETS_ROOT/charts/praetor-secrets-stack"
 
-for command in docker go helm kubectl; do command -v "$command" >/dev/null || { echo "error: $command is required" >&2; exit 1; }; done
+for command in docker go helm k3d kubectl; do command -v "$command" >/dev/null || { echo "error: $command is required" >&2; exit 1; }; done
 [[ -f "$SECRETS_ROOT/cmd/praetor-dev-bootstrap/main.go" ]] || { echo "error: praetor-secrets checkout not found at $SECRETS_ROOT" >&2; exit 1; }
+[[ "$SECRETS_IMAGE" == *:* && "$SECRETS_IMAGE" != *@* ]] || { echo "error: PRAETOR_VALIDATION_SECRETS_IMAGE must be a tagged image name" >&2; exit 1; }
 kubectl get --raw=/readyz >/dev/null
+
+docker build --tag "$SECRETS_IMAGE" "$SECRETS_ROOT"
+k3d image import --cluster "$CLUSTER" "$SECRETS_IMAGE"
+secrets_repository="${SECRETS_IMAGE%:*}"
+secrets_tag="${SECRETS_IMAGE##*:}"
 
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl apply -n "$NAMESPACE" -f "$ROOT/deployments/product-validation/base-datastores.yaml" >/dev/null
@@ -39,11 +47,17 @@ apply_identity praetor-executor-identity "$work/generated/clients/praetor-execut
 
 helm dependency build "$SECRETS_CHART" >/dev/null
 helm upgrade --install praetor-secrets-stack "$SECRETS_CHART" -n "$NAMESPACE" \
+  --set praetor-secrets.image.repository="$secrets_repository" \
+  --set praetor-secrets.image.tag="$secrets_tag" \
+  --set praetor-secrets.image.pullPolicy=IfNotPresent \
   --set praetor-secrets.trustDomain="$TRUST_DOMAIN" \
   --set praetor-secrets.secrets.runtimeSecret=praetor-secrets-runtime \
   --set praetor-secrets.secrets.serverTLSSecret=praetor-secrets-server \
   --set praetor-secrets.secrets.auditSinkTLSSecret=praetor-secrets-audit-client \
   --set praetor-audit-sink.trustDomain="$TRUST_DOMAIN" \
+  --set praetor-audit-sink.image.repository="$secrets_repository" \
+  --set praetor-audit-sink.image.tag="$secrets_tag" \
+  --set praetor-audit-sink.image.pullPolicy=IfNotPresent \
   --set praetor-audit-sink.secrets.runtimeSecret=praetor-audit-runtime \
   --set praetor-audit-sink.secrets.serverTLSSecret=praetor-audit-server \
   --wait --timeout 5m

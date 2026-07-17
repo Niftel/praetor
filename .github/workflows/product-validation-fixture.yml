@@ -41,6 +41,7 @@ jobs:
       - name: Create clean cluster and integrated base
         env:
           PRAETOR_SECRETS_ROOT: ${{ github.workspace }}/praetor-secrets
+          PRAETOR_K3D_CLUSTER: praetor-validation
         run: |
           k3d cluster create praetor-validation --wait
           ./scripts/bootstrap-product-validation-base.sh
