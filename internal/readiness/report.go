@@ -130,7 +130,8 @@ func Generate(manifest Manifest) (Report, error) {
 		}
 	}
 
-	findings := append([]Finding(nil), manifest.Findings...)
+	findings := make([]Finding, len(manifest.Findings))
+	copy(findings, manifest.Findings)
 	for i := range findings {
 		finding := &findings[i]
 		if finding.ID == "" {

@@ -46,6 +46,9 @@ func TestRunWritesGoReport(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"status": "go"`) {
 		t.Fatalf("unexpected report: %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), `"findings": []`) {
+		t.Fatalf("empty findings did not serialize as an array: %s", stdout.String())
+	}
 }
 
 func TestRunWritesNoGoReportAndReturnsTwo(t *testing.T) {
