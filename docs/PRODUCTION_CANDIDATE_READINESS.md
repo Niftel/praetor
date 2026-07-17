@@ -40,6 +40,12 @@ The aggregator rejects missing/invalid envelopes and sensitive field names,
 then records only each journey result and the SHA-256 digest of its sanitized
 artifact.
 
+For a staging release-candidate decision, set
+`PRAETOR_READINESS_PROFILE=staging-release-candidate`. That profile additionally
+requires `staging-health`, `staging-recovery`, and `ui-acceptance` evidence.
+Supply the exact deployed image digests as a JSON object through
+`PRAETOR_READINESS_COMPONENTS_FILE`; an invalid component digest fails closed.
+
 ## Evidence manifest
 
 ```json
