@@ -7,12 +7,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="${PRAETOR_NAMESPACE:-praetor-secrets}"
+RELEASE="${PRAETOR_E2E_RELEASE:-praetor}"
 API_SERVICE="${PRAETOR_API_SERVICE:-praetor-api}"
 API_PORT="${PRAETOR_E2E_API_PORT:-18080}"
 SECRETS_SERVICE="${PRAETOR_E2E_SECRETS_SERVICE:-praetor-secrets}"
 SECRETS_PORT="${PRAETOR_E2E_SECRETS_PORT:-18443}"
 ADMIN_USERNAME="${PRAETOR_E2E_USERNAME:-admin}"
 ADMIN_PASSWORD="${PRAETOR_E2E_PASSWORD:-admin}"
+AUDITOR_USERNAME="${PRAETOR_E2E_AUDITOR_USERNAME:-demo-auditor}"
+AUDITOR_PASSWORD="${PRAETOR_E2E_AUDITOR_PASSWORD:-praetor123}"
 ORGANIZATION_ID="${PRAETOR_E2E_ORGANIZATION_ID:-}"
 PROJECT_URL="${PRAETOR_E2E_PROJECT_URL:-https://github.com/Niftel/praetor.git}"
 PLAYBOOK="${PRAETOR_E2E_PLAYBOOK:-playbooks/validate-credential-injection.yml}"
@@ -20,6 +23,8 @@ PROJECT_REF="${PRAETOR_E2E_PROJECT_REF:-${GITHUB_HEAD_REF:-}}"
 TIMEOUT_SECONDS="${PRAETOR_E2E_TIMEOUT_SECONDS:-180}"
 SECRETS_DB_SELECTOR="app=${PRAETOR_E2E_SECRETS_DB_APP:-praetor-secrets-postgres}"
 AUDIT_DB_SELECTOR="app=${PRAETOR_E2E_AUDIT_DB_APP:-praetor-audit-postgres}"
+SECRETS_DB_NAME="${PRAETOR_E2E_SECRETS_DB_NAME:-postgres}"
+AUDIT_DB_NAME="${PRAETOR_E2E_AUDIT_DB_NAME:-postgres}"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -33,8 +38,8 @@ for command in curl jq kubectl openssl; do
 done
 
 first_pod() { kubectl get pods -n "$NAMESPACE" -l "$1" -o name | head -n1 | cut -d/ -f2; }
-EXECUTOR_POD="$(first_pod 'app.kubernetes.io/component=executor,app.kubernetes.io/instance=praetor')"
-PRAETOR_DB_POD="$(first_pod 'app.kubernetes.io/component=postgresql,app.kubernetes.io/instance=praetor')"
+EXECUTOR_POD="$(first_pod "app.kubernetes.io/component=executor,app.kubernetes.io/instance=$RELEASE")"
+PRAETOR_DB_POD="$(first_pod "app.kubernetes.io/component=postgresql,app.kubernetes.io/instance=$RELEASE")"
 SECRETS_DB_POD="$(first_pod "$SECRETS_DB_SELECTOR")"
 AUDIT_DB_POD="$(first_pod "$AUDIT_DB_SELECTOR")"
 
@@ -299,7 +304,7 @@ DEADLINE=$((SECONDS + 30))
 BINDING=""
 while (( SECONDS < DEADLINE )); do
   BINDING="$(
-    kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
+    kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- env POSTGRES_DB="$SECRETS_DB_NAME" sh -c \
       'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -Atc \
        "select state||'\''|'\''||executor_identity||'\''|'\''||resolution_count from run_bindings where run_id='\''$1'\''"' \
       sh "$RUN_ID"
@@ -313,7 +318,7 @@ if [[ "$BINDING" != canceled\|praetor-executor:*\|1 ]]; then
 fi
 
 ATTEMPTS="$(
-  kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
+  kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- env POSTGRES_DB="$SECRETS_DB_NAME" sh -c \
     'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -Atc \
      "select count(*) from resolution_attempts where run_id='\''$1'\''"' \
     sh "$RUN_ID"
@@ -407,7 +412,7 @@ sleep 3
 secrets_request executor POST "runs/$EXPIRED_RUN_ID/credential:resolve" \
   "$(jq -nc --arg attempt_id "$(uuid)" --arg requested_at "$(jq -nr 'now | todateiso8601')" '{attempt_id:$attempt_id,requested_at:$requested_at}')"
 assert_denied_without_secret 403 "expired binding resolution"
-EXPIRED_STATE="$(kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
+EXPIRED_STATE="$(kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- env POSTGRES_DB="$SECRETS_DB_NAME" sh -c \
   'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -Atc \
    "select state from run_bindings where run_id='\''$1'\''"' \
   sh "$EXPIRED_RUN_ID")"
@@ -437,12 +442,23 @@ assert_denied_without_secret 404 "retired credential binding registration"
 
 echo "==> Scanning API, audit, database, and workload artifacts for plaintext"
 printf '%s\n' "$CREDENTIAL" >"$WORK/credential-response.json"
-api_get 'activity-stream?limit=500' >"$WORK/praetor-activity.json"
+ACTIVITY_STATUS="$(curl -sS -o "$WORK/praetor-activity.json" -w '%{http_code}' \
+  -H "Authorization: Bearer $TOKEN" "$API/activity-stream?limit=500")"
+if [[ "$ACTIVITY_STATUS" == 403 ]]; then
+  AUDITOR_LOGIN="$(curl -fsS -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg username "$AUDITOR_USERNAME" --arg password "$AUDITOR_PASSWORD" '{username:$username,password:$password}')" \
+    "$API/auth/login")"
+  AUDITOR_TOKEN="$(jq -er .token <<<"$AUDITOR_LOGIN")"
+  curl -fsS -H "Authorization: Bearer $AUDITOR_TOKEN" "$API/activity-stream?limit=500" >"$WORK/praetor-activity.json"
+elif [[ "$ACTIVITY_STATUS" != 200 ]]; then
+  echo "error: activity stream returned $ACTIVITY_STATUS" >&2
+  exit 1
+fi
 kubectl exec -n "$NAMESPACE" "$PRAETOR_DB_POD" -- \
   pg_dump -U postgres -d praetor --data-only >"$WORK/praetor-database.sql"
-kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
+kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- env POSTGRES_DB="$SECRETS_DB_NAME" sh -c \
   'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" pg_dump -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" --data-only' >"$WORK/secrets-database.sql"
-kubectl exec -n "$NAMESPACE" "$AUDIT_DB_POD" -- sh -c \
+kubectl exec -n "$NAMESPACE" "$AUDIT_DB_POD" -- env POSTGRES_DB="$AUDIT_DB_NAME" sh -c \
   'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" pg_dump -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" --data-only' >"$WORK/audit-database.sql"
 while IFS= read -r pod; do
   kubectl logs -n "$NAMESPACE" "$pod" --all-containers=true >"$WORK/log-${pod#pod/}.txt" 2>/dev/null || true

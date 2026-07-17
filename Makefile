@@ -179,6 +179,19 @@ staging-release-deploy:
 staging-release-status:
 	./scripts/staging-release.sh status
 
+.PHONY: staging-integrations-plan staging-integrations-bootstrap staging-integrations-status staging-integrations-verify
+staging-integrations-plan:
+	./scripts/staging-integrations.sh plan
+
+staging-integrations-bootstrap:
+	./scripts/staging-integrations.sh bootstrap
+
+staging-integrations-status:
+	./scripts/staging-integrations.sh status
+
+staging-integrations-verify:
+	./scripts/staging-integrations.sh verify
+
 .PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
 validation-fixture-bootstrap:
 	./scripts/bootstrap-product-validation-base.sh

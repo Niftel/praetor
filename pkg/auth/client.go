@@ -2,7 +2,9 @@ package auth
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -33,6 +35,20 @@ func (c *LDAPClient) Connect() error {
 	// Build TLS config
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: c.config.Server.InsecureSkipVerify,
+	}
+	if c.config.Server.CAFile != "" {
+		pem, readErr := os.ReadFile(c.config.Server.CAFile)
+		if readErr != nil {
+			return fmt.Errorf("read LDAP CA file: %w", readErr)
+		}
+		roots, rootsErr := x509.SystemCertPool()
+		if rootsErr != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return fmt.Errorf("LDAP CA file contains no PEM certificates")
+		}
+		tlsConfig.RootCAs = roots
 	}
 
 	// Set timeout

@@ -135,7 +135,7 @@ ldap:
   # validation fixture owns the directory and its configuration.
   existingConfigMap: ""
   # Provider-neutral authenticator rules and legacy LDAP login mappings, rendered verbatim into
-  # /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml for a full
+  # /etc/praetor/ldap/ldap.yaml (see deployments/ldap/ldap-config.yaml for a full
   # LDAP example and docs/AUTHENTICATOR_MAPPING.md for ordered all/any/not
   # rules). Leave empty to disable LDAP entirely (local auth only).
   config: {}
