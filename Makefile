@@ -42,6 +42,12 @@ secrets-execution-contract-test:
 	grep -q 'exactly one credential resolution attempt' ./scripts/test-secrets-execution-e2e.sh
 	grep -q 'JOB_COMPLETED' ./scripts/test-secrets-execution-e2e.sh
 	grep -q 'PRAETOR_E2E_EVIDENCE_FILE' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'terminal executor manifest retained planted secret material' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'completed-run credential replay' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'wrong-workload credential resolution' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'expired binding resolution' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'retired credential binding registration' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'Scanning API, audit, database, and workload artifacts' ./scripts/test-secrets-execution-e2e.sh
 
 secrets-execution-e2e:
 	./scripts/test-secrets-execution-e2e.sh

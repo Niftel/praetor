@@ -95,6 +95,7 @@ helm upgrade --install praetor "$CHART" -n "$NAMESPACE" \
   --set image.registry= \
   --set image.tag="$validation_tag" \
   --set ingress.enabled=false \
+  --set hostRunner.callbackUrl="http://praetor-ingestion:8081" \
   --set secretsService.enabled=true \
   --set secretsService.url="https://praetor-secrets.$NAMESPACE.svc:8443" \
   --set secretsService.trustDomain="$TRUST_DOMAIN" \
