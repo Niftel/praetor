@@ -156,8 +156,15 @@ expected="$(go run ./cmd/stagingrelease -lock "$LOCK" -output images | sort)"
 actual="$(kubectl --context "$CONTEXT" get deployments,statefulsets,jobs -n "$NAMESPACE" \
   -l "app.kubernetes.io/instance=$RELEASE" -o json |
   jq -r '.items[].spec.template.spec | ((.initContainers // []) + (.containers // []))[]?.image' | sort -u)"
+release_manifest="$(helm get manifest "$RELEASE" --kube-context "$CONTEXT" -n "$NAMESPACE")"
 while IFS= read -r image; do
-  grep -Fxq "$image" <<<"$actual" || { echo "error: expected deployed image is absent: $image" >&2; exit 1; }
+  if [[ "$image" == */praetor-migrator@* ]]; then
+    # The revisioned migration Job is intentionally removed ten minutes after
+    # success. Its immutable image remains in Helm's stored release manifest.
+    grep -Fq "image: $image" <<<"$release_manifest" || { echo "error: expected migrator image is absent from Helm release: $image" >&2; exit 1; }
+  else
+    grep -Fxq "$image" <<<"$actual" || { echo "error: expected deployed image is absent: $image" >&2; exit 1; }
+  fi
 done <<<"$expected"
 
 platform_version="$(go run ./cmd/stagingrelease -lock "$LOCK" -output summary | awk '{print $3}' | tr -d ':')"

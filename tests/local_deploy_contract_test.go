@@ -335,6 +335,8 @@ func TestStagingReleaseIsDigestPinnedAndSecretReferenced(t *testing.T) {
 		"praetor-api-identity",
 		"deployment/praetor-secrets",
 		"missing or has an empty key",
+		"expected migrator image is absent from Helm release",
+		"helm get manifest",
 		"revision-$revision.json",
 	} {
 		if !strings.Contains(script, required) {
@@ -423,6 +425,34 @@ func TestStagingIntegrationsUseTLSAndPersistentState(t *testing.T) {
 	for _, forbidden := range []string{"kubectl delete pvc", "kubectl delete namespace", "k3d cluster delete", "rm -rf"} {
 		if strings.Contains(script, forbidden) {
 			t.Fatalf("staging integration automation must not contain destructive operation %q", forbidden)
+		}
+	}
+}
+
+func TestStagingRecoveryIsEncryptedIsolatedAndNonDestructive(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-recovery.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	for _, required := range []string{
+		"openssl cms -encrypt", "-aes-256-cbc", "SHA256SUMS", "pg_dump -U postgres",
+		"praetor_secrets", "praetor_audit", "slapcat -n 1", "nats-jetstream.tar.gz",
+		"/var/lib/praetor /opt/praetor/packs /home/praetor/.ssh", "executor-state.tar.gz", "praetor-staging-restore", "pg_restore", "restored Praetor integrity counts",
+		"slapadd -u -F /etc/ldap/slapd.d",
+		"pg_isready -U postgres -d praetor", "did not become ready within 120 seconds",
+		"credential_references", "supported rollback changed protected application-state counts", "locked re-upgrade changed protected application-state counts",
+		"duration_seconds", "archive_sha256", "sanitized evidence",
+		"helm rollback", "no prior successful Helm revision exists", "staging-release.sh\" deploy",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("staging recovery automation must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"kubectl delete namespace", "kubectl delete pvc", "k3d cluster delete", "helm upgrade --force"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("staging recovery automation must not contain destructive operation %q", forbidden)
 		}
 	}
 }
