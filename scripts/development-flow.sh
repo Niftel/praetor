@@ -14,13 +14,14 @@ REPOSITORY="$OWNER/$REPO"
 
 usage() {
   cat <<EOF
-usage: $0 <bootstrap|validate-issue|sync-issue|sync-pr|verify-main>
+usage: $0 <bootstrap|validate-issue|sync-issue|sync-pr|verify-main|repair-project>
 
   bootstrap       create labels, milestones, project, fields, and saved state
   validate-issue  validate EVENT_PATH issue content before accepting it
   sync-issue      add/update an issue in the project from EVENT_PATH
   sync-pr         move the linked issue from In Progress to In Review/Verification
   verify-main     mark merged issues Done only after successful main workflows
+  repair-project  reconcile canonical project Status from authoritative flow labels
 EOF
 }
 
@@ -64,20 +65,17 @@ bootstrap() {
     --single-select-options "P0,P1,P2,P3" >/dev/null 2>&1 || true
   project_gh project field-create "$number" --owner "$OWNER" --name "Security gate" --data-type SINGLE_SELECT \
     --single-select-options "Required,Recommended,Not blocking" >/dev/null 2>&1 || true
-  project_gh project field-create "$number" --owner "$OWNER" --name "Workflow Status" --data-type SINGLE_SELECT \
-    --single-select-options "$(jq -r '.statuses | join(",")' "$CONFIG")" >/dev/null 2>&1 || true
-
   local project_id field_json
   project_id="$(project_gh project view "$number" --owner "$OWNER" --format json --jq .id)"
   field_json="$(project_gh project field-list "$number" --owner "$OWNER" --format json |
-    jq '.fields[] | select(.name == "Workflow Status")')"
-  [[ -n "$field_json" ]] || { echo "error: Workflow Status field was not created" >&2; exit 1; }
+    jq '.fields[] | select(.name == "Status")')"
+  [[ -n "$field_json" ]] || { echo "error: canonical project Status field is missing" >&2; exit 1; }
   jq -n \
     --argjson project_number "$number" \
     --arg project_id "$project_id" \
     --arg field_id "$(jq -r .id <<<"$field_json")" \
     --argjson options "$(jq '.options | map({key:.name,value:.id}) | from_entries' <<<"$field_json")" \
-    '{project_number:$project_number,project_id:$project_id,workflow_status:{field_id:$field_id,options:$options}}' \
+    '{project_number:$project_number,project_id:$project_id,project_status:{field_id:$field_id,options:$options}}' \
     > "$STATE_FILE"
   echo "development flow bootstrapped in project $number"
 }
@@ -122,7 +120,7 @@ add_to_project() {
 }
 
 set_project_status() {
-  local url="$1" status="$2" number item_id field_id option_id project_id items
+  local url="$1" status="$2" number item_id field_id option_id project_id items canonical
   number="$(state_project_number)"
   add_to_project "$url"
   if ! items="$(project_gh project item-list "$number" --owner "$OWNER" --format json --limit 500 2>/dev/null)"; then
@@ -132,12 +130,35 @@ set_project_status() {
   item_id="$(jq -r --arg url "$url" '.items[] | select(.content.url == $url) | .id' <<<"$items" | head -n1)"
   [[ -n "$item_id" ]] || { echo "warning: project item for $url is not visible yet" >&2; return 0; }
   project_id="$(jq -r .project_id "$STATE_FILE")"
-  field_id="$(jq -r .workflow_status.field_id "$STATE_FILE")"
-  option_id="$(jq -r --arg status "$status" '.workflow_status.options[$status] // empty' "$STATE_FILE")"
-  [[ -n "$option_id" ]] || { echo "error: project has no Workflow Status option '$status'" >&2; return 1; }
+  canonical="$(canonical_project_status "$status")"
+  field_id="$(jq -r .project_status.field_id "$STATE_FILE")"
+  option_id="$(jq -r --arg status "$canonical" '.project_status.options[$status] // empty' "$STATE_FILE")"
+  [[ -n "$option_id" ]] || { echo "error: project has no canonical Status option '$canonical'" >&2; return 1; }
   project_gh project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" \
     --single-select-option-id "$option_id" >/dev/null 2>&1 ||
     echo "warning: project synchronization requires PROJECT_AUTOMATION_TOKEN" >&2
+}
+
+canonical_project_status() {
+  case "$1" in
+    Backlog|Ready) echo "Todo" ;;
+    "In Progress"|"In Review"|Verification) echo "In Progress" ;;
+    Done) echo "Done" ;;
+    *) echo "error: unsupported workflow status '$1'" >&2; return 1 ;;
+  esac
+}
+
+repair_project() {
+  local number items url label status
+  number="$(state_project_number)"
+  items="$(project_gh project item-list "$number" --owner "$OWNER" --format json --limit 500)"
+  while IFS=$'\t' read -r url label; do
+    [[ -n "$url" && -n "$label" ]] || continue
+    status="$(jq -r --arg label "$label" '.labels[$label] // empty' "$CONFIG")"
+    [[ -n "$status" ]] || continue
+    set_project_status "$url" "$status"
+  done < <(jq -r '.items[] | select(.content.type == "Issue") | .content.url as $url | (.labels // [])[] | select(startswith("flow:")) | [$url, .] | @tsv' <<<"$items")
+  echo "canonical project Status repaired from flow labels"
 }
 
 sync_issue() {
@@ -211,5 +232,6 @@ case "${1:-}" in
   sync-issue) sync_issue ;;
   sync-pr) sync_pr ;;
   verify-main) verify_main ;;
+  repair-project) repair_project ;;
   *) usage >&2; exit 2 ;;
 esac
