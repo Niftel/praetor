@@ -356,7 +356,7 @@ func TestStagingReleaseIsDigestPinnedAndSecretReferenced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(lockRaw), "platformVersion: 0.1.1") || !strings.Contains(string(lockRaw), "digest: sha256:") {
+	if !strings.Contains(string(lockRaw), "platformVersion: 0.1.2") || !strings.Contains(string(lockRaw), "digest: sha256:") {
 		t.Fatal("staging release lock must declare platform version and digests")
 	}
 }

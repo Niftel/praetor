@@ -1,8 +1,8 @@
 # Staging acceptance report
 
-Date: 2026-07-17  
-Parent: [#156](https://github.com/Niftel/praetor/issues/156)  
-Release: persistent `praetor-staging` environment
+Date: 2026-07-18
+Parent: [#167](https://github.com/Niftel/praetor/issues/167)
+Release: platform `0.1.2`, Helm revision 9 in persistent `praetor-staging`
 
 ## Scripted journeys
 
@@ -21,25 +21,26 @@ tokens, and are deliberately not committed.
 |---|---|---|
 | `demo-operator`, desktop | LDAP login; Engineering workflow and inventory visibility; host edit controls; DAG builder node selection; launch and relaunch with backend-team approval; credential fields remain sealed/write-only | Pass |
 | `mwebb`, desktop | Pending approval is visible only to an assigned backend-team member; approval completes the run and clears the notification | Pass |
-| `demo-auditor`, desktop | Read-only workflow, run, inventory, host, access, and audit visibility | Defect [#162](https://github.com/Niftel/praetor/issues/162): unauthorized mutation controls are rendered |
-| `demo-auditor`, 390 x 844 | Workflow and inventory pages remain readable and operable | Defect [#163](https://github.com/Niftel/praetor/issues/163): header/actions clip and resource names become unreadable |
+| `demo-auditor`, desktop (1280 x 720) | Read-only workflow, run, inventory, host, access, and audit visibility; no workflow or inventory mutation controls | Pass; verifies [#162](https://github.com/Niftel/praetor/issues/162) |
+| `demo-auditor`, 390 x 844 | Workflow and inventory pages remain readable and operable; inventory detail tabs remain accessible; no horizontal overflow | Pass; verifies [#163](https://github.com/Niftel/praetor/issues/163) |
 
-The API authorization tests continued to deny unauthorized mutations; #162 is
-a capability-aware UI defect, not evidence that the server-side RBAC boundary
-was bypassed. No secret value appeared in the application UI, notification
-sink logs, or sanitized evidence artifacts.
+The API authorization tests continue to deny unauthorized mutations, and the
+`0.1.2` UI now omits the corresponding auditor mutation controls. No secret
+value appeared in the application UI, notification sink logs, or sanitized
+evidence artifacts.
 
 ## Release-candidate decision
 
-**No-go.** The automated product journeys, staging health, and recovery
-journeys pass, but the immutable staging UI digest predates the merged fixes for
-[#162](https://github.com/Niftel/praetor/issues/162) and
-[#163](https://github.com/Niftel/praetor/issues/163). The fixed UI has therefore
-not completed staging acceptance at desktop and 390 x 844.
+**Go.** Platform `0.1.2` is deployed from eight immutable component digests.
+The automated product journeys, staging health, encrypted recovery evidence,
+and responsive UI acceptance all pass with no open release blocker. The live UI
+digest is
+`sha256:b0ce7d3d737c09e40bcea6c856d80ae45ccc15f231552049d6dc3a8deafef67d`.
 
 The machine-readable decision is
-[`release-candidate-decision.json`](release-candidate-decision.json). Promotion
-remains blocked until a new immutable platform version is published, deployed
-to staging, and the UI acceptance journey passes against that exact revision.
-That remediation is tracked by
-[#167](https://github.com/Niftel/praetor/issues/167).
+[`release-candidate-decision.json`](release-candidate-decision.json). It binds
+the GO decision to source revision
+`5dfb448eb855723778c8ddc9d815413dcf3fe58a`, the exact component digests, and
+the sanitized evidence hashes. This completes the release-candidate remediation
+tracked by [#167](https://github.com/Niftel/praetor/issues/167); production
+promotion remains outside this issue's scope.
