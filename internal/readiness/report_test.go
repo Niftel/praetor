@@ -9,8 +9,8 @@ const revision = "0123456789abcdef0123456789abcdef01234567"
 const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func validManifest() Manifest {
-	journeys := make([]JourneyEvidence, 0, len(requiredJourneys))
-	for _, name := range requiredJourneys {
+	journeys := make([]JourneyEvidence, 0, len(productJourneys))
+	for _, name := range productJourneys {
 		journeys = append(journeys, JourneyEvidence{Name: name, Result: "pass", EvidenceSHA256: digest})
 	}
 	return Manifest{
@@ -19,6 +19,24 @@ func validManifest() Manifest {
 		Revisions:     Revisions{Praetor: revision, SecretsService: revision, Fixture: revision},
 		Journeys:      journeys,
 		Findings:      []Finding{},
+	}
+}
+
+func TestStagingProfileFailsClosedWhenUIAcceptanceFails(t *testing.T) {
+	manifest := validManifest()
+	manifest.Profile = "staging-release-candidate"
+	manifest.Revisions.Components = map[string]string{"ui": "sha256:" + strings.Repeat("a", 64)}
+	manifest.Journeys = append(manifest.Journeys,
+		JourneyEvidence{Name: "staging-health", Result: "pass", EvidenceSHA256: strings.Repeat("b", 64)},
+		JourneyEvidence{Name: "staging-recovery", Result: "pass", EvidenceSHA256: strings.Repeat("c", 64)},
+		JourneyEvidence{Name: "ui-acceptance", Result: "fail", EvidenceSHA256: strings.Repeat("d", 64)},
+	)
+	report, err := Generate(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Decision.Status != "no-go" || !strings.Contains(strings.Join(report.Decision.Reasons, ","), "journey-failed:ui-acceptance") {
+		t.Fatalf("staging UI failure must block promotion: %+v", report.Decision)
 	}
 }
 

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "profile": "staging-release-candidate",
+  "generated_at": "2026-07-17T21:41:31Z",
+  "revisions": {
+    "praetor": "a67885395d856913580530ef5151480f1147c904",
+    "secrets_service": "9b2e2f325265933fc02329e62dc4e7b7064609bf",
+    "fixture": "a67885395d856913580530ef5151480f1147c904",
+    "components": {
+      "api": "sha256:16370e1ceb5fea5c8bec990070a572eca7f016e3e841ee011f5a539f9f23eb5c",
+      "consumer": "sha256:d91d79fd5982577160c880cd7e7ff9f6954102fa19e2528a2f27295d86959d86",
+      "executor": "sha256:d732a37a241f5389d5da94315783cfdc0aa0d0cad2155f279b15353a6426d9cf",
+      "ingestion": "sha256:966a45f5fabcbe653f835130a898dbfa7a4b1130a32004c309f94d5dd66bddbd",
+      "migrator": "sha256:d6695dfe7d69e2a191f5091c206c96ba86d5721ca556db7f669ceec355707861",
+      "reconciler": "sha256:6f926f3f8b9614b6ca78913334a120bbb650b50d3f4ec4f8c23bd77ab459d620",
+      "scheduler": "sha256:68b0d0fb8a7a879a4d68068eef1899f21b49ce3ecde9501a8012b9f16fe3f985",
+      "ui": "sha256:632b483283a81ceec937fddaca1dc78a11e9c08194d4b081c320781d77111fff"
+    }
+  },
+  "journeys": [
+    {"name":"delegated-api","result":"pass","evidence_sha256":"cde418bd373e9ff6d3484e6937b720cc565db62981f7521bba7af356670e759b"},
+    {"name":"execution-recovery","result":"pass","evidence_sha256":"10ccb7c831f241f7a5d4bbad0fc1d255c5006290e2e2d5fff8ee9aa4567e54ac"},
+    {"name":"ldap-operator","result":"pass","evidence_sha256":"1a82f610c7bef513b7bdf6faba5d8353c1f76d4a55829dd2a4a2bb0cd079f419"},
+    {"name":"secrets-service","result":"pass","evidence_sha256":"c1f510f7eb83931fc13646db70dcc612fe2661da6e76aa5ca7ed63b92f8fef97"},
+    {"name":"staging-health","result":"pass","evidence_sha256":"55620cfeb1bbf1c95393f483b121b9e56c73e680d0f9187b31f6dcdf9271eb05"},
+    {"name":"staging-recovery","result":"pass","evidence_sha256":"acaee143ffbecdb664f68298d69314b19a73decf4da67d6df5f3de3c0aee37a4"},
+    {"name":"ui-acceptance","result":"fail","evidence_sha256":"b0d0291777416de88b90e70e8bb42f2f9a4dd15c598343177f148decf25b4da1"}
+  ],
+  "findings": [
+    {"id":"RC-STAGING-FRESHNESS","category":"reliability","classification":"release-blocking","status":"open","issue":"https://github.com/Niftel/praetor/issues/167"}
+  ],
+  "decision": {
+    "status": "no-go",
+    "rationale": "Production-candidate promotion is blocked until every listed reason is resolved.",
+    "reasons": ["journey-failed:ui-acceptance", "open-release-blocker:RC-STAGING-FRESHNESS"]
+  }
+}

@@ -8,6 +8,8 @@ PRAETOR_REVISION="${PRAETOR_REVISION:-}"
 SECRETS_REVISION="${PRAETOR_SECRETS_REVISION:-}"
 FIXTURE_REVISION="${PRAETOR_FIXTURE_REVISION:-$PRAETOR_REVISION}"
 FINDINGS_FILE="${PRAETOR_READINESS_FINDINGS_FILE:-}"
+COMPONENTS_FILE="${PRAETOR_READINESS_COMPONENTS_FILE:-}"
+PROFILE="${PRAETOR_READINESS_PROFILE:-product-validation}"
 GENERATED_AT="${PRAETOR_READINESS_GENERATED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -15,6 +17,12 @@ for command in go jq shasum; do command -v "$command" >/dev/null || die "$comman
 [[ -n "$PRAETOR_REVISION" && -n "$SECRETS_REVISION" ]] || die "PRAETOR_REVISION and PRAETOR_SECRETS_REVISION are required"
 
 journeys=(ldap-operator secrets-service delegated-api execution-recovery)
+if [[ "$PROFILE" == staging-release-candidate ]]; then
+  journeys+=(staging-health staging-recovery ui-acceptance)
+  [[ -n "$COMPONENTS_FILE" ]] || die "PRAETOR_READINESS_COMPONENTS_FILE is required for the staging-release-candidate profile"
+elif [[ "$PROFILE" != product-validation ]]; then
+  die "unsupported readiness profile $PROFILE"
+fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/praetor-readiness.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 umask 077
@@ -43,16 +51,30 @@ else
   printf '[]\n' >"$work/findings.json"
 fi
 
+if [[ -n "$COMPONENTS_FILE" ]]; then
+  jq -e 'type == "object" and all(.[]; type == "string")' "$COMPONENTS_FILE" >/dev/null || die "components file must contain a JSON object"
+  cp "$COMPONENTS_FILE" "$work/components.json"
+else
+  printf '{}\n' >"$work/components.json"
+fi
+
 jq -n \
   --arg generated_at "$GENERATED_AT" \
+  --arg profile "$PROFILE" \
   --arg praetor "$PRAETOR_REVISION" \
   --arg secrets "$SECRETS_REVISION" \
   --arg fixture "$FIXTURE_REVISION" \
   --argjson journeys "$(cat "$work/journeys.json")" \
   --argjson findings "$(cat "$work/findings.json")" \
-  '{schema_version:1,generated_at:$generated_at,revisions:{praetor:$praetor,secrets_service:$secrets,fixture:$fixture},journeys:$journeys,findings:$findings}' \
+  --argjson components "$(cat "$work/components.json")" \
+  '{schema_version:1,profile:$profile,generated_at:$generated_at,revisions:{praetor:$praetor,secrets_service:$secrets,fixture:$fixture,components:$components},journeys:$journeys,findings:$findings}' \
   >"$work/manifest.json"
 
 mkdir -p "$(dirname "$OUTPUT")"
-go run "$ROOT/cmd/readiness-report" -input "$work/manifest.json" -output "$OUTPUT"
+go build -o "$work/readiness-report" "$ROOT/cmd/readiness-report"
+set +e
+"$work/readiness-report" -input "$work/manifest.json" -output "$OUTPUT"
+status=$?
+set -e
 echo "readiness report: $OUTPUT"
+exit "$status"

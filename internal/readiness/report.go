@@ -18,10 +18,13 @@ var (
 	digestPattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
-var requiredJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery"}
+var productJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery"}
+var stagingJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "staging-health", "staging-recovery", "ui-acceptance"}
+var stagingComponents = []string{"api", "consumer", "executor", "ingestion", "migrator", "reconciler", "scheduler", "ui"}
 
 type Manifest struct {
 	SchemaVersion int               `json:"schema_version"`
+	Profile       string            `json:"profile,omitempty"`
 	GeneratedAt   string            `json:"generated_at"`
 	Revisions     Revisions         `json:"revisions"`
 	Journeys      []JourneyEvidence `json:"journeys"`
@@ -29,9 +32,10 @@ type Manifest struct {
 }
 
 type Revisions struct {
-	Praetor        string `json:"praetor"`
-	SecretsService string `json:"secrets_service"`
-	Fixture        string `json:"fixture"`
+	Praetor        string            `json:"praetor"`
+	SecretsService string            `json:"secrets_service"`
+	Fixture        string            `json:"fixture"`
+	Components     map[string]string `json:"components,omitempty"`
 }
 
 type JourneyEvidence struct {
@@ -52,6 +56,7 @@ type Finding struct {
 
 type Report struct {
 	SchemaVersion int               `json:"schema_version"`
+	Profile       string            `json:"profile,omitempty"`
 	GeneratedAt   string            `json:"generated_at"`
 	Revisions     Revisions         `json:"revisions"`
 	Journeys      []JourneyEvidence `json:"journeys"`
@@ -95,8 +100,27 @@ func Generate(manifest Manifest) (Report, error) {
 		}
 	}
 
-	known := make(map[string]bool, len(requiredJourneys))
-	for _, name := range requiredJourneys {
+	requiredJourneys := productJourneys
+	switch manifest.Profile {
+	case "", "product-validation":
+	case "staging-release-candidate":
+		requiredJourneys = stagingJourneys
+		for _, name := range stagingComponents {
+			if _, ok := manifest.Revisions.Components[name]; !ok {
+				reasons = append(reasons, "missing-component-revision:"+name)
+			}
+		}
+	default:
+		return Report{}, fmt.Errorf("unsupported profile %q", manifest.Profile)
+	}
+	for name, digest := range manifest.Revisions.Components {
+		if name == "" || !digestPattern.MatchString(strings.TrimPrefix(digest, "sha256:")) {
+			reasons = append(reasons, "missing-or-invalid-component-revision:"+name)
+		}
+	}
+
+	known := make(map[string]bool, len(stagingJourneys))
+	for _, name := range stagingJourneys {
 		known[name] = true
 	}
 	seen := make(map[string]bool, len(manifest.Journeys))
@@ -166,7 +190,7 @@ func Generate(manifest Manifest) (Report, error) {
 		status = "no-go"
 		rationale = "Production-candidate promotion is blocked until every listed reason is resolved."
 	}
-	return Report{SchemaVersion: SchemaVersion, GeneratedAt: manifest.GeneratedAt, Revisions: manifest.Revisions, Journeys: journeys, Findings: findings, Decision: Decision{Status: status, Rationale: rationale, Reasons: reasons}}, nil
+	return Report{SchemaVersion: SchemaVersion, Profile: manifest.Profile, GeneratedAt: manifest.GeneratedAt, Revisions: manifest.Revisions, Journeys: journeys, Findings: findings, Decision: Decision{Status: status, Rationale: rationale, Reasons: reasons}}, nil
 }
 
 func scopedIssue(raw string) bool {
