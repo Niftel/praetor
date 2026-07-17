@@ -215,7 +215,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := string(fixtureRaw)
-	for _, required := range []string{"log_format notification '$request_body'", "return 204", "praetor-validation-notification-sink"} {
+	for _, required := range []string{"log_format notification escape=none '$request_body'", "rewrite ^ /capture break", "proxy_pass http://127.0.0.1:8080", "location = /capture { access_log off; return 204; }", "praetor-validation-notification-sink"} {
 		if !strings.Contains(fixture, required) {
 			t.Fatalf("notification recorder must contain %q", required)
 		}

@@ -83,10 +83,17 @@ metadata:
   labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
 data:
   default.conf: |
-    log_format notification '$request_body';
+    log_format notification escape=none '$request_body';
     access_log /dev/stdout notification;
     server {
       listen 8080;
       location = /healthz { access_log off; return 204; }
-      location / { return 204; }
+      # Proxying forces nginx to consume the request body before access_log
+      # evaluates $request_body. The internal endpoint is not logged, keeping
+      # exactly one JSON log record per notification delivery.
+      location / {
+        rewrite ^ /capture break;
+        proxy_pass http://127.0.0.1:8080;
+      }
+      location = /capture { access_log off; return 204; }
     }
