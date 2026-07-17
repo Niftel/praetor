@@ -97,7 +97,7 @@ spec:
         {{- if .Values.ldap.enabled }}
         - name: ldap-config
           configMap:
-            name: {{ include "praetor.fullname" . }}-ldap
+            name: {{ default (printf "%s-ldap" (include "praetor.fullname" .)) .Values.ldap.existingConfigMap | quote }}
         {{- end }}
         {{- if .Values.secretsService.enabled }}
         - name: secrets-service-identity

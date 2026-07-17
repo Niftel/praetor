@@ -145,6 +145,19 @@ local-cluster-update:
 local-cluster-release:
 	./scripts/deploy-local-release.sh
 
+.PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup
+validation-fixture-bootstrap:
+	./scripts/bootstrap-product-validation-base.sh
+
+validation-fixture-create:
+	./scripts/product-validation-fixture.sh create
+
+validation-fixture-status:
+	./scripts/product-validation-fixture.sh status
+
+validation-fixture-cleanup:
+	./scripts/product-validation-fixture.sh cleanup
+
 # Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
 # tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run
 # against a live/in-use database. Spins up a fresh postgres, migrates it, runs

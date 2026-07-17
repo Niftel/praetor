@@ -1,0 +1,92 @@
+name: Product validation fixture
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/product-validation-fixture.yml'
+      - 'deployments/product-validation/**'
+      - 'deployments/helm/praetor-v2/**'
+      - 'scripts/bootstrap-product-validation-base.sh'
+      - 'scripts/product-validation-fixture.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with: {version: v3.18.4}
+      - name: Install pinned k3d
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64 \
+            --output /usr/local/bin/k3d
+          chmod 0755 /usr/local/bin/k3d
+          test "$(k3d version | awk '/k3d version/ {print $3}')" = v5.8.3
+      - name: Check out Secrets Service
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/praetor-secrets
+          path: praetor-secrets
+      - name: Check out Scheduler
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/scheduler
+          path: scheduler
+      - name: Check out Executor
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/executor
+          path: executor
+      - name: Check out Ingestion
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/ingestion
+          path: ingestion
+      - name: Check out Consumer
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/consumer
+          path: consumer
+      - name: Check out Reconciler
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/reconciler
+          path: reconciler
+      - name: Create clean cluster and integrated base
+        env:
+          PRAETOR_SECRETS_ROOT: ${{ github.workspace }}/praetor-secrets
+          PRAETOR_SCHEDULER_ROOT: ${{ github.workspace }}/scheduler
+          PRAETOR_EXECUTOR_ROOT: ${{ github.workspace }}/executor
+          PRAETOR_INGESTION_ROOT: ${{ github.workspace }}/ingestion
+          PRAETOR_CONSUMER_ROOT: ${{ github.workspace }}/consumer
+          PRAETOR_RECONCILER_ROOT: ${{ github.workspace }}/reconciler
+          PRAETOR_K3D_CLUSTER: praetor-validation
+        run: |
+          k3d cluster create praetor-validation --wait
+          ./scripts/bootstrap-product-validation-base.sh
+      - name: Exercise complete fixture lifecycle
+        run: |
+          ./scripts/product-validation-fixture.sh create
+          ./scripts/product-validation-fixture.sh create
+          ./scripts/product-validation-fixture.sh cleanup
+          if ./scripts/product-validation-fixture.sh status; then
+            echo 'fixture status unexpectedly passed after cleanup' >&2
+            exit 1
+          fi
+          ./scripts/product-validation-fixture.sh create
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl get events -A --sort-by=.lastTimestamp | tail -n 100

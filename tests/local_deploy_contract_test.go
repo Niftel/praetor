@@ -113,6 +113,65 @@ func TestLocalClusterRequiresBrowserIngress(t *testing.T) {
 	}
 }
 
+func TestProductValidationFixtureIsScopedAndIdempotent(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "product-validation-fixture.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	for _, required := range []string{
+		`create|status|cleanup`,
+		`--dry-run=client -o yaml | kubectl apply -f -`,
+		`app.kubernetes.io/part-of=praetor-validation-fixture`,
+		`--reuse-values`,
+		`DELETE FROM workflow_templates WHERE name = 'Praetor Validation Workflow'`,
+		`persistent platform data and secrets were preserved`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("product validation fixture must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"delete namespace", "delete pvc", "helm uninstall"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("fixture cleanup must not contain %q", forbidden)
+		}
+	}
+}
+
+func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{
+		"scripts/bootstrap-product-validation-base.sh",
+		".github/workflows/product-validation-fixture.yml",
+		"deployments/product-validation/base-datastores.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("clean fixture gate is missing %s: %v", name, err)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "product-validation-fixture.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("clean fixture workflow must contain %q", required)
+		}
+	}
+	bootstrapRaw, err := os.ReadFile(filepath.Join(root, "scripts", "bootstrap-product-validation-base.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := string(bootstrapRaw)
+	for _, required := range []string{"docker build", "k3d image import", "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag"} {
+		if !strings.Contains(bootstrap, required) {
+			t.Fatalf("clean fixture bootstrap must contain %q", required)
+		}
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("..")
