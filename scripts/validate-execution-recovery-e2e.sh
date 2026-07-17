@@ -272,8 +272,9 @@ for pair in \
   jq -e --arg path "/api/v1/workflow-job-nodes/$approval_id/approve" '.[] | select(.username == "mwebb" and .path == $path and .status_code == 204)' <<<"$AUDIT" >/dev/null || die "approval audit evidence is missing for workflow $workflow_job_id"
 done
 
-RESOLUTION_COUNTS="$(kubectl exec -n "$NAMESPACE" deployment/praetor-validation-secrets-postgres -- sh -c \
-  'PGPASSWORD=validation-only psql -U postgres -d postgres -Atc "select run_id||'\''|'\''||resolution_count from run_bindings where run_id in ('\'''"$RECOVERABLE_RUN_ID"'\'','\'''"$LOST_RUN_ID"'\'','\'''"$RELAUNCH_RUN_ID"'\'') order by run_id"')"
+RESOLUTION_QUERY="select run_id||'|'||resolution_count from run_bindings where run_id in ('$RECOVERABLE_RUN_ID','$LOST_RUN_ID','$RELAUNCH_RUN_ID') order by run_id"
+RESOLUTION_COUNTS="$(kubectl exec -n "$NAMESPACE" deployment/praetor-validation-secrets-postgres -- \
+  env PGPASSWORD=validation-only psql -U postgres -d postgres -Atc "$RESOLUTION_QUERY")"
 RESOLUTION_ROWS="$(grep -c . <<<"$RESOLUTION_COUNTS" || true)"
 [[ "$RESOLUTION_ROWS" == 3 ]] || die "Secrets Service returned $RESOLUTION_ROWS run bindings, expected 3"
 while IFS='|' read -r run_id count; do

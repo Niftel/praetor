@@ -185,7 +185,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery := string(recoveryRaw)
-	for _, required := range []string{"RESUMED_FROM_CHECKPOINT", "recovery-side-effects.log", "deployment/praetor-ingestion --replicas=0", "state='reconciling'", "activity-stream?limit=500", "resolution_count", "notification_count", "PGPASSWORD=validation-only psql -U postgres -d postgres"} {
+	for _, required := range []string{"RESUMED_FROM_CHECKPOINT", "recovery-side-effects.log", "deployment/praetor-ingestion --replicas=0", "state='reconciling'", "activity-stream?limit=500", "resolution_count", "notification_count", "env PGPASSWORD=validation-only psql -U postgres -d postgres -Atc \"$RESOLUTION_QUERY\""} {
 		if !strings.Contains(recovery, required) {
 			t.Fatalf("execution recovery journey must contain %q", required)
 		}
