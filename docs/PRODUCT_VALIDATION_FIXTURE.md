@@ -32,3 +32,23 @@ visibility limited to the assigned team, rejection of cross-team and self
 approval, successful completion, and requester/approver attribution in the
 auditor-visible activity stream. Its final output is sanitized JSON containing
 only the workflow run ID, terminal status, and synthetic actor/team names.
+
+## Credential execution lifecycle
+
+With an architecture-matched Execution Pack in `build/runtime`, the live secrets
+gate exercises the deployed API, scheduler, executor, ingestion service, and
+Secrets Service rather than mocks:
+
+```sh
+make secrets-execution-e2e
+```
+
+It plants a random canary as a Machine credential password, verifies that
+Praetor stores only the Secrets Service reference and a masking placeholder,
+executes the playbook, and proves that the run resolves its credential exactly
+once. It then checks cross-team metadata denial, wrong-workload resolution,
+completed-run replay, explicit cancellation, expiry, and credential retirement.
+Finally, it scans captured API responses, activity and audit data, database
+dumps, terminal executor manifests, and workload logs for the canary. Evidence
+output contains IDs and terminal status only; it never contains credential
+material.

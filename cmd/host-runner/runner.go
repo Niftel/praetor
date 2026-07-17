@@ -77,7 +77,18 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 	if err := json.Unmarshal(manifestBytes, &req); err != nil {
 		return fmt.Errorf("failed to parse manifest: %w", err)
 	}
-
+	// The resolved credential and run token are needed for interruption recovery
+	// only while the run is non-terminal. Every normal exit below writes a terminal
+	// status, so remove plaintext from the durable manifest before returning. A
+	// failed scrub is logged and surfaced by the product security gate.
+	defer func() {
+		if !isTerminalStatus(r.JobDir) {
+			return
+		}
+		if err := scrubManifestSecrets(manifestPath); err != nil {
+			log.Printf("Warning: could not scrub terminal manifest secrets: %v", err)
+		}
+	}()
 	defer r.Wal.Close()
 
 	log.Printf("Executing run %s (Job %d)", req.ExecutionRunID, req.UnifiedJobID)
@@ -117,6 +128,12 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 			writeTerminal("failed", events.EventJobFailed, "Job failed during setup: "+err.Error())
 		}
 	}()
+	credentialFileEnv, cleanupCredentialFiles, err := materializeCredentialFiles(r.JobDir, req.JobManifest.CredentialFiles)
+	if err != nil {
+		return fmt.Errorf("prepare credential files: %w", err)
+	}
+	defer cleanupCredentialFiles()
+	log.Printf("credential injectors prepared: %d environment entries, %d private files", len(req.JobManifest.CredentialEnv), len(credentialFileEnv))
 
 	// Detect a resume up front: a usable checkpoint means a previous invocation
 	// was interrupted (commonly a host reboot) and we are continuing it. We reuse
@@ -235,13 +252,8 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 	// Privilege-escalation password (if the Machine credential carries one): the
 	// scheduler renders it into CredentialFiles; write it to a 0600 file and let
 	// ansible-playbook read it via --become-password-file (never on the cmdline).
-	if pw := req.JobManifest.CredentialFiles["ANSIBLE_BECOME_PASSWORD_FILE"]; pw != "" {
-		pwPath := filepath.Join(r.JobDir, "become_pass")
-		if err := os.WriteFile(pwPath, []byte(pw), 0o600); err == nil {
-			playArgs = append(playArgs, "--become-password-file", pwPath)
-		} else {
-			log.Printf("Warning: could not write become password file: %v", err)
-		}
+	if pwPath := credentialFileEnv["ANSIBLE_BECOME_PASSWORD_FILE"]; pwPath != "" {
+		playArgs = append(playArgs, "--become-password-file", pwPath)
 	}
 	playArgs = append(playArgs, playbookPath)
 
@@ -292,6 +304,9 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 			continue
 		}
 		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	for k, path := range credentialFileEnv {
+		cmd.Env = append(cmd.Env, k+"="+path)
 	}
 	// Turn on become whenever the credential specifies an escalation method (the
 	// injectors carry the method/user but not the on/off switch itself).
@@ -359,6 +374,96 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 	// a lost one. The runner returns once the playbook finishes; the deferred
 	// syncer/heartbeat shutdown in main.go then performs a final flush.
 	return err
+}
+
+func materializeCredentialFiles(jobDir string, values map[string]string) (map[string]string, func(), error) {
+	result := make(map[string]string, len(values))
+	directory := filepath.Join(jobDir, ".credentials")
+	cleanup := func() { _ = os.RemoveAll(directory) }
+	if len(values) == 0 {
+		return result, cleanup, nil
+	}
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return nil, cleanup, err
+	}
+	if err := os.Chmod(directory, 0o700); err != nil {
+		cleanup()
+		return nil, cleanup, err
+	}
+	index := 0
+	for name, content := range values {
+		if !validCredentialEnvironmentName(name) {
+			cleanup()
+			return nil, cleanup, fmt.Errorf("invalid credential environment name")
+		}
+		path := filepath.Join(directory, strconv.Itoa(index))
+		index++
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			cleanup()
+			return nil, cleanup, err
+		}
+		result[name] = path
+	}
+	return result, cleanup, nil
+}
+
+func validCredentialEnvironmentName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, char := range value {
+		if (char >= 'A' && char <= 'Z') || char == '_' || (i > 0 && char >= '0' && char <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func scrubManifestSecrets(manifestPath string) error {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	var req events.ExecutionRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return err
+	}
+	clear(req.JobManifest.CredentialEnv)
+	clear(req.JobManifest.CredentialFiles)
+	req.JobManifest.CredentialEnv = nil
+	req.JobManifest.CredentialFiles = nil
+	req.JobManifest.SSHPrivateKey = ""
+	req.JobManifest.IngestToken = ""
+	for i := range req.JobManifest.GalaxyServers {
+		req.JobManifest.GalaxyServers[i].Token = ""
+	}
+	sanitized, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(manifestPath), ".manifest-scrub-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(sanitized); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, manifestPath)
 }
 
 // fetchProject places the playbook project into destDir. It prefers an

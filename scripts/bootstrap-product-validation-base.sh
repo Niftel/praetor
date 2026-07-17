@@ -95,6 +95,7 @@ helm upgrade --install praetor "$CHART" -n "$NAMESPACE" \
   --set image.registry= \
   --set image.tag="$validation_tag" \
   --set ingress.enabled=false \
+  --set hostRunner.callbackUrl="http://praetor-ingestion:8081" \
   --set secretsService.enabled=true \
   --set secretsService.url="https://praetor-secrets.$NAMESPACE.svc:8443" \
   --set secretsService.trustDomain="$TRUST_DOMAIN" \
@@ -102,3 +103,26 @@ helm upgrade --install praetor "$CHART" -n "$NAMESPACE" \
   --set secretsService.schedulerIdentitySecret=praetor-scheduler-identity \
   --set secretsService.executorIdentitySecret=praetor-executor-identity \
   --wait --timeout 10m
+
+# The validation bootstrap intentionally rotates its generated workload
+# identities on every run. Those identities are supplied through externally
+# managed Secrets, so Helm cannot detect their content changes and would leave
+# existing pods using stale certificates. Restart every client after the
+# release is reconciled so repeated bootstraps remain deterministic.
+kubectl rollout restart \
+  deployment/praetor-api \
+  deployment/praetor-scheduler \
+  deployment/praetor-ingestion \
+  deployment/praetor-consumer \
+  deployment/praetor-reconciler \
+  statefulset/praetor-executor \
+  -n "$NAMESPACE"
+for workload in \
+  deployment/praetor-api \
+  deployment/praetor-scheduler \
+  deployment/praetor-ingestion \
+  deployment/praetor-consumer \
+  deployment/praetor-reconciler \
+  statefulset/praetor-executor; do
+  kubectl rollout status "$workload" -n "$NAMESPACE" --timeout=180s
+done

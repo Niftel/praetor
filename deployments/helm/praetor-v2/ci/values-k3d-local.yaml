@@ -121,7 +121,7 @@ ldap:
       insecure_skip_verify: true
       start_tls: false
       timeout: 30s
-      url: ldap://praetor-openldap:389
+      url: ldap://ldap:389
     team_map:
       backend-team:
         organization: Engineering
