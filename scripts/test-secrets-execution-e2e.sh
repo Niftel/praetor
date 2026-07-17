@@ -18,6 +18,8 @@ PROJECT_URL="${PRAETOR_E2E_PROJECT_URL:-https://github.com/Niftel/praetor.git}"
 PLAYBOOK="${PRAETOR_E2E_PLAYBOOK:-playbooks/validate-credential-injection.yml}"
 PROJECT_REF="${PRAETOR_E2E_PROJECT_REF:-${GITHUB_HEAD_REF:-}}"
 TIMEOUT_SECONDS="${PRAETOR_E2E_TIMEOUT_SECONDS:-180}"
+SECRETS_DB_SELECTOR="app=${PRAETOR_E2E_SECRETS_DB_APP:-praetor-secrets-postgres}"
+AUDIT_DB_SELECTOR="app=${PRAETOR_E2E_AUDIT_DB_APP:-praetor-audit-postgres}"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -30,26 +32,11 @@ for command in curl jq kubectl openssl; do
   need "$command"
 done
 
-EXECUTOR_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app.kubernetes.io/component=executor,app.kubernetes.io/instance=praetor \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
-PRAETOR_DB_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app.kubernetes.io/component=postgresql,app.kubernetes.io/instance=praetor \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
-SECRETS_DB_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app=praetor-secrets-postgres \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
-AUDIT_DB_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app=praetor-audit-postgres \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
+first_pod() { kubectl get pods -n "$NAMESPACE" -l "$1" -o name | head -n1 | cut -d/ -f2; }
+EXECUTOR_POD="$(first_pod 'app.kubernetes.io/component=executor,app.kubernetes.io/instance=praetor')"
+PRAETOR_DB_POD="$(first_pod 'app.kubernetes.io/component=postgresql,app.kubernetes.io/instance=praetor')"
+SECRETS_DB_POD="$(first_pod "$SECRETS_DB_SELECTOR")"
+AUDIT_DB_POD="$(first_pod "$AUDIT_DB_SELECTOR")"
 
 for value in "$EXECUTOR_POD" "$PRAETOR_DB_POD" "$SECRETS_DB_POD" "$AUDIT_DB_POD"; do
   if [[ -z "$value" ]]; then
@@ -313,7 +300,7 @@ BINDING=""
 while (( SECONDS < DEADLINE )); do
   BINDING="$(
     kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
-      'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+      'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -Atc \
        "select state||'\''|'\''||executor_identity||'\''|'\''||resolution_count from run_bindings where run_id='\''$1'\''"' \
       sh "$RUN_ID"
   )"
@@ -327,7 +314,7 @@ fi
 
 ATTEMPTS="$(
   kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
-    'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+    'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -Atc \
      "select count(*) from resolution_attempts where run_id='\''$1'\''"' \
     sh "$RUN_ID"
 )"
@@ -421,7 +408,7 @@ secrets_request executor POST "runs/$EXPIRED_RUN_ID/credential:resolve" \
   "$(jq -nc --arg attempt_id "$(uuid)" --arg requested_at "$(jq -nr 'now | todateiso8601')" '{attempt_id:$attempt_id,requested_at:$requested_at}')"
 assert_denied_without_secret 403 "expired binding resolution"
 EXPIRED_STATE="$(kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+  'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -Atc \
    "select state from run_bindings where run_id='\''$1'\''"' \
   sh "$EXPIRED_RUN_ID")"
 [[ "$EXPIRED_STATE" == expired ]] || { echo "error: expired binding remained in state '$EXPIRED_STATE'" >&2; exit 1; }
@@ -454,9 +441,9 @@ api_get 'activity-stream?limit=500' >"$WORK/praetor-activity.json"
 kubectl exec -n "$NAMESPACE" "$PRAETOR_DB_POD" -- \
   pg_dump -U postgres -d praetor --data-only >"$WORK/praetor-database.sql"
 kubectl exec -n "$NAMESPACE" "$SECRETS_DB_POD" -- sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --data-only' >"$WORK/secrets-database.sql"
+  'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" pg_dump -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" --data-only' >"$WORK/secrets-database.sql"
 kubectl exec -n "$NAMESPACE" "$AUDIT_DB_POD" -- sh -c \
-  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --data-only' >"$WORK/audit-database.sql"
+  'PGPASSWORD="${POSTGRES_PASSWORD:-validation-only}" pg_dump -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" --data-only' >"$WORK/audit-database.sql"
 while IFS= read -r pod; do
   kubectl logs -n "$NAMESPACE" "$pod" --all-containers=true >"$WORK/log-${pod#pod/}.txt" 2>/dev/null || true
 done < <(kubectl get pods -n "$NAMESPACE" -o name)

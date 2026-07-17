@@ -175,10 +175,13 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
+	}
+	for _, required := range []string{"PRAETOR_E2E_SECRETS_DB_APP: praetor-validation-secrets-postgres", "PRAETOR_E2E_AUDIT_DB_APP: praetor-validation-audit-postgres"} {
+		if !strings.Contains(workflow, required) { t.Fatalf("readiness workflow must contain %q", required) }
 	}
 	recoveryRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-execution-recovery-e2e.sh"))
 	if err != nil {

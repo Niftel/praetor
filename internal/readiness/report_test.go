@@ -30,6 +30,9 @@ func TestGenerateGoReport(t *testing.T) {
 	if report.Decision.Status != "go" || len(report.Decision.Reasons) != 0 {
 		t.Fatalf("unexpected decision: %+v", report.Decision)
 	}
+	if report.Findings == nil {
+		t.Fatal("empty findings must serialize as an array, not null")
+	}
 }
 
 func TestGenerateNoGoForFailedAndMissingEvidence(t *testing.T) {
