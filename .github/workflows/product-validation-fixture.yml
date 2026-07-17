@@ -66,6 +66,7 @@ jobs:
           repository: Niftel/reconciler
           path: reconciler
       - name: Create clean cluster and integrated base
+        timeout-minutes: 15
         env:
           PRAETOR_SECRETS_ROOT: ${{ github.workspace }}/praetor-secrets
           PRAETOR_SCHEDULER_ROOT: ${{ github.workspace }}/scheduler

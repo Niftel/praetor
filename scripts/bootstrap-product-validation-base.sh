@@ -43,6 +43,35 @@ k3d image import --cluster "$CLUSTER" \
   "praetor-ingestion:$validation_tag" \
   "praetor-consumer:$validation_tag" \
   "praetor-reconciler:$validation_tag"
+
+# Do not start Helm when an image import was incomplete. Without this check,
+# Kubernetes falls back to Docker Hub and the fixture wastes several minutes in
+# ImagePullBackOff before Helm eventually times out.
+validation_images=(
+  "$SECRETS_IMAGE"
+  "praetor-api:$validation_tag"
+  "praetor-migrator:$validation_tag"
+  "praetor-ui:$validation_tag"
+  "praetor-scheduler:$validation_tag"
+  "praetor-executor:$validation_tag"
+  "praetor-ingestion:$validation_tag"
+  "praetor-consumer:$validation_tag"
+  "praetor-reconciler:$validation_tag"
+)
+cluster_nodes=()
+while IFS= read -r node; do
+  cluster_nodes+=("$node")
+done < <(k3d node list --no-headers | awk -v cluster="k3d-$CLUSTER-" '$1 ~ "^" cluster {print $1}')
+(( ${#cluster_nodes[@]} > 0 )) || { echo "error: no nodes found for k3d cluster $CLUSTER" >&2; exit 1; }
+for node in "${cluster_nodes[@]}"; do
+  imported_images="$(docker exec "$node" ctr --namespace k8s.io images list --quiet)"
+  for image in "${validation_images[@]}"; do
+    if ! grep -Fxq "docker.io/library/$image" <<<"$imported_images" && ! grep -Fxq "$image" <<<"$imported_images"; then
+      echo "error: k3d image import did not load $image into $node" >&2
+      exit 1
+    fi
+  done
+done
 secrets_repository="${SECRETS_IMAGE%:*}"
 secrets_tag="${SECRETS_IMAGE##*:}"
 
