@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SECRETS_ROOT="${PRAETOR_SECRETS_ROOT:-$ROOT/../praetor-secrets}"
+SCHEDULER_ROOT="${PRAETOR_SCHEDULER_ROOT:-$ROOT/../scheduler}"
+EXECUTOR_ROOT="${PRAETOR_EXECUTOR_ROOT:-$ROOT/../executor}"
+INGESTION_ROOT="${PRAETOR_INGESTION_ROOT:-$ROOT/../ingestion}"
+CONSUMER_ROOT="${PRAETOR_CONSUMER_ROOT:-$ROOT/../consumer}"
+RECONCILER_ROOT="${PRAETOR_RECONCILER_ROOT:-$ROOT/../reconciler}"
 NAMESPACE="${PRAETOR_VALIDATION_NAMESPACE:-praetor-secrets}"
 TRUST_DOMAIN="${PRAETOR_VALIDATION_TRUST_DOMAIN:-praetor.local}"
 CLUSTER="${PRAETOR_K3D_CLUSTER:-praetor-validation}"
@@ -12,11 +17,32 @@ SECRETS_CHART="$SECRETS_ROOT/charts/praetor-secrets-stack"
 
 for command in docker go helm k3d kubectl; do command -v "$command" >/dev/null || { echo "error: $command is required" >&2; exit 1; }; done
 [[ -f "$SECRETS_ROOT/cmd/praetor-dev-bootstrap/main.go" ]] || { echo "error: praetor-secrets checkout not found at $SECRETS_ROOT" >&2; exit 1; }
+for component_root in "$SCHEDULER_ROOT" "$EXECUTOR_ROOT" "$INGESTION_ROOT" "$CONSUMER_ROOT" "$RECONCILER_ROOT"; do
+  [[ -f "$component_root/Dockerfile" ]] || { echo "error: component checkout with Dockerfile not found at $component_root" >&2; exit 1; }
+done
 [[ "$SECRETS_IMAGE" == *:* && "$SECRETS_IMAGE" != *@* ]] || { echo "error: PRAETOR_VALIDATION_SECRETS_IMAGE must be a tagged image name" >&2; exit 1; }
 kubectl get --raw=/readyz >/dev/null
 
 docker build --tag "$SECRETS_IMAGE" "$SECRETS_ROOT"
-k3d image import --cluster "$CLUSTER" "$SECRETS_IMAGE"
+validation_tag="validation"
+docker build --file "$ROOT/build/package/Dockerfile.api" --tag "praetor-api:$validation_tag" "$ROOT"
+docker build --file "$ROOT/build/package/Dockerfile.migrator" --tag "praetor-migrator:$validation_tag" "$ROOT"
+docker build --tag "praetor-ui:$validation_tag" "$ROOT/web"
+docker build --tag "praetor-scheduler:$validation_tag" "$SCHEDULER_ROOT"
+docker build --tag "praetor-executor:$validation_tag" "$EXECUTOR_ROOT"
+docker build --tag "praetor-ingestion:$validation_tag" "$INGESTION_ROOT"
+docker build --tag "praetor-consumer:$validation_tag" "$CONSUMER_ROOT"
+docker build --tag "praetor-reconciler:$validation_tag" "$RECONCILER_ROOT"
+k3d image import --cluster "$CLUSTER" \
+  "$SECRETS_IMAGE" \
+  "praetor-api:$validation_tag" \
+  "praetor-migrator:$validation_tag" \
+  "praetor-ui:$validation_tag" \
+  "praetor-scheduler:$validation_tag" \
+  "praetor-executor:$validation_tag" \
+  "praetor-ingestion:$validation_tag" \
+  "praetor-consumer:$validation_tag" \
+  "praetor-reconciler:$validation_tag"
 secrets_repository="${SECRETS_IMAGE%:*}"
 secrets_tag="${SECRETS_IMAGE##*:}"
 
@@ -66,6 +92,8 @@ release_values="$work/release-values.yaml"
 (cd "$ROOT" && go run ./cmd/compatcheck -output helm-values) >"$release_values"
 helm upgrade --install praetor "$CHART" -n "$NAMESPACE" \
   -f "$ROOT/deployments/helm/praetor-v2/ci/values-k3d-local.yaml" -f "$release_values" \
+  --set image.registry= \
+  --set image.tag="$validation_tag" \
   --set ingress.enabled=false \
   --set secretsService.enabled=true \
   --set secretsService.url="https://praetor-secrets.$NAMESPACE.svc:8443" \

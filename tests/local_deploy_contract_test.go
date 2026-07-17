@@ -165,7 +165,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrap := string(bootstrapRaw)
-	for _, required := range []string{"docker build", "k3d image import", "praetor-secrets:validation", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository"} {
+	for _, required := range []string{"docker build", "k3d image import", "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag"} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap must contain %q", required)
 		}
