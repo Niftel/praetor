@@ -90,7 +90,7 @@ helm upgrade --install praetor-secrets-stack "$SECRETS_CHART" -n "$NAMESPACE" \
 
 release_values="$work/release-values.yaml"
 (cd "$ROOT" && go run ./cmd/compatcheck -output helm-values) >"$release_values"
-helm upgrade --install praetor "$CHART" -n "$NAMESPACE" \
+praetor_helm_args=(
   -f "$ROOT/deployments/helm/praetor-v2/ci/values-k3d-local.yaml" -f "$release_values" \
   --set image.registry= \
   --set image.tag="$validation_tag" \
@@ -101,7 +101,11 @@ helm upgrade --install praetor "$CHART" -n "$NAMESPACE" \
   --set secretsService.trustDomain="$TRUST_DOMAIN" \
   --set secretsService.apiIdentitySecret=praetor-api-identity \
   --set secretsService.schedulerIdentitySecret=praetor-scheduler-identity \
-  --set secretsService.executorIdentitySecret=praetor-executor-identity \
+  --set secretsService.executorIdentitySecret=praetor-executor-identity
+)
+"$ROOT/scripts/helm-statefulset-preflight.sh" praetor "$NAMESPACE" "$CHART" "${praetor_helm_args[@]}"
+helm upgrade --install praetor "$CHART" -n "$NAMESPACE" \
+  "${praetor_helm_args[@]}" \
   --wait --timeout 10m
 
 # The validation bootstrap intentionally rotates its generated workload

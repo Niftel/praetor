@@ -65,6 +65,9 @@ k3d image import -c "$CLUSTER" \
   "praetor-scheduler:$TAG"
 
 echo "==> Upgrading Helm release '$RELEASE' in namespace '$NAMESPACE'"
+"$ROOT/scripts/helm-statefulset-preflight.sh" "$RELEASE" "$NAMESPACE" "$CHART" \
+  -f "$VALUES" \
+  --set-string image.tag="$TAG"
 helm upgrade --install "$RELEASE" "$CHART" \
   -f "$VALUES" \
   --set-string image.tag="$TAG" \
