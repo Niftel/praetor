@@ -37,6 +37,25 @@ func TestDevelopmentFlowIssueValidation(t *testing.T) {
 	}
 }
 
+func TestDevelopmentFlowReportsUnlinkedHumanPullRequest(t *testing.T) {
+	root := repositoryRoot(t)
+	event := filepath.Join(t.TempDir(), "event.json")
+	body := `{"action":"opened","pull_request":{"body":"No closing reference","merged":false}}`
+	if err := os.WriteFile(event, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "scripts/development-flow.sh", "sync-pr")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "EVENT_PATH="+event)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("unlinked human pull request was accepted")
+	}
+	if !strings.Contains(string(output), "PR must use Closes/Fixes/Resolves #issue") {
+		t.Fatalf("missing explicit link error; output:\n%s", output)
+	}
+}
+
 func TestDevelopmentFlowIsRepositoryDriven(t *testing.T) {
 	root := repositoryRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "scripts", "development-flow.sh"))
