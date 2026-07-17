@@ -12,6 +12,7 @@ This directory contains the core documentation for the Praetor backend.
 - [RBAC](RBAC.md) - Persisted grants, the RBAC v4 decision engine, and API enforcement boundaries.
 - [Delegated API users](DELEGATED_API_USERS.md) - Bounded service principals for application-triggered workflow launches.
 - [Production-candidate readiness](PRODUCTION_CANDIDATE_READINESS.md) - Sanitized, fail-closed readiness evidence and decision reports.
+- [Persistent staging environment](../deployments/staging/README.md) - Isolated, durable release-candidate infrastructure and prerequisite health checks.
 - [Chaos Testing](chaos-testing.md) - Repeatable PostgreSQL-outage and JetStream-restart resilience checks.
 - [Architecture](architecture.md) - Kubernetes-native design, data models, and component diagrams.
 - [REST API v1](praetor_rest_api_v1_full.md) - Detailed API reference for the Control Plane and Execution Plane.

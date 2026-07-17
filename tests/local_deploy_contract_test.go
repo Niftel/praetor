@@ -181,7 +181,9 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		}
 	}
 	for _, required := range []string{"PRAETOR_E2E_SECRETS_DB_APP: praetor-validation-secrets-postgres", "PRAETOR_E2E_AUDIT_DB_APP: praetor-validation-audit-postgres"} {
-		if !strings.Contains(workflow, required) { t.Fatalf("readiness workflow must contain %q", required) }
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("readiness workflow must contain %q", required)
+		}
 	}
 	recoveryRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-execution-recovery-e2e.sh"))
 	if err != nil {
@@ -221,6 +223,94 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 	for _, required := range []string{"log_format notification escape=none '$request_body'", "rewrite ^ /capture break", "proxy_pass http://127.0.0.1:8080", "location = /capture { access_log off; return 204; }", "praetor-validation-notification-sink"} {
 		if !strings.Contains(fixture, required) {
 			t.Fatalf("notification recorder must contain %q", required)
+		}
+	}
+}
+
+func TestPersistentStagingEnvironmentIsIsolatedAndIdempotent(t *testing.T) {
+	root := repositoryRoot(t)
+	scriptRaw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-environment.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptRaw)
+	for _, required := range []string{
+		`plan|provision|status`,
+		`praetor-staging`,
+		`PRAETOR_STAGING_DATA_ROOT`,
+		`install -d -m 0700`,
+		`if cluster_exists; then`,
+		`preserving it`,
+		`/var/lib/rancher/k3s/storage@server:0`,
+		`/var/lib/rancher/k3s/storage@agent:*`,
+		`assert_storage_mounts`,
+		`--port "$HTTP_PORT:80@loadbalancer"`,
+		`--port "$HTTPS_PORT:443@loadbalancer"`,
+		`get --raw=/readyz`,
+		`wait --for=create deployment/traefik`,
+		`rollout status deployment/traefik`,
+		`wait --for=create storageclass/local-path`,
+		`get storageclass local-path`,
+		`storage_probe`,
+		`persistentVolumeClaim:`,
+		`exec "$probe" -- test -s /probe/health`,
+		`runAsNonRoot: true`,
+		`allowPrivilegeEscalation: false`,
+		`drop: [ALL]`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("persistent staging script must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"k3d cluster delete", "kubectl delete namespace", "rm -rf"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("persistent staging automation must not contain %q", forbidden)
+		}
+	}
+
+	cmd := exec.Command("bash", "scripts/staging-environment.sh", "plan")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("staging dry-run plan failed: %v\n%s", err, output)
+	}
+	for _, expected := range []string{"Persistent Praetor staging plan", "praetor-staging", "8080:80@loadbalancer", "8443:443@loadbalancer"} {
+		if !bytes.Contains(output, []byte(expected)) {
+			t.Errorf("staging plan is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestPersistentStagingNamespaceHasCapacityAndSecurityPolicy(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "deployments", "staging", "namespace.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(raw)
+	for _, required := range []string{
+		"name: praetor-staging",
+		"app.kubernetes.io/environment: staging",
+		"pod-security.kubernetes.io/enforce: baseline",
+		"kind: ResourceQuota",
+		"requests.storage: 100Gi",
+		"persistentvolumeclaims: \"16\"",
+		"kind: LimitRange",
+	} {
+		if !strings.Contains(manifest, required) {
+			t.Fatalf("persistent staging namespace policy must contain %q", required)
+		}
+	}
+
+	readmeRaw, err := os.ReadFile(filepath.Join(root, "deployments", "staging", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := string(readmeRaw)
+	for _, required := range []string{"Topology and trust boundaries", "not a production high-availability", "There is intentionally no staging teardown target"} {
+		if !strings.Contains(readme, required) {
+			t.Fatalf("persistent staging runbook must contain %q", required)
 		}
 	}
 }
