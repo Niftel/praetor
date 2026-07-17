@@ -75,7 +75,8 @@ executor_pod() {
 notification_count() {
   local workflow_job_id="$1" event="$2"
   kubectl logs -n "$NAMESPACE" deployment/praetor-validation-notification-sink --since=30m 2>/dev/null |
-    grep -F "\"job_id\":$workflow_job_id" | grep -F "\"event\":\"$event\"" | wc -l | tr -d ' '
+    awk -v job="\"job_id\":$workflow_job_id" -v event="\"event\":\"$event\"" \
+      'index($0, job) && index($0, event) { count++ } END { print count + 0 }'
 }
 wait_notification_count() {
   local workflow_job_id="$1" event="$2" expected="$3" deadline=$((SECONDS + 60)) count=0
@@ -85,6 +86,7 @@ wait_notification_count() {
     (( count > expected )) && die "notification $event for workflow $workflow_job_id was delivered $count times"
     sleep 1
   done
+  kubectl logs -n "$NAMESPACE" deployment/praetor-validation-notification-sink --since=30m --tail=100 >&2 || true
   die "notification $event for workflow $workflow_job_id was delivered $count times, expected $expected"
 }
 
