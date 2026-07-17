@@ -75,6 +75,21 @@ func TestDevelopmentFlowSeparatesRepositoryAndProjectTokens(t *testing.T) {
 	}
 }
 
+func TestDevelopmentFlowSkipsDependabotPullRequestsByAuthor(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "development-flow.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	if !strings.Contains(workflow, "github.event.pull_request.user.login != 'dependabot[bot]'") {
+		t.Fatal("Dependabot exclusion must use pull request author, not event actor")
+	}
+	if strings.Contains(workflow, "github.actor != 'dependabot[bot]'") {
+		t.Fatal("event actor changes when a maintainer updates a Dependabot branch")
+	}
+}
+
 func workflowContains(t *testing.T, root, value string) bool {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "development-flow.yml"))
