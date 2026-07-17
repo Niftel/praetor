@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      repair_project:
+        description: Reconcile canonical project Status from flow labels
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -70,3 +75,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PROJECT_GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
         run: ./scripts/development-flow.sh bootstrap
+
+  repair-project:
+    if: github.event_name == 'workflow_dispatch' && inputs.repair_project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Repair canonical project status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+        run: ./scripts/development-flow.sh repair-project

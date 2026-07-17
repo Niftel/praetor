@@ -35,6 +35,20 @@ GH_TOKEN=... PROJECT_GH_TOKEN=... ./scripts/development-flow.sh bootstrap
 Configuration lives in `.github/development-flow.json`. Do not hard-code project
 IDs in workflows or documentation.
 
+The six-stage lifecycle remains authoritative in `flow:*` issue labels. The
+generated board uses GitHub's canonical three-state **Status** field:
+
+- `Backlog` and `Ready` map to `Todo`;
+- `In Progress`, `In Review`, and `Verification` map to `In Progress`;
+- `Done` maps to `Done`.
+
+Do not create a second project status field. After changing lifecycle automation
+or importing older items, reconcile the board from issue labels:
+
+```sh
+GH_TOKEN=... PROJECT_GH_TOKEN=... ./scripts/development-flow.sh repair-project
+```
+
 ## Local validation
 
 ```sh

@@ -64,8 +64,10 @@ func TestDevelopmentFlowIsRepositoryDriven(t *testing.T) {
 	}
 	script := string(raw)
 	for _, required := range []string{
-		"bootstrap|validate-issue|sync-issue|sync-pr|verify-main",
-		"Workflow Status",
+		"bootstrap|validate-issue|sync-issue|sync-pr|verify-main|repair-project",
+		`select(.name == "Status")`,
+		"canonical_project_status",
+		"repair_project",
 		"set_project_status",
 		"PROJECT_AUTOMATION_TOKEN",
 		"PROJECT_GH_TOKEN",
@@ -75,6 +77,27 @@ func TestDevelopmentFlowIsRepositoryDriven(t *testing.T) {
 			!workflowContains(t, root, required) {
 			t.Fatalf("development pipeline must contain %q", required)
 		}
+	}
+	if strings.Contains(script, `--name "Workflow Status"`) ||
+		strings.Contains(script, ".workflow_status") {
+		t.Fatal("development pipeline must not create or update a duplicate workflow status field")
+	}
+}
+
+func TestDevelopmentFlowStateUsesCanonicalProjectStatus(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "development-flow-state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := string(raw)
+	for _, required := range []string{`"project_status"`, `"Todo"`, `"In Progress"`, `"Done"`} {
+		if !strings.Contains(state, required) {
+			t.Fatalf("canonical project state must contain %s", required)
+		}
+	}
+	if strings.Contains(state, `"workflow_status"`) || strings.Contains(state, `"Verification"`) {
+		t.Fatal("generated state must not retain the duplicate six-stage status field")
 	}
 }
 
@@ -91,6 +114,24 @@ func TestDevelopmentFlowSeparatesRepositoryAndProjectTokens(t *testing.T) {
 	if strings.Contains(script, `GH_TOKEN="$PROJECT_GH_TOKEN" gh label`) ||
 		strings.Contains(script, `GH_TOKEN="$PROJECT_GH_TOKEN" gh issue`) {
 		t.Fatal("repository labels and issues must not use the organization project token")
+	}
+}
+
+func TestDevelopmentFlowExposesCanonicalStatusRepair(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "development-flow.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{
+		"repair_project:",
+		"./scripts/development-flow.sh repair-project",
+		"PROJECT_GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("development workflow must contain %q", required)
+		}
 	}
 }
 
