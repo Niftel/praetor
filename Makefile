@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -157,6 +157,17 @@ local-cluster-update:
 # Deploy the exact image set declared by platform-compatibility.yaml.
 local-cluster-release:
 	./scripts/deploy-local-release.sh
+
+# Persistent release-candidate staging prerequisites. This is intentionally
+# isolated from the mutable local cluster and disposable validation fixture.
+staging-environment-plan:
+	./scripts/staging-environment.sh plan
+
+staging-environment-provision:
+	./scripts/staging-environment.sh provision
+
+staging-environment-status:
+	./scripts/staging-environment.sh status
 
 .PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
 validation-fixture-bootstrap:
