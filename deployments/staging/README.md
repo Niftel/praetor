@@ -150,3 +150,44 @@ organization and `backend-team`; `demo-auditor` maps to the Engineering auditor
 role. The bind password remains in `praetor-staging-runtime`, and the committed
 LDAP configuration requires `ldaps://`, a mounted CA bundle, and
 `insecure_skip_verify: false`.
+
+## Upgrade, backup, and isolated restore
+
+Recovery automation is deliberately separate from routine deployment. It backs
+up the three PostgreSQL databases, LDAP directory, NATS JetStream store, and
+executor jobs/packs/SSH state. The resulting archive is CMS EnvelopedData
+encrypted for a local recovery certificate using AES-256-CBC. Plaintext exists
+only in a mode-0700 temporary directory and is removed on command exit; the
+recipient private key is never included in the archive or a workflow artifact.
+
+Initialize the recovery recipient once and protect its private key separately:
+
+```sh
+make staging-recovery-init
+make staging-recovery-plan
+make staging-recovery-backup
+```
+
+Verify and restore an archive by explicit path:
+
+```sh
+make staging-recovery-verify ARCHIVE="$HOME/.local/share/praetor/staging/recovery/backups/<archive>.cms"
+make staging-recovery-restore ARCHIVE="$HOME/.local/share/praetor/staging/recovery/backups/<archive>.cms"
+```
+
+Restore runs in `praetor-staging-restore`, compares tenant/RBAC/inventory/
+workflow/credential counts with the signed-in-archive integrity manifest, and
+starts an isolated Praetor release against the restored database and NATS.
+It never deletes the source namespace, PVCs, or cluster. The restore namespace
+is retained for inspection; removing it is a separate operator decision.
+Successful restore and rollback journeys record their elapsed recovery time,
+exact Helm boundary, archive digest, and integrity results as mode-0600 JSON
+below `~/.local/share/praetor/staging/recovery/evidence/`. These evidence files
+contain no database contents, credentials, tokens, certificate material, or
+private keys.
+
+`make staging-recovery-exercise` rolls back only to the latest prior successful
+Helm revision and then deploys the current immutable lock again. This is a chart
+rollback boundary, not permission to reverse arbitrary database migrations.
+The executable database compatibility matrix remains authoritative for schema
+rollback support.

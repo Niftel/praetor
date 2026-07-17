@@ -192,6 +192,27 @@ staging-integrations-status:
 staging-integrations-verify:
 	./scripts/staging-integrations.sh verify
 
+.PHONY: staging-recovery-plan staging-recovery-init staging-recovery-backup staging-recovery-verify staging-recovery-restore staging-recovery-exercise
+staging-recovery-plan:
+	./scripts/staging-recovery.sh plan
+
+staging-recovery-init:
+	./scripts/staging-recovery.sh init-recipient
+
+staging-recovery-backup:
+	./scripts/staging-recovery.sh backup
+
+staging-recovery-verify:
+	@test -n "$(ARCHIVE)" || { echo "ARCHIVE is required" >&2; exit 2; }
+	./scripts/staging-recovery.sh verify "$(ARCHIVE)"
+
+staging-recovery-restore:
+	@test -n "$(ARCHIVE)" || { echo "ARCHIVE is required" >&2; exit 2; }
+	./scripts/staging-recovery.sh restore "$(ARCHIVE)"
+
+staging-recovery-exercise:
+	./scripts/staging-recovery.sh exercise
+
 .PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
 validation-fixture-bootstrap:
 	./scripts/bootstrap-product-validation-base.sh
