@@ -315,6 +315,44 @@ func TestPersistentStagingNamespaceHasCapacityAndSecurityPolicy(t *testing.T) {
 	}
 }
 
+func TestStagingReleaseIsDigestPinnedAndSecretReferenced(t *testing.T) {
+	root := repositoryRoot(t)
+	scriptRaw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-release.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptRaw)
+	for _, required := range []string{
+		"docker buildx imagetools inspect",
+		"does not publish linux/$target_arch required by staging",
+		"every rendered staging workload image must be digest-pinned",
+		"--rollback-on-failure --wait",
+		"praetor-staging-runtime",
+		"praetor-staging-registry",
+		"revision-$revision.json",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("staging release script must contain %q", required)
+		}
+	}
+	valuesRaw, err := os.ReadFile(filepath.Join(root, "deployments", "staging", "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"secretKey:", "jwtSecret:", "internalToken:"} {
+		if strings.Contains(string(valuesRaw), forbidden) {
+			t.Fatalf("staging values must not contain secret material field %q", forbidden)
+		}
+	}
+	lockRaw, err := os.ReadFile(filepath.Join(root, "deployments", "staging", "release-lock.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(lockRaw), "platformVersion: 0.1.1") || !strings.Contains(string(lockRaw), "digest: sha256:") {
+		t.Fatal("staging release lock must declare platform version and digests")
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("..")

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMMAND="${1:-}"
+CLUSTER="praetor-staging"
+CONTEXT="k3d-$CLUSTER"
+NAMESPACE="praetor-staging"
+RELEASE="praetor-staging"
+CHART="$ROOT/deployments/helm/praetor-v2"
+STAGING_VALUES="$ROOT/deployments/staging/values.yaml"
+LOCK="$ROOT/deployments/staging/release-lock.yaml"
+SECRET_NAME="praetor-staging-runtime"
+REGISTRY_SECRET_NAME="praetor-staging-registry"
+DATA_ROOT="${PRAETOR_STAGING_DATA_ROOT:-$HOME/.local/share/praetor/staging}"
+export GOCACHE="${PRAETOR_STAGING_CACHE:-${TMPDIR:-/tmp}/praetor-staging-release/go-build}"
+
+usage() {
+  echo "usage: $0 <plan|deploy|status>" >&2
+  exit 2
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || { echo "error: required command '$1' is not installed" >&2; exit 1; }
+}
+
+for command in go helm kubectl jq docker; do need "$command"; done
+[[ "$COMMAND" =~ ^(plan|deploy|status)$ ]] || usage
+
+generated="$(mktemp "${TMPDIR:-/tmp}/praetor-staging-values.yaml.XXXXXX")"
+rendered="$(mktemp "${TMPDIR:-/tmp}/praetor-staging-rendered.yaml.XXXXXX")"
+cleanup() {
+  local status=$?
+  trap - EXIT
+  rm -f "$generated" "$rendered"
+  exit "$status"
+}
+trap cleanup EXIT
+
+cd "$ROOT"
+go run ./cmd/compatcheck >/dev/null
+go run ./cmd/stagingrelease -lock "$LOCK" -output helm-values >"$generated"
+go run ./cmd/stagingrelease -lock "$LOCK"
+
+echo "==> Verifying locked registry manifests"
+target_arch="${PRAETOR_STAGING_ARCH:-$(kubectl --context "$CONTEXT" get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}' 2>/dev/null || true)}"
+[[ -n "$target_arch" ]] || {
+  echo "error: cannot determine staging architecture; set PRAETOR_STAGING_ARCH" >&2
+  exit 1
+}
+while IFS=@ read -r tagged digest; do
+  manifest="$(docker buildx imagetools inspect "$tagged" --format '{{json .Manifest}}')"
+  remote="$(jq -r '.digest // .Digest' <<<"$manifest")"
+  [[ "$remote" == "$digest" ]] || {
+    echo "error: $tagged resolved to $remote, lock requires $digest" >&2
+    exit 1
+  }
+  platforms="$(jq -r '(.manifests // .Manifests)[] | (.platform.os // .Platform.OS) + "/" + (.platform.architecture // .Platform.Architecture)' <<<"$manifest")"
+  grep -Fxq "linux/$target_arch" <<<"$platforms" || {
+    echo "error: $tagged does not publish linux/$target_arch required by staging" >&2
+    exit 1
+  }
+done < <(go run ./cmd/stagingrelease -lock "$LOCK" -output artifacts)
+
+helm lint "$CHART" -f "$STAGING_VALUES" -f "$generated" >/dev/null
+helm template "$RELEASE" "$CHART" -n "$NAMESPACE" \
+  -f "$STAGING_VALUES" -f "$generated" >"$rendered"
+
+if grep -Eq '^[[:space:]]*image:[[:space:]]+[^@[:space:]]+:(latest|dev|main|master)([[:space:]]|$)' "$rendered"; then
+  echo "error: rendered staging release contains a floating image" >&2
+  grep -En '^[[:space:]]*image:[[:space:]]+[^@[:space:]]+:(latest|dev|main|master)([[:space:]]|$)' "$rendered" >&2
+  exit 1
+fi
+if grep -E '^[[:space:]]*image:' "$rendered" | grep -vq '@sha256:'; then
+  echo "error: every rendered staging workload image must be digest-pinned" >&2
+  grep -E '^[[:space:]]*image:' "$rendered" | grep -v '@sha256:' >&2
+  exit 1
+fi
+
+if [[ "$COMMAND" == plan ]]; then
+  echo "Staging release plan passed: lock, remote manifests, chart schema, and rendered digests agree."
+  exit 0
+fi
+
+"$ROOT/scripts/staging-environment.sh" status >/dev/null
+kubectl --context "$CONTEXT" get secret "$SECRET_NAME" -n "$NAMESPACE" >/dev/null 2>&1 || {
+  echo "error: required Secret $NAMESPACE/$SECRET_NAME does not exist" >&2
+  echo "Create it outside Git; deployment accepts secret references only." >&2
+  exit 1
+}
+kubectl --context "$CONTEXT" get secret "$REGISTRY_SECRET_NAME" -n "$NAMESPACE" \
+  -o json | jq -e '.type == "kubernetes.io/dockerconfigjson" and (.data | has(".dockerconfigjson"))' >/dev/null || {
+    echo "error: required read-only registry Secret $NAMESPACE/$REGISTRY_SECRET_NAME is missing or invalid" >&2
+    exit 1
+  }
+for key in DATABASE_URL PRAETOR_SECRET_KEY PRAETOR_SECRET_KEY_OLD JWT_SECRET PRAETOR_INTERNAL_TOKEN PRAETOR_LDAP_BIND_PASSWORD; do
+  kubectl --context "$CONTEXT" get secret "$SECRET_NAME" -n "$NAMESPACE" -o json |
+    jq -e --arg key "$key" '.data | has($key)' >/dev/null || {
+      echo "error: Secret $NAMESPACE/$SECRET_NAME is missing key $key" >&2
+      exit 1
+    }
+done
+
+if [[ "$COMMAND" == deploy ]]; then
+  echo "==> Applying immutable platform release"
+  helm upgrade --install "$RELEASE" "$CHART" \
+    --kube-context "$CONTEXT" --namespace "$NAMESPACE" \
+    -f "$STAGING_VALUES" -f "$generated" \
+    --rollback-on-failure --wait --timeout 15m
+fi
+
+echo "==> Verifying deployed revisions"
+expected="$(go run ./cmd/stagingrelease -lock "$LOCK" -output images | sort)"
+actual="$(kubectl --context "$CONTEXT" get deployments,statefulsets,jobs -n "$NAMESPACE" \
+  -l "app.kubernetes.io/instance=$RELEASE" -o json |
+  jq -r '.items[].spec.template.spec | ((.initContainers // []) + (.containers // []))[]?.image' | sort -u)"
+while IFS= read -r image; do
+  grep -Fxq "$image" <<<"$actual" || { echo "error: expected deployed image is absent: $image" >&2; exit 1; }
+done <<<"$expected"
+
+platform_version="$(go run ./cmd/stagingrelease -lock "$LOCK" -output summary | awk '{print $3}' | tr -d ':')"
+revision="$(helm status "$RELEASE" --kube-context "$CONTEXT" -n "$NAMESPACE" -o json | jq -r .version)"
+evidence_dir="$DATA_ROOT/evidence/$platform_version"
+mkdir -p "$evidence_dir"
+chmod 700 "$DATA_ROOT" "$DATA_ROOT/evidence" "$evidence_dir" 2>/dev/null || true
+evidence="$evidence_dir/revision-$revision.json"
+jq -n --arg platformVersion "$platform_version" --arg release "$RELEASE" \
+  --arg namespace "$NAMESPACE" --argjson helmRevision "$revision" \
+  --arg recordedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson images "$(printf '%s\n' "$actual" | jq -Rsc 'split("\n") | map(select(length > 0))')" \
+  '{schemaVersion:1, platformVersion:$platformVersion, release:$release, namespace:$namespace, helmRevision:$helmRevision, recordedAt:$recordedAt, images:$images}' \
+  >"$evidence"
+chmod 600 "$evidence"
+echo "Staging release is healthy; sanitized evidence: $evidence"

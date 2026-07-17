@@ -97,7 +97,7 @@ storage_probe() {
   local probe="praetor-staging-storage-probe"
   kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pod "$probe" --ignore-not-found --wait=true >/dev/null
   kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pvc "$probe" --ignore-not-found --wait=true >/dev/null
-  kubectl --context "$CONTEXT" -n "$NAMESPACE" apply -f - >/dev/null <<EOF
+  if ! kubectl --context "$CONTEXT" -n "$NAMESPACE" apply -f - >/dev/null <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -142,10 +142,17 @@ spec:
       persistentVolumeClaim:
         claimName: $probe
 EOF
+  then
+    kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pod "$probe" --ignore-not-found --wait=true >/dev/null || true
+    kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pvc "$probe" --ignore-not-found --wait=true >/dev/null || true
+    return 1
+  fi
   if ! kubectl --context "$CONTEXT" -n "$NAMESPACE" wait --for=condition=Ready \
     "pod/$probe" --timeout="$TIMEOUT" >/dev/null; then
     kubectl --context "$CONTEXT" -n "$NAMESPACE" describe "pod/$probe" >&2 || true
     kubectl --context "$CONTEXT" -n "$NAMESPACE" describe "pvc/$probe" >&2 || true
+    kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pod "$probe" --ignore-not-found --wait=true >/dev/null || true
+    kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pvc "$probe" --ignore-not-found --wait=true >/dev/null || true
     return 1
   fi
   kubectl --context "$CONTEXT" -n "$NAMESPACE" exec "$probe" -- test -s /probe/health

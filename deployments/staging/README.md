@@ -73,3 +73,42 @@ There is intentionally no staging teardown target. Destruction requires a
 separate, explicit operational decision: first archive or verify the storage
 root, then delete the k3d cluster manually. Never remove the data root as part
 of automated validation.
+
+## Immutable release candidates
+
+`release-lock.yaml` maps the authoritative platform compatibility set to the
+exact OCI manifest digest of every first-party image. `values.yaml` also pins
+the chart's PostgreSQL, NATS, and init-container images. Review the complete
+non-mutating preflight before deployment:
+
+```sh
+make staging-release-plan
+```
+
+The preflight rejects a lock that disagrees with
+`platform-compatibility.yaml`, a registry tag that no longer resolves to the
+locked digest, an invalid Helm render, or any workload image without a digest.
+
+Deployment requires the pre-existing Secret
+`praetor-staging/praetor-staging-runtime`. It must be created through an
+approved out-of-repository secret process and contain `DATABASE_URL`,
+`PRAETOR_SECRET_KEY`, `PRAETOR_SECRET_KEY_OLD`, `JWT_SECRET`,
+`PRAETOR_INTERNAL_TOKEN`, and `PRAETOR_LDAP_BIND_PASSWORD`. Neither the release
+script nor its evidence reads or prints secret values.
+
+Private first-party images are pulled with the pre-existing Docker registry
+Secret `praetor-staging/praetor-staging-registry`. Its credential must be a
+dedicated token limited to package reads. Do not reuse a developer, project
+automation, or release-coordinator token.
+
+```sh
+make staging-release-deploy
+make staging-release-status
+```
+
+The deploy is a rollback-on-failure, idempotent Helm upgrade. Both deploy and status verify
+that every locked first-party digest is live. Sanitized revision evidence is
+written with mode `0600` below
+`~/.local/share/praetor/staging/evidence/<platform-version>/`; it contains only
+the release name, namespace, Helm revision, timestamp, and deployed image
+references.

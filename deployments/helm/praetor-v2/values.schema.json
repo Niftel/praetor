@@ -17,6 +17,20 @@
         "migrator": { "type": "string" }
       }
     },
+    "imageDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "api": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "ingestion": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "scheduler": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "consumer": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "reconciler": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "executor": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "ui": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "migrator": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
     "secrets": {
       "type": "object",
       "properties": {
@@ -76,7 +90,8 @@
     "executor": {
       "type": "object",
       "properties": {
-        "replicas": { "type": "integer", "minimum": 1 }
+        "replicas": { "type": "integer", "minimum": 1 },
+        "initImage": { "type": "string" }
       }
     },
     "ingress": {

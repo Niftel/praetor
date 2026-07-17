@@ -169,6 +169,16 @@ staging-environment-provision:
 staging-environment-status:
 	./scripts/staging-environment.sh status
 
+.PHONY: staging-release-plan staging-release-deploy staging-release-status
+staging-release-plan:
+	./scripts/staging-release.sh plan
+
+staging-release-deploy:
+	./scripts/staging-release.sh deploy
+
+staging-release-status:
+	./scripts/staging-release.sh status
+
 .PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
 validation-fixture-bootstrap:
 	./scripts/bootstrap-product-validation-base.sh

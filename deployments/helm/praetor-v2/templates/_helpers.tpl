@@ -66,11 +66,20 @@ Usage: include "praetor.image" (dict "root" $ "svc" "api")
 {{- $root := .root -}}
 {{- $repo := index $root.Values.images .svc -}}
 {{- $componentTag := index $root.Values.imageTags .svc -}}
+{{- $componentDigest := index ($root.Values.imageDigests | default dict) .svc -}}
 {{- $tag := $root.Values.image.tag | default $componentTag | default $root.Chart.AppVersion -}}
 {{- if $root.Values.image.registry -}}
+{{- if $componentDigest -}}
+{{- printf "%s/%s@%s" $root.Values.image.registry $repo $componentDigest -}}
+{{- else -}}
 {{- printf "%s/%s:%s" $root.Values.image.registry $repo $tag -}}
+{{- end -}}
+{{- else -}}
+{{- if $componentDigest -}}
+{{- printf "%s@%s" $repo $componentDigest -}}
 {{- else -}}
 {{- printf "%s:%s" $repo $tag -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

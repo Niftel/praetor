@@ -38,6 +38,11 @@ imageTags:
   ui: 0.1.1
   migrator: 0.1.1
 
+# Optional immutable manifest digests. When set, a digest takes precedence over
+# both imageTags and image.tag and renders as registry/repository@sha256:....
+# Release-candidate environments should populate every first-party component.
+imageDigests: {}
+
 serviceAccount:
   create: true
   name: ""
@@ -189,6 +194,7 @@ executor:
   workers: 2
   ansibleForks: 1
   shmSize: 1Gi
+  initImage: busybox:1.36
   persistence:
     jobs:  { size: 5Gi,   storageClass: "" }   # /var/lib/praetor  (localhost-run WAL)
     packs: { size: 10Gi,  storageClass: "" }   # /opt/praetor/packs (extracted packs)
