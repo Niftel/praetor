@@ -83,6 +83,25 @@ func TestLocalDeploymentScriptsRejectMutableDefaults(t *testing.T) {
 	}
 }
 
+func TestLocalDeploymentRunsStatefulSetPreflightBeforeHelm(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{"update-local-cluster.sh", "bootstrap-product-validation-base.sh"} {
+		raw, err := os.ReadFile(filepath.Join(root, "scripts", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := string(raw)
+		preflight := strings.Index(script, "helm-statefulset-preflight.sh")
+		upgrade := strings.LastIndex(script, "helm upgrade --install praetor")
+		if name == "update-local-cluster.sh" {
+			upgrade = strings.Index(script, "helm upgrade --install")
+		}
+		if preflight < 0 || upgrade < 0 || preflight > upgrade {
+			t.Fatalf("%s must run StatefulSet preflight before Helm upgrade", name)
+		}
+	}
+}
+
 func TestLocalClusterRequiresBrowserIngress(t *testing.T) {
 	root := repositoryRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "scripts", "local-cluster.sh"))
