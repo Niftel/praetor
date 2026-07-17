@@ -4,7 +4,7 @@
 # Docker Compose sibling build context may override these versions for coordinated
 # development, but those overrides do not define a platform release.
 schemaVersion: 1
-platformVersion: 0.1.1
+platformVersion: 0.1.2
 releaseStatus: development
 wireContracts: v1
 
@@ -12,21 +12,21 @@ wireContracts: v1
 # retained as the chart/appVersion fallback and platform release identifier.
 image:
   registry: ghcr.io/niftel
-  tag: 0.1.1
+  tag: 0.1.2
 
 components:
   api:
     repository: Niftel/praetor
     image: praetor-api
-    version: 0.1.1
+    version: 0.1.2
   migrator:
     repository: Niftel/praetor
     image: praetor-migrator
-    version: 0.1.1
+    version: 0.1.2
   ui:
     repository: Niftel/praetor
     image: praetor-ui
-    version: 0.1.1
+    version: 0.1.2
   scheduler:
     repository: Niftel/scheduler
     module: github.com/praetordev/scheduler
