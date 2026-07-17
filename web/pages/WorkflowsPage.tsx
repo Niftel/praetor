@@ -84,17 +84,17 @@ const WorkflowsPage = () => {
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink overflow-auto scroll-tint">
-      <div className="max-w-[1060px] w-full mx-auto px-8 pt-6 pb-16">
-        <div className="flex flex-wrap items-start gap-4 mb-6">
+      <div className="max-w-[1060px] w-full mx-auto px-8 pt-6 pb-16 max-[640px]:px-4 max-[640px]:pt-4">
+        <div className="flex flex-wrap items-start gap-4 mb-6 max-[520px]:flex-col">
           <div className="min-w-0 flex-1">
             <Link to="/workflows" className="inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-acc"><ArrowLeft size={14} /> Organizations</Link>
-            <h1 className="text-[21px] font-semibold tracking-tight mt-1.5 flex items-center gap-2"><GitFork size={20} className="text-acc2" /> {orgName} · Workflows</h1>
+            <h1 className="text-[21px] font-semibold tracking-tight mt-1.5 flex items-start gap-2 min-w-0"><GitFork size={20} className="text-acc2 shrink-0 mt-0.5" /> <span className="min-w-0 break-words">{orgName} · Workflows</span></h1>
             <p className="mt-2 text-[12.5px] text-mut max-w-[560px] leading-relaxed">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
           </div>
           {!orgCapabilitiesLoading && canCreate && (
             <button
               onClick={() => navigate(`/workflows/org/${orgId}/builder`)}
-              className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+              className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg max-[520px]:w-full"
             >
               <Plus size={15} /> New workflow
             </button>
@@ -124,20 +124,22 @@ const WorkflowsPage = () => {
             const active = g.runs.filter(r => r.status === 'running').length;
             return (
               <div key={g.id} className="border-b border-line last:border-0">
-                <button onClick={() => toggleGroup(g.id)} className="w-full flex items-center gap-2.5 px-5 py-3 hover:bg-white/[0.02] text-left">
+                <button onClick={() => toggleGroup(g.id)} className="w-full grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 px-5 py-3 hover:bg-white/[0.02] text-left max-[520px]:px-3">
                   {open ? <ChevronDown size={15} className="text-dim" /> : <ChevronRight size={15} className="text-dim" />}
                   <span className="text-[13.5px] font-medium truncate">{g.name}</span>
                   <span className="font-mono text-[11px] text-dim">{g.runs.length} run{g.runs.length === 1 ? '' : 's'}</span>
-                  {active > 0 && <span className="font-mono text-[10px] text-run">{active} running</span>}
-                  <span className="ml-auto font-mono text-[10.5px] text-dim">latest {new Date(g.runs[0].created_at).toLocaleString()}</span>
+                  <span className="col-start-2 flex items-center gap-2 min-w-0">
+                    {active > 0 && <span className="font-mono text-[10px] text-run shrink-0">{active} running</span>}
+                    <span className="font-mono text-[10.5px] text-dim truncate">latest {new Date(g.runs[0].created_at).toLocaleString()}</span>
+                  </span>
                 </button>
                 {open && g.runs.map(r => {
                   const t = runTone(r.status);
                   return (
-                    <div key={r.id} onClick={() => navigate(`/workflows/runs/${r.id}`)} className="flex items-center gap-3 pl-12 pr-5 py-2 border-t border-line hover:bg-white/[0.02] cursor-pointer">
-                      <span className="font-mono text-[12px] text-acc2 w-14">#{r.id}</span>
+                    <div key={r.id} onClick={() => navigate(`/workflows/runs/${r.id}`)} className="grid grid-cols-[3.5rem_auto_minmax(0,1fr)] items-center gap-3 pl-12 pr-5 py-2 border-t border-line hover:bg-white/[0.02] cursor-pointer max-[520px]:pl-6 max-[520px]:pr-3">
+                      <span className="font-mono text-[12px] text-acc2">#{r.id}</span>
                       <span className={`inline-flex items-center gap-1.5 text-[12px] ${t.text}`}><span className={`w-[6px] h-[6px] rounded-full ${t.dot} ${r.status === 'running' ? 'animate-pulse' : ''}`} />{r.status}</span>
-                      <span className="ml-auto font-mono text-[11px] text-dim">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</span>
+                      <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-dim">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</span>
                     </div>
                   );
                 })}
@@ -163,10 +165,10 @@ const WorkflowCatalogRow: React.FC<{
   const canLaunch = !loading && capabilities.execute;
   return (
     <div onClick={canManage ? () => edit(workflow) : undefined}
-      className={`group flex items-center gap-3 px-5 py-4 border-b border-line last:border-0 hover:bg-white/[0.02] ${canManage ? 'cursor-pointer' : ''}`}>
+      className={`group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-5 py-4 border-b border-line last:border-0 hover:bg-white/[0.02] max-[520px]:px-3 ${canManage ? 'cursor-pointer' : ''}`}>
       <span className="w-9 h-9 rounded-lg border border-line2 grid place-items-center text-acc2 shrink-0"><GitFork size={17} /></span>
       <div className="min-w-0">
-        <div className="text-[14px] font-semibold tracking-tight truncate">{workflow.name}</div>
+        <div className="text-[14px] font-semibold tracking-tight break-words">{workflow.name}</div>
         <div className="font-mono text-[11px] text-dim mt-0.5">
           {typeof nodeCount === 'number' ? `${nodeCount} node${nodeCount === 1 ? '' : 's'}` : 'DAG'}
           {(workflow as any).webhook_enabled ? ' · webhook trigger' : ''}
@@ -174,9 +176,9 @@ const WorkflowCatalogRow: React.FC<{
       </div>
       {!loading && !canManage && !canLaunch && <span className="ml-auto font-mono text-[10px] text-dim">read only</span>}
       {(canManage || canLaunch) && (
-        <div className="ml-auto flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-          {canManage && <button onClick={() => edit(workflow)} className="h-8 px-2.5 rounded-md text-[12px] font-medium flex items-center gap-1.5 text-ink2 hover:bg-white/5"><Pencil size={13} /> Edit</button>}
-          {canLaunch && <button onClick={() => launch(workflow)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>}
+        <div className="ml-auto flex items-center gap-1.5 max-[520px]:col-span-3 max-[520px]:ml-0 max-[520px]:w-full max-[520px]:pl-12" onClick={e => e.stopPropagation()}>
+          {canManage && <button onClick={() => edit(workflow)} className="h-9 px-2.5 rounded-md text-[12px] font-medium flex items-center justify-center gap-1.5 text-ink2 hover:bg-white/5 max-[520px]:flex-1"><Pencil size={13} /> Edit</button>}
+          {canLaunch && <button onClick={() => launch(workflow)} className="h-9 px-3 rounded-md text-[12px] font-semibold flex items-center justify-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc max-[520px]:flex-1"><Rocket size={13} /> Launch</button>}
           {canManage && <button onClick={() => remove(workflow)} className="w-8 h-8 grid place-items-center rounded-md text-faint hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={15} /></button>}
         </div>
       )}

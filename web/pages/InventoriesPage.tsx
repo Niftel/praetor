@@ -57,6 +57,7 @@ const InventoriesPage = () => {
   const [collapsed, setCollapsed] = useState<Set<number | 'ungrouped'>>(new Set());
   const [invMenu, setInvMenu] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
+  const [mobilePane, setMobilePane] = useState<'structure' | 'details'>('structure');
 
   // Modals
   const [showInventoryModal, setShowInventoryModal] = useState(false);
@@ -269,13 +270,13 @@ const InventoriesPage = () => {
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
       {/* Inventory context bar */}
-      <div className="flex items-center gap-4 h-[54px] px-6 border-b border-line shrink-0">
+      <div className="flex items-center gap-4 min-h-[54px] px-6 py-2 border-b border-line shrink-0 max-[640px]:gap-2.5 max-[640px]:px-3">
         <Link to="/inventories" className="w-7 h-7 grid place-items-center rounded-md border border-line2 text-mut hover:text-ink hover:border-white/20 transition-colors shrink-0" title="All organizations">
           <ArrowLeft size={15} />
         </Link>
-        <div className="relative">
+        <div className="relative min-w-0">
           <button onClick={() => setInvMenu(v => !v)} onBlur={() => setTimeout(() => setInvMenu(false), 150)} className="flex items-center gap-2 group">
-            <span className="text-[15px] font-semibold tracking-tight">{selectedInv?.name || 'No inventory'}</span>
+            <span className="text-[15px] font-semibold tracking-tight truncate max-w-[min(38vw,320px)] max-[640px]:max-w-[42vw]">{selectedInv?.name || 'No inventory'}</span>
             <ChevronDown size={14} className="text-mut group-hover:text-ink" />
           </button>
           {invMenu && (
@@ -295,14 +296,14 @@ const InventoriesPage = () => {
           )}
         </div>
         {selectedInv && (
-          <div className="flex gap-4 font-mono text-[11px] text-dim">
+          <div className="flex gap-4 font-mono text-[11px] text-dim max-[700px]:hidden">
             <span><b className="text-mut font-medium">{hosts.length}</b> hosts</span>
             <span><b className="text-mut font-medium">{groups.length}</b> groups</span>
             <span><b className="text-mut font-medium">{sources.length}</b> sources</span>
           </div>
         )}
         {canManageInventory && <div className="ml-auto flex items-center gap-1">
-          <button onClick={() => setShowImportModal(true)} className="h-8 px-3 rounded-md text-xs font-medium flex items-center gap-1.5 text-mut hover:text-ink hover:bg-white/5 transition-colors"><Upload size={14} /> Import</button>
+          <button onClick={() => setShowImportModal(true)} className="h-8 px-3 rounded-md text-xs font-medium flex items-center gap-1.5 text-mut hover:text-ink hover:bg-white/5 transition-colors max-[480px]:w-8 max-[480px]:px-0 max-[480px]:justify-center" title="Import inventory"><Upload size={14} /> <span className="max-[480px]:hidden">Import</span></button>
           {selectedInv && (
             <button onClick={() => deleteInventory(selectedInv.id)} className="w-8 h-8 grid place-items-center rounded-md text-dim hover:text-err hover:bg-white/5 transition-colors" title="Delete inventory"><Trash2 size={15} /></button>
           )}
@@ -318,9 +319,13 @@ const InventoriesPage = () => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-[268px_1fr] flex-1 min-h-0 max-[820px]:grid-cols-1">
+        <div className="grid grid-cols-[268px_1fr] flex-1 min-h-0 max-[820px]:grid-cols-1 max-[820px]:grid-rows-[44px_minmax(0,1fr)]">
+          <div className="hidden max-[820px]:flex items-center gap-1 px-3 border-b border-line bg-panel2">
+            <button onClick={() => setMobilePane('structure')} className={`h-9 flex-1 rounded-md text-[12px] font-medium ${mobilePane === 'structure' ? 'bg-white/[0.06] text-ink' : 'text-mut'}`}>Hosts & groups</button>
+            <button onClick={() => setMobilePane('details')} className={`h-9 flex-1 rounded-md text-[12px] font-medium ${mobilePane === 'details' ? 'bg-white/[0.06] text-ink' : 'text-mut'}`}>{selectedHost ? 'Host details' : 'Inventory details'}</button>
+          </div>
           {/* STRUCTURE */}
-          <div className="flex flex-col min-h-0 border-r border-line bg-tree max-[820px]:hidden">
+          <div className={`flex flex-col min-h-0 border-r border-line bg-tree max-[820px]:col-start-1 max-[820px]:row-start-2 ${mobilePane === 'structure' ? '' : 'max-[820px]:hidden'}`}>
             <div className="flex items-center gap-2.5 h-[46px] px-4 border-b border-line shrink-0">
               <Search size={14} className="text-dim shrink-0" />
               <input value={treeFilter} onChange={e => setTreeFilter(e.target.value)} placeholder="Filter hosts" className="flex-1 bg-transparent border-none outline-none text-[12.5px] text-ink placeholder:text-dim" />
@@ -328,7 +333,7 @@ const InventoriesPage = () => {
             <div className="flex items-center h-[34px] px-4 mt-1.5 shrink-0">
               <span className="font-mono text-[9px] tracking-[0.16em] uppercase text-dim">Structure</span>
               {canManageInventory && <div className="ml-auto relative">
-                <button onClick={() => setAddMenu(v => !v)} onBlur={() => setTimeout(() => setAddMenu(false), 150)} className="text-dim hover:text-ink" title="Add"><Plus size={15} /></button>
+                <button onClick={() => setAddMenu(v => !v)} onBlur={() => setTimeout(() => setAddMenu(false), 150)} className="w-8 h-8 grid place-items-center text-dim hover:text-ink" title="Add"><Plus size={15} /></button>
                 {addMenu && (
                   <div className="absolute z-30 top-6 right-0 w-40 bg-panel border border-line2 rounded-lg shadow-2xl py-1.5">
                     <button onMouseDown={() => setShowHostModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add host</button>
@@ -343,14 +348,14 @@ const InventoriesPage = () => {
                 const isCollapsed = collapsed.has(group.id);
                 return (
                   <div key={group.id}>
-                    <button onClick={() => toggleCollapse(group.id)} className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-lg hover:bg-white/[0.028]">
+                    <button onClick={() => toggleCollapse(group.id)} className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-lg hover:bg-white/[0.028] max-[820px]:h-10">
                       {isCollapsed ? <ChevronRight size={11} className="text-dim shrink-0" /> : <ChevronDown size={11} className="text-dim shrink-0" />}
                       <span className="text-[12.5px] font-semibold text-ink2 tracking-[0.01em]">{group.name}</span>
                       <span className="ml-auto font-mono text-[10.5px] text-faint">{members.length}</span>
                     </button>
                     {!isCollapsed && (
                       <div className="relative mb-1 before:content-[''] before:absolute before:left-4 before:top-0.5 before:bottom-3.5 before:w-px before:bg-line">
-                        {members.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => setSelectedHostId(h.id)} />)}
+                        {members.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => { setSelectedHostId(h.id); setMobilePane('details'); }} />)}
                         {members.length === 0 && <div className="pl-7 py-1 font-mono text-[11px] text-faint">empty</div>}
                       </div>
                     )}
@@ -359,14 +364,14 @@ const InventoriesPage = () => {
               })}
               {tree.ungrouped.length > 0 && (
                 <div className="mt-3 pt-2.5 border-t border-line">
-                  <button onClick={() => toggleCollapse('ungrouped')} className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-lg hover:bg-white/[0.028]">
+                  <button onClick={() => toggleCollapse('ungrouped')} className="w-full flex items-center gap-2 h-[30px] px-2.5 rounded-lg hover:bg-white/[0.028] max-[820px]:h-10">
                     {collapsed.has('ungrouped') ? <ChevronRight size={11} className="text-dim shrink-0" /> : <ChevronDown size={11} className="text-dim shrink-0" />}
                     <span className="text-[12.5px] font-semibold text-dim">ungrouped</span>
                     <span className="ml-auto font-mono text-[10.5px] text-faint">{tree.ungrouped.length}</span>
                   </button>
                   {!collapsed.has('ungrouped') && (
                     <div className="relative mb-1 before:content-[''] before:absolute before:left-4 before:top-0.5 before:bottom-3.5 before:w-px before:bg-line">
-                      {tree.ungrouped.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => setSelectedHostId(h.id)} />)}
+                      {tree.ungrouped.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => { setSelectedHostId(h.id); setMobilePane('details'); }} />)}
                     </div>
                   )}
                 </div>
@@ -376,23 +381,23 @@ const InventoriesPage = () => {
           </div>
 
           {/* EDITOR / OVERVIEW */}
-          <div className="flex flex-col min-h-0 bg-bg">
+          <div className={`flex flex-col min-h-0 bg-bg max-[820px]:col-start-1 max-[820px]:row-start-2 ${mobilePane === 'details' ? '' : 'max-[820px]:hidden'}`}>
             {selectedHost ? (
               <>
-                <div className="flex items-start gap-4 px-10 pt-6 pb-5 border-b border-line shrink-0 max-[820px]:px-5">
+                <div className="flex items-start gap-4 px-10 pt-6 pb-5 border-b border-line shrink-0 max-[820px]:px-5 max-[520px]:flex-wrap max-[520px]:px-4 max-[520px]:pt-4">
                   <div className="min-w-0">
                     <div className="font-mono text-[11px] text-dim mb-2">
                       <span className="text-mut">{selectedInv.name}</span>
                       {memberGroupNames[0] && <><span className="mx-1.5 text-faint">/</span><span className="text-mut">{memberGroupNames[0]}</span></>}
                       <span className="mx-1.5 text-faint">/</span>{selectedHost.name}
                     </div>
-                    <h1 className="font-mono text-[23px] font-semibold tracking-tight leading-none truncate">{selectedHost.name}</h1>
+                    <h1 className="font-mono text-[23px] font-semibold tracking-tight leading-tight break-words">{selectedHost.name}</h1>
                     <div className="mt-2.5 text-[12px] text-dim flex items-center gap-2 flex-wrap">
                       <span>host{memberGroupNames.length ? <> · member of {memberGroupNames.map((n, i) => <React.Fragment key={n}>{i > 0 && ', '}<b className="text-mut font-medium">{n}</b></React.Fragment>)}</> : ' · no groups'}</span>
                       {selectedHost.is_runner_host && <span className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-violet/15 text-violet">runner</span>}
                     </div>
                   </div>
-                  <div className="ml-auto flex items-center gap-3 pt-1 shrink-0">
+                  <div className="ml-auto flex items-center gap-3 pt-1 shrink-0 max-[520px]:w-full max-[520px]:ml-0">
                     <span className="font-mono text-[10.5px] text-dim flex items-center gap-1.5">
                       {dirty ? <><span className="w-1.5 h-1.5 rounded-full bg-changed" /> unsaved</> : <><Check size={12} className="text-faint" /> saved</>}
                     </span>
@@ -401,14 +406,14 @@ const InventoriesPage = () => {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-auto scroll-tint px-10 pb-16 max-[820px]:px-5">
+                <div className="flex-1 overflow-auto scroll-tint px-10 pb-16 max-[820px]:px-5 max-[520px]:px-4">
                   <div className="max-w-[640px]">
                     {/* Connection */}
                     <Section title="Connection">
                       <ConnRow readOnly={!canManageInventory} label="Address" varName="ansible_host" value={connForm.ansible_host} placeholder={selectedHost.name} onChange={v => setConnForm({ ...connForm, ansible_host: v })} />
                       <ConnRow readOnly={!canManageInventory} label="Port" varName="ansible_port" value={connForm.ansible_port} placeholder="22" sm onChange={v => setConnForm({ ...connForm, ansible_port: v })} />
                       <ConnRow readOnly={!canManageInventory} label="User" varName="ansible_user" value={connForm.ansible_user} placeholder="root" onChange={v => setConnForm({ ...connForm, ansible_user: v })} />
-                      <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5">
+                      <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5 max-[520px]:grid-cols-1 max-[520px]:gap-1">
                         <div className="text-[12.5px] text-mut">Transport<span className="block font-mono text-[9.5px] text-faint mt-0.5">ansible_connection</span></div>
                         <select disabled={!canManageInventory} value={connForm.ansible_connection} onChange={e => setConnForm({ ...connForm, ansible_connection: e.target.value })}
                           className="max-w-[120px] bg-transparent border-b border-line focus:border-acc text-ink font-mono text-[13px] py-1.5 outline-none hover:border-line2">
@@ -425,12 +430,12 @@ const InventoriesPage = () => {
                     <Section title="Defined on this host" hint={`host_vars · ${Object.keys(extraVars).length}`} action={canManageInventory ? <button onClick={openVarsModal} className="font-mono text-[11px] text-dim hover:text-acc">edit as JSON</button> : undefined}>
                       {Object.keys(extraVars).length === 0 && <p className="font-mono text-[12px] text-faint py-1">No host-specific variables.</p>}
                       {Object.entries(extraVars).map(([k, v]) => (
-                        <div key={k} className="flex items-center gap-3.5 py-2 group">
+                        <div key={k} className="grid grid-cols-[auto_minmax(7rem,auto)_auto_minmax(0,1fr)_auto] items-center gap-3.5 py-2 group max-[520px]:grid-cols-[auto_minmax(0,1fr)_auto] max-[520px]:gap-x-2">
                           <span className="w-1.5 h-1.5 rounded-full bg-acc shrink-0" />
-                          <span className="font-mono text-[13px] text-ink min-w-[158px]">{k}</span>
-                          <span className="text-faint font-mono">=</span>
+                          <span className="font-mono text-[13px] text-ink break-all">{k}</span>
+                          <span className="text-faint font-mono max-[520px]:hidden">=</span>
                           <input readOnly={!canManageInventory} value={v} onChange={e => setExtraVars(p => ({ ...p, [k]: e.target.value }))}
-                            className="flex-1 bg-transparent border-b border-transparent group-hover:border-line focus:border-acc text-ink2 font-mono text-[13px] pb-0.5 outline-none" />
+                            className="min-w-0 bg-transparent border-b border-transparent group-hover:border-line focus:border-acc text-ink2 font-mono text-[13px] pb-0.5 outline-none max-[520px]:col-start-2" />
                           {canManageInventory && <button onClick={() => setExtraVars(p => { const n = { ...p }; delete n[k]; return n; })} className="text-faint hover:text-err opacity-0 group-hover:opacity-100" title="Remove"><Trash2 size={13} /></button>}
                         </div>
                       ))}
@@ -470,10 +475,10 @@ const InventoriesPage = () => {
                     {sources.length === 0 ? <p className="font-mono text-[12px] text-faint py-1">No dynamic sources. Add one to populate hosts (e.g. AWS).</p> : (
                       <div className="space-y-0">
                         {sources.map(s => (
-                          <div key={s.id} className="flex items-center gap-3 py-2.5 border-b border-line last:border-0">
+                          <div key={s.id} className="flex items-center gap-3 py-2.5 border-b border-line last:border-0 max-[520px]:flex-wrap">
                             <span className="text-[13px] text-ink font-medium">{s.name}</span>
                             <span className="font-mono text-[11px] text-dim">{s.source_kind}</span>
-                            <span className="ml-auto font-mono text-[11px] text-dim">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
+                            <span className="ml-auto font-mono text-[11px] text-dim max-[520px]:order-4 max-[520px]:basis-full max-[520px]:ml-0">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
                             {canManageInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
                             {canManageInventory && <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>}
                           </div>
@@ -563,7 +568,7 @@ const InventoriesPage = () => {
 function g_match(g: Group, q: string) { return g.name.toLowerCase().includes(q); }
 
 const HostRow: React.FC<{ host: Host; sel: boolean; onClick: () => void }> = ({ host, sel, onClick }) => (
-  <button onClick={onClick} className={`w-full flex items-center gap-2.5 h-7 pl-7 pr-2.5 rounded-lg ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>
+  <button onClick={onClick} className={`w-full flex items-center gap-2.5 h-7 pl-7 pr-2.5 rounded-lg max-[820px]:h-11 ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>
     <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${sel ? 'bg-acc' : host.is_runner_host ? 'bg-violet' : host.enabled ? 'bg-faint' : 'bg-faint/50'}`} />
     <span className={`font-mono text-[12px] truncate ${sel ? 'text-ink font-medium' : 'text-mut'}`}>{host.name}</span>
   </button>
@@ -590,7 +595,7 @@ const HostActions: React.FC<{ host: Host; settingRunner: boolean; onRunner: () =
 
 const Section: React.FC<{ title: string; hint?: string; icon?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }> = ({ title, hint, icon, action, children }) => (
   <div className="py-6 border-t border-line first:border-t-0">
-    <div className="flex items-baseline gap-3 mb-4">
+    <div className="flex items-baseline gap-3 mb-4 max-[520px]:flex-wrap">
       {icon}
       <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-mut">{title}</span>
       {hint && <span className="font-mono text-[9.5px] text-faint">{hint}</span>}
@@ -601,7 +606,7 @@ const Section: React.FC<{ title: string; hint?: string; icon?: React.ReactNode; 
 );
 
 const ConnRow: React.FC<{ label: string; varName: string; value: string; placeholder?: string; sm?: boolean; readOnly?: boolean; onChange: (v: string) => void }> = ({ label, varName, value, placeholder, sm, readOnly, onChange }) => (
-  <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5">
+  <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5 max-[520px]:grid-cols-1 max-[520px]:gap-1">
     <div className="text-[12.5px] text-mut">{label}<span className="block font-mono text-[9.5px] text-faint mt-0.5">{varName}</span></div>
     <input readOnly={readOnly} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
       className={`${sm ? 'max-w-[120px]' : 'max-w-[300px]'} w-full bg-transparent border-b border-line focus:border-acc text-ink font-mono text-[13px] py-1.5 outline-none hover:border-line2 placeholder:text-faint`} />
