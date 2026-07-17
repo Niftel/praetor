@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praetor-validation-ldap
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: praetor-validation-ldap}
+  template:
+    metadata:
+      labels: {app: praetor-validation-ldap, app.kubernetes.io/part-of: praetor-validation-fixture}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ldap
+          image: docker.io/osixia/openldap@sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28
+          env:
+            - {name: LDAP_ORGANISATION, value: "Praetor Validation"}
+            - {name: LDAP_DOMAIN, value: "praetor.local"}
+            - {name: LDAP_ADMIN_PASSWORD, value: "admin"}
+            - {name: LDAP_SEED_INTERNAL_LDIF_PATH, value: /tmp/ldif}
+            # Kubernetes injects LDAP_PORT=tcp://... for the Service named ldap;
+            # the image expects a numeric listener port under the same name.
+            - {name: LDAP_PORT, value: "389"}
+          ports: [{name: ldap, containerPort: 389}]
+          volumeMounts:
+            - {name: bootstrap, mountPath: /tmp/ldif/bootstrap.ldif, subPath: bootstrap.ldif, readOnly: true}
+          readinessProbe: {tcpSocket: {port: ldap}, initialDelaySeconds: 5, periodSeconds: 5}
+          resources: {requests: {cpu: 25m, memory: 64Mi}, limits: {memory: 256Mi}}
+      volumes:
+        - name: bootstrap
+          configMap: {name: praetor-validation-ldap-bootstrap}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ldap
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+spec:
+  selector: {app: praetor-validation-ldap}
+  ports: [{name: ldap, port: 389, targetPort: ldap}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praetor-validation-notification-sink
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: praetor-validation-notification-sink}
+  template:
+    metadata:
+      labels: {app: praetor-validation-notification-sink, app.kubernetes.io/part-of: praetor-validation-fixture}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: sink
+          image: registry.k8s.io/e2e-test-images/agnhost@sha256:99c6b4bb4a1e1df3f0b3752168c89358794d02258ebebc26bf21c29399011a85
+          args: ["netexec", "--http-port=8080"]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 2, periodSeconds: 3}
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praetor-validation-notification-sink
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+spec:
+  selector: {app: praetor-validation-notification-sink}
+  ports: [{name: http, port: 8080, targetPort: http}]

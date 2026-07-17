@@ -113,6 +113,32 @@ func TestLocalClusterRequiresBrowserIngress(t *testing.T) {
 	}
 }
 
+func TestProductValidationFixtureIsScopedAndIdempotent(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "product-validation-fixture.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	for _, required := range []string{
+		`create|status|cleanup`,
+		`--dry-run=client -o yaml | kubectl apply -f -`,
+		`app.kubernetes.io/part-of=praetor-validation-fixture`,
+		`--reuse-values`,
+		`DELETE FROM workflow_templates WHERE name = 'Praetor Validation Workflow'`,
+		`persistent platform data and secrets were preserved`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("product validation fixture must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"delete namespace", "delete pvc", "helm uninstall"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("fixture cleanup must not contain %q", forbidden)
+		}
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("..")
