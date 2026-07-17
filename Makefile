@@ -54,6 +54,8 @@ secrets-execution-e2e:
 
 readiness-report-test:
 	go test ./internal/readiness ./cmd/readiness-report
+	bash -n ./scripts/generate-readiness-report.sh
+	bash -n ./scripts/validate-delegated-api-e2e.sh
 
 # A release preflight intentionally fails while the manifest is marked
 # development. The remote form also verifies GHCR images and Go module tags.

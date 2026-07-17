@@ -26,6 +26,20 @@ The command exits `0` only for a `go` decision. It still writes a useful
 evidence digest is missing, or an unresolved release blocker exists. Invalid or
 secret-bearing manifest fields are rejected with exit `1`.
 
+When all four live journeys have written their sanitized evidence envelopes,
+aggregate them without copying their contents into the report:
+
+```sh
+PRAETOR_REVISION="$(git rev-parse HEAD)" \
+PRAETOR_SECRETS_REVISION="$(git -C ../praetor-secrets rev-parse HEAD)" \
+PRAETOR_READINESS_EVIDENCE_DIR=build/readiness-evidence \
+./scripts/generate-readiness-report.sh
+```
+
+The aggregator rejects missing/invalid envelopes and sensitive field names,
+then records only each journey result and the SHA-256 digest of its sanitized
+artifact.
+
 ## Evidence manifest
 
 ```json

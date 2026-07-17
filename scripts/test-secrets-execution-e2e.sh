@@ -468,13 +468,18 @@ while IFS= read -r artifact; do
 done < <(find "$WORK" -type f ! -path '*/api-identity/*' ! -path '*/scheduler-identity/*' ! -path '*/executor-identity/*')
 
 if [[ -n "${PRAETOR_E2E_EVIDENCE_FILE:-}" ]]; then
+  umask 077
   jq -n \
+    --arg result pass \
     --argjson credential_id "$CREDENTIAL_ID" \
     --argjson project_id "$PROJECT_ID" \
     --argjson job_id "$JOB_ID" \
     --arg run_id "$RUN_ID" \
     --arg status "$STATUS" \
     '{
+      schema_version:1,
+      journey:"secrets-service",
+      result:$result,
       credential_id:$credential_id,
       project_id:$project_id,
       job_id:$job_id,

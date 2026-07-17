@@ -32,6 +32,8 @@ visibility limited to the assigned team, rejection of cross-team and self
 approval, successful completion, and requester/approver attribution in the
 auditor-visible activity stream. Its final output is sanitized JSON containing
 only the workflow run ID, terminal status, and synthetic actor/team names.
+Set `PRAETOR_LDAP_EVIDENCE_FILE` to retain that sanitized JSON for readiness
+aggregation.
 
 ## Execution recovery lifecycle
 
@@ -51,6 +53,7 @@ removed and must become clearly `lost`/`error`; a subsequent relaunch must creat
 new run IDs while retaining the initiating user and approval-team boundary.
 Approval and terminal webhooks, terminal events, activity-stream actors, and
 credential resolution counts are asserted exactly once.
+Set `PRAETOR_RECOVERY_EVIDENCE_FILE` to retain the sanitized recovery result.
 
 ## Credential execution lifecycle
 
@@ -71,3 +74,17 @@ Finally, it scans captured API responses, activity and audit data, database
 dumps, terminal executor manifests, and workload logs for the canary. Evidence
 output contains IDs and terminal status only; it never contains credential
 material.
+Set `PRAETOR_E2E_EVIDENCE_FILE` to retain that sanitized result for readiness
+aggregation.
+
+## Delegated API lifecycle
+
+The delegated API evidence runner requires `TEST_DATABASE_URL` to reference an
+isolated, migrated Praetor database. It executes every delegated workflow launch
+scope test and fails if any are skipped:
+
+```sh
+PRAETOR_DELEGATED_EVIDENCE_FILE=build/readiness-evidence/delegated-api.json \
+TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+./scripts/validate-delegated-api-e2e.sh
+```

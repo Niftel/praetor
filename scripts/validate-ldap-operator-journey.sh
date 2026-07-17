@@ -119,5 +119,10 @@ audit="$(get "$auditor_token" 'activity-stream?limit=100')"
 jq -e --arg path "/api/v1/workflow-templates/$workflow_id/launch" '.[] | select(.username == "demo-operator" and .method == "POST" and .path == $path and .status_code == 201)' <<<"$audit" >/dev/null || die "launch actor is missing from audit evidence"
 jq -e --arg path "/api/v1/workflow-job-nodes/$approval_id/approve" '.[] | select(.username == "mwebb" and .method == "POST" and .path == $path and .status_code == 204)' <<<"$audit" >/dev/null || die "approval actor is missing from audit evidence"
 
-jq -n --argjson workflow_job_id "$workflow_job_id" --arg status "$terminal" --arg requester demo-operator --arg approver mwebb --arg approval_team backend-team \
-  '{result:"pass",workflow_job_id:$workflow_job_id,status:$status,requester:$requester,approver:$approver,approval_team:$approval_team}'
+EVIDENCE="$(jq -n --argjson workflow_job_id "$workflow_job_id" --arg status "$terminal" --arg requester demo-operator --arg approver mwebb --arg approval_team backend-team \
+  '{schema_version:1,journey:"ldap-operator",result:"pass",workflow_job_id:$workflow_job_id,status:$status,requester:$requester,approver:$approver,approval_team:$approval_team}')"
+if [[ -n "${PRAETOR_LDAP_EVIDENCE_FILE:-}" ]]; then
+  umask 077
+  printf '%s\n' "$EVIDENCE" >"$PRAETOR_LDAP_EVIDENCE_FILE"
+fi
+printf '%s\n' "$EVIDENCE"
