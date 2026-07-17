@@ -58,31 +58,25 @@ validation_images=(
   "praetor-consumer:$validation_tag"
   "praetor-reconciler:$validation_tag"
 )
-cluster_nodes=()
-while IFS= read -r node; do
-  cluster_nodes+=("$node")
-done < <(k3d node list --no-headers | awk -v cluster="k3d-$CLUSTER-" '$1 ~ "^" cluster {print $1}')
-(( ${#cluster_nodes[@]} > 0 )) || { echo "error: no nodes found for k3d cluster $CLUSTER" >&2; exit 1; }
-for node in "${cluster_nodes[@]}"; do
-  imported_images=""
-  for _ in {1..15}; do
-    imported_images="$(kubectl get node "$node" -o jsonpath='{range .status.images[*].names[*]}{.}{"\n"}{end}')"
-    missing_image=false
-    for image in "${validation_images[@]}"; do
-      if ! grep -Fxq "docker.io/library/$image" <<<"$imported_images" && ! grep -Fxq "$image" <<<"$imported_images"; then
-        missing_image=true
-        break
-      fi
-    done
-    [[ "$missing_image" == false ]] && break
+probe_index=0
+for image in "${validation_images[@]}"; do
+  probe="praetor-image-probe-$probe_index"
+  kubectl run "$probe" --image="$image" --image-pull-policy=Never --restart=Never \
+    --command -- /bin/sh -c 'exit 0' >/dev/null
+  phase=""
+  for _ in {1..20}; do
+    phase="$(kubectl get pod "$probe" -o jsonpath='{.status.phase}')"
+    [[ "$phase" == Succeeded || "$phase" == Failed ]] && break
     sleep 1
   done
-  for image in "${validation_images[@]}"; do
-    if ! grep -Fxq "docker.io/library/$image" <<<"$imported_images" && ! grep -Fxq "$image" <<<"$imported_images"; then
-      echo "error: k3d image import did not load $image into $node" >&2
-      exit 1
-    fi
-  done
+  if [[ "$phase" != Succeeded ]]; then
+    echo "error: imported image $image could not start with imagePullPolicy=Never" >&2
+    kubectl describe pod "$probe" >&2 || true
+    kubectl delete pod "$probe" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    exit 1
+  fi
+  kubectl delete pod "$probe" --wait=false >/dev/null
+  probe_index=$((probe_index + 1))
 done
 secrets_repository="${SECRETS_IMAGE%:*}"
 secrets_tag="${SECRETS_IMAGE##*:}"
