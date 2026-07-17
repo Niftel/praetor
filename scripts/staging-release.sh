@@ -12,6 +12,10 @@ STAGING_VALUES="$ROOT/deployments/staging/values.yaml"
 LOCK="$ROOT/deployments/staging/release-lock.yaml"
 SECRET_NAME="praetor-staging-runtime"
 REGISTRY_SECRET_NAME="praetor-staging-registry"
+INGRESS_TLS_SECRET_NAME="praetor-staging-ingress-tls"
+LDAP_TLS_SECRET_NAME="praetor-staging-ldap-tls"
+LDAP_CONFIG_NAME="praetor-staging-ldap-config"
+IDENTITY_SECRET_NAMES=(praetor-api-identity praetor-scheduler-identity praetor-executor-identity)
 DATA_ROOT="${PRAETOR_STAGING_DATA_ROOT:-$HOME/.local/share/praetor/staging}"
 export GOCACHE="${PRAETOR_STAGING_CACHE:-${TMPDIR:-/tmp}/praetor-staging-release/go-build}"
 
@@ -93,12 +97,50 @@ kubectl --context "$CONTEXT" get secret "$REGISTRY_SECRET_NAME" -n "$NAMESPACE" 
     echo "error: required read-only registry Secret $NAMESPACE/$REGISTRY_SECRET_NAME is missing or invalid" >&2
     exit 1
   }
-for key in DATABASE_URL PRAETOR_SECRET_KEY PRAETOR_SECRET_KEY_OLD JWT_SECRET PRAETOR_INTERNAL_TOKEN PRAETOR_LDAP_BIND_PASSWORD; do
+for key in DATABASE_URL PRAETOR_SECRET_KEY JWT_SECRET PRAETOR_INTERNAL_TOKEN PRAETOR_LDAP_BIND_PASSWORD; do
   kubectl --context "$CONTEXT" get secret "$SECRET_NAME" -n "$NAMESPACE" -o json |
-    jq -e --arg key "$key" '.data | has($key)' >/dev/null || {
-      echo "error: Secret $NAMESPACE/$SECRET_NAME is missing key $key" >&2
+    jq -e --arg key "$key" '.data | has($key) and (.[$key] | @base64d | length > 0)' >/dev/null || {
+      echo "error: Secret $NAMESPACE/$SECRET_NAME is missing or has an empty key $key" >&2
       exit 1
     }
+done
+kubectl --context "$CONTEXT" get secret "$SECRET_NAME" -n "$NAMESPACE" -o json |
+  jq -e '.data | has("PRAETOR_SECRET_KEY_OLD")' >/dev/null || {
+    echo "error: Secret $NAMESPACE/$SECRET_NAME is missing key PRAETOR_SECRET_KEY_OLD" >&2
+    exit 1
+  }
+kubectl --context "$CONTEXT" get secret "$INGRESS_TLS_SECRET_NAME" -n "$NAMESPACE" -o json |
+  jq -e '.type == "kubernetes.io/tls" and (.data | has("tls.crt") and has("tls.key"))' >/dev/null || {
+    echo "error: trusted ingress TLS Secret $NAMESPACE/$INGRESS_TLS_SECRET_NAME is missing or invalid" >&2
+    exit 1
+  }
+kubectl --context "$CONTEXT" get secret "$LDAP_TLS_SECRET_NAME" -n "$NAMESPACE" -o json |
+  jq -e '.data | has("tls.crt") and has("tls.key") and has("ca.crt")' >/dev/null || {
+    echo "error: verified LDAPS Secret $NAMESPACE/$LDAP_TLS_SECRET_NAME is missing or invalid" >&2
+    exit 1
+  }
+kubectl --context "$CONTEXT" get configmap "$LDAP_CONFIG_NAME" -n "$NAMESPACE" -o json |
+  jq -e '.data | has("ldap.yaml") and has("ca.crt")' >/dev/null || {
+    echo "error: LDAP configuration bundle $NAMESPACE/$LDAP_CONFIG_NAME is missing ldap.yaml or ca.crt" >&2
+    exit 1
+  }
+for identity in "${IDENTITY_SECRET_NAMES[@]}"; do
+  kubectl --context "$CONTEXT" get secret "$identity" -n "$NAMESPACE" -o json |
+    jq -e '.data | has("ca.crt") and has("tls.crt") and has("tls.key")' >/dev/null || {
+      echo "error: workload identity Secret $NAMESPACE/$identity is missing required certificate keys" >&2
+      exit 1
+    }
+done
+for prerequisite in \
+  statefulset/praetor-staging-ldap \
+  statefulset/praetor-staging-secrets-postgres \
+  statefulset/praetor-staging-audit-postgres \
+  deployment/praetor-secrets \
+  deployment/praetor-audit-sink; do
+  kubectl --context "$CONTEXT" rollout status "$prerequisite" -n "$NAMESPACE" --timeout=180s >/dev/null || {
+    echo "error: staging integration prerequisite $prerequisite is not healthy" >&2
+    exit 1
+  }
 done
 
 if [[ "$COMMAND" == deploy ]]; then

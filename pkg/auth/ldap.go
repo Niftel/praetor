@@ -50,6 +50,7 @@ func (c *LDAPConfig) UsesGroupMapping() bool {
 // LDAPServerConfig contains LDAP server connection settings.
 type LDAPServerConfig struct {
 	URL                string        `yaml:"url"`                  // ldap:// or ldaps:// URL
+	CAFile             string        `yaml:"ca_file"`              // Optional PEM CA bundle for LDAP TLS verification
 	BindDN             string        `yaml:"bind_dn"`              // Service account DN
 	BindPassword       string        `yaml:"bind_password"`        // Direct password (not recommended)
 	BindPasswordEnv    string        `yaml:"bind_password_env"`    // Environment variable name for password

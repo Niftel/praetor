@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: praetor-staging-ldap}
+spec:
+  serviceName: praetor-staging-ldap
+  replicas: 1
+  selector: {matchLabels: {app: praetor-staging-ldap}}
+  template:
+    metadata: {labels: {app: praetor-staging-ldap}}
+    spec:
+      initContainers:
+        - name: stage-tls
+          image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+          command: [sh, -ec, "cp /source/* /certs/; chmod 0600 /certs/tls.key; chmod 0644 /certs/tls.crt /certs/ca.crt"]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: tls-source, mountPath: /source, readOnly: true}
+            - {name: tls, mountPath: /certs}
+      containers:
+        - name: ldap
+          image: osixia/openldap@sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28
+          env:
+            - {name: LDAP_ORGANISATION, value: Praetor Staging}
+            - {name: LDAP_DOMAIN, value: praetor.local}
+            - {name: LDAP_BASE_DN, value: "dc=praetor,dc=local"}
+            - name: LDAP_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: praetor-staging-runtime, key: PRAETOR_LDAP_BIND_PASSWORD}}
+            - {name: LDAP_TLS, value: "true"}
+            - {name: LDAP_TLS_CRT_FILENAME, value: tls.crt}
+            - {name: LDAP_TLS_KEY_FILENAME, value: tls.key}
+            - {name: LDAP_TLS_CA_CRT_FILENAME, value: ca.crt}
+            - {name: LDAP_TLS_VERIFY_CLIENT, value: never}
+            - {name: LDAP_SEED_INTERNAL_LDIF_PATH, value: /tmp/ldif}
+          ports: [{name: ldaps, containerPort: 636}]
+          readinessProbe: {tcpSocket: {port: ldaps}, initialDelaySeconds: 10, periodSeconds: 5}
+          volumeMounts:
+            - {name: seed, mountPath: /tmp/ldif, readOnly: true}
+            - {name: tls, mountPath: /container/service/slapd/assets/certs}
+            - {name: data, mountPath: /var/lib/ldap}
+            - {name: config, mountPath: /etc/ldap/slapd.d}
+      volumes:
+        - {name: seed, configMap: {name: praetor-staging-ldap-seed}}
+        - {name: tls-source, secret: {secretName: praetor-staging-ldap-tls, defaultMode: 0400}}
+        - {name: tls, emptyDir: {sizeLimit: 2Mi}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], storageClassName: local-path, resources: {requests: {storage: 1Gi}}}
+    - metadata: {name: config}
+      spec: {accessModes: [ReadWriteOnce], storageClassName: local-path, resources: {requests: {storage: 1Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: praetor-staging-ldap}
+spec:
+  selector: {app: praetor-staging-ldap}
+  ports: [{name: ldaps, port: 636, targetPort: ldaps}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: praetor-staging-secrets-postgres}
+spec:
+  serviceName: praetor-staging-secrets-postgres
+  replicas: 1
+  selector: {matchLabels: {app: praetor-staging-secrets-postgres}}
+  template:
+    metadata: {labels: {app: praetor-staging-secrets-postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15@sha256:74e110c41804365e3915fcc09d5e7a1eff50161aaa94d5da0e58e0cd75ae509c
+          env:
+            - {name: POSTGRES_DB, value: postgres}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: praetor-staging-secrets-database, key: password}}
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe: {exec: {command: [pg_isready, -U, postgres]}, initialDelaySeconds: 5, periodSeconds: 5}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], storageClassName: local-path, resources: {requests: {storage: 4Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: praetor-staging-secrets-postgres}
+spec:
+  selector: {app: praetor-staging-secrets-postgres}
+  ports: [{name: postgres, port: 5432}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: praetor-staging-audit-postgres}
+spec:
+  serviceName: praetor-staging-audit-postgres
+  replicas: 1
+  selector: {matchLabels: {app: praetor-staging-audit-postgres}}
+  template:
+    metadata: {labels: {app: praetor-staging-audit-postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15@sha256:74e110c41804365e3915fcc09d5e7a1eff50161aaa94d5da0e58e0cd75ae509c
+          env:
+            - {name: POSTGRES_DB, value: postgres}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: praetor-staging-secrets-database, key: password}}
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe: {exec: {command: [pg_isready, -U, postgres]}, initialDelaySeconds: 5, periodSeconds: 5}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], storageClassName: local-path, resources: {requests: {storage: 4Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: praetor-staging-audit-postgres}
+spec:
+  selector: {app: praetor-staging-audit-postgres}
+  ports: [{name: postgres, port: 5432}]

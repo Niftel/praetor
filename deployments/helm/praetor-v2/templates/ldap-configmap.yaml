@@ -7,7 +7,7 @@ metadata:
     {{- include "praetor.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 data:
-  # Mounted at /etc/praetor/ldap.yaml on the api pod. The bind password is NOT here;
+  # Mounted at /etc/praetor/ldap/ldap.yaml on the api pod. The bind password is NOT here;
   # it is read from PRAETOR_LDAP_BIND_PASSWORD (the chart Secret) via bind_password_env.
   ldap.yaml: |
     {{- toYaml .Values.ldap.config | nindent 4 }}

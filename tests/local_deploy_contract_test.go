@@ -329,6 +329,12 @@ func TestStagingReleaseIsDigestPinnedAndSecretReferenced(t *testing.T) {
 		"--rollback-on-failure --wait",
 		"praetor-staging-runtime",
 		"praetor-staging-registry",
+		"praetor-staging-ingress-tls",
+		"praetor-staging-ldap-tls",
+		"praetor-staging-ldap-config",
+		"praetor-api-identity",
+		"deployment/praetor-secrets",
+		"missing or has an empty key",
 		"revision-$revision.json",
 	} {
 		if !strings.Contains(script, required) {
@@ -350,6 +356,74 @@ func TestStagingReleaseIsDigestPinnedAndSecretReferenced(t *testing.T) {
 	}
 	if !strings.Contains(string(lockRaw), "platformVersion: 0.1.1") || !strings.Contains(string(lockRaw), "digest: sha256:") {
 		t.Fatal("staging release lock must declare platform version and digests")
+	}
+}
+
+func TestStagingIntegrationsUseTLSAndPersistentState(t *testing.T) {
+	root := repositoryRoot(t)
+	manifestRaw, err := os.ReadFile(filepath.Join(root, "deployments", "staging", "integrations.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(manifestRaw)
+	for _, required := range []string{
+		"kind: StatefulSet",
+		"name: praetor-staging-ldap",
+		"LDAP_TLS, value: \"true\"",
+		"secretKeyRef: {name: praetor-staging-runtime, key: PRAETOR_LDAP_BIND_PASSWORD}",
+		"secretName: praetor-staging-ldap-tls",
+		"volumeClaimTemplates:",
+		"name: praetor-staging-secrets-postgres",
+		"name: praetor-staging-audit-postgres",
+		"@sha256:",
+	} {
+		if !strings.Contains(manifest, required) {
+			t.Fatalf("staging integrations manifest must contain %q", required)
+		}
+	}
+
+	ldapRaw, err := os.ReadFile(filepath.Join(root, "deployments", "staging", "ldap.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ldap := string(ldapRaw)
+	for _, required := range []string{"ldaps://", "ca_file:", "insecure_skip_verify: false", "bind_password_env: PRAETOR_LDAP_BIND_PASSWORD"} {
+		if !strings.Contains(ldap, required) {
+			t.Fatalf("staging LDAP configuration must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"bind_password:", "ldap://praetor"} {
+		if strings.Contains(ldap, forbidden) {
+			t.Fatalf("staging LDAP configuration must not contain %q", forbidden)
+		}
+	}
+
+	scriptRaw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-integrations.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptRaw)
+	for _, required := range []string{
+		"plan|bootstrap|status|verify",
+		"mkcert -cert-file",
+		"praetor-staging-ingress-tls",
+		"praetor-staging-ldap-tls",
+		"praetor-dev-bootstrap",
+		"secrets-database-url-file",
+		"audit-database-url-file",
+		"docker buildx imagetools inspect",
+		"has no linux/$target_arch manifest required by staging",
+		"--from-file=password=",
+		"--from-file=ca.crt=",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("staging integration automation must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{"kubectl delete pvc", "kubectl delete namespace", "k3d cluster delete", "rm -rf"} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("staging integration automation must not contain destructive operation %q", forbidden)
+		}
 	}
 }
 

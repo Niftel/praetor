@@ -18,10 +18,10 @@ spec:
         app.kubernetes.io/component: reconciler
       annotations:
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
-      {{- with .Values.reconciler.podAnnotations }}
-      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.reconciler.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "praetor.serviceAccountName" . }}
       {{- with .Values.image.pullSecrets }}

@@ -44,7 +44,7 @@ data:
   # Host-runner callback URL (must be routable from managed targets).
   HOST_RUNNER_CALLBACK_URL: {{ include "praetor.callbackUrl" . | quote }}
   {{- if .Values.ldap.enabled }}
-  PRAETOR_LDAP_CONFIG: /etc/praetor/ldap.yaml
+  PRAETOR_LDAP_CONFIG: /etc/praetor/ldap/ldap.yaml
   {{- end }}
   {{- if .Values.bootstrapAdmin.enabled }}
   # Break-glass local superuser (the migrator reads these + the password secret).

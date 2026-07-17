@@ -23,8 +23,33 @@ executor:
     packs: { size: 10Gi, storageClass: local-path }
     ssh: { size: 100Mi, storageClass: local-path }
 
+hostRunner:
+  # Localhost executions run inside the executor pod and must not resolve the
+  # host-only .localhost ingress name back to their own loopback interface.
+  callbackUrl: http://praetor-staging-ingestion:8081
+
+ldap:
+  enabled: true
+  existingConfigMap: praetor-staging-ldap-config
+
+api:
+  extraEnv:
+    - name: SSL_CERT_FILE
+      value: /etc/praetor/ldap/ca.crt
+
+secretsService:
+  enabled: true
+  url: https://praetor-secrets.praetor-staging.svc:8443
+  trustDomain: staging.praetor.local
+  apiIdentitySecret: praetor-api-identity
+  schedulerIdentitySecret: praetor-scheduler-identity
+  executorIdentitySecret: praetor-executor-identity
+
 ingress:
   enabled: true
   className: traefik
   host: praetor-staging.localhost
   ingestionHost: ingest.praetor-staging.localhost
+  tls:
+    enabled: true
+    secretName: praetor-staging-ingress-tls

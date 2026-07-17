@@ -36,10 +36,10 @@ spec:
         app.kubernetes.io/component: scheduler
       annotations:
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
-      {{- with .Values.scheduler.podAnnotations }}
-      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.scheduler.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "praetor.serviceAccountName" . }}
       {{- with .Values.image.pullSecrets }}

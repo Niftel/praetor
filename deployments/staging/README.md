@@ -112,3 +112,41 @@ written with mode `0600` below
 `~/.local/share/praetor/staging/evidence/<platform-version>/`; it contains only
 the release name, namespace, Helm revision, timestamp, and deployed image
 references.
+
+## Security and identity integrations
+
+Review the staging-only integration plan before it changes the cluster:
+
+```sh
+make staging-integrations-plan
+```
+
+Bootstrap the trusted TLS, persistent directory, and Secrets Service
+prerequisites, then deploy the immutable Praetor release:
+
+```sh
+make staging-integrations-bootstrap
+make staging-release-deploy
+make staging-integrations-verify
+```
+
+The bootstrap uses the workstation's `mkcert` CA for the two `.localhost`
+ingress names and for verified in-cluster LDAPS. Run `mkcert -install` once if
+the local CA has not been installed. Private keys and generated staging-only
+workload identities are stored with restrictive permissions below
+`~/.local/share/praetor/staging/pki/` and projected into pods through
+Kubernetes Secret references. They are never accepted as Helm values or
+written to repository files.
+
+OpenLDAP, the Secrets Service database, and the audit database are StatefulSets
+with `local-path` PVCs. Their PVCs are preserved across controlled pod and
+workload restarts. `staging-release.sh` refuses to deploy Praetor until LDAPS,
+both databases, the Secrets Service, its audit sink, ingress TLS, and all three
+Praetor workload identity Secrets are present and healthy.
+
+The staging directory contains only synthetic users from
+`deployments/ldap/bootstrap.ldif`. `demo-operator` maps to the Engineering
+organization and `backend-team`; `demo-auditor` maps to the Engineering auditor
+role. The bind password remains in `praetor-staging-runtime`, and the committed
+LDAP configuration requires `ldaps://`, a mounted CA bundle, and
+`insecure_skip_verify: false`.

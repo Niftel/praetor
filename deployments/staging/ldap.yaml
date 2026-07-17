@@ -1,0 +1,43 @@
+server:
+  url: "ldaps://praetor-staging-ldap:636"
+  ca_file: /etc/praetor/ldap/ca.crt
+  bind_dn: "cn=admin,dc=praetor,dc=local"
+  bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
+  start_tls: false
+  insecure_skip_verify: false
+  timeout: 30s
+users:
+  search_base: "ou=users,dc=praetor,dc=local"
+  search_filter: "(objectClass=inetOrgPerson)"
+  search_scope: sub
+  attributes: {username: uid, email: mail, first_name: givenName, last_name: sn}
+group_type:
+  type: member_dn
+  search_base: "ou=teams,dc=praetor,dc=local"
+  search_filter: "(objectClass=groupOfNames)"
+  member_attribute: member
+authenticator_maps:
+  - {name: "deny login by default", order: 0, revoke: true, when: {always: false}, map: {type: allow}}
+  - name: "allow staging operators and auditors"
+    order: 10
+    when: {any: [{group: "cn=backend-team,ou=teams,dc=praetor,dc=local"}, {group: "cn=frontend-team,ou=teams,dc=praetor,dc=local"}, {group: "cn=compliance-team,ou=teams,dc=praetor,dc=local"}]}
+    map: {type: allow}
+user_flags_by_group:
+  is_system_auditor: ["cn=compliance-team,ou=teams,dc=praetor,dc=local"]
+organization_map:
+  Engineering:
+    admins: ["cn=backend-team,ou=teams,dc=praetor,dc=local"]
+    users: ["cn=backend-team,ou=teams,dc=praetor,dc=local", "cn=frontend-team,ou=teams,dc=praetor,dc=local"]
+    auditors: ["cn=compliance-team,ou=teams,dc=praetor,dc=local"]
+    remove_users: true
+    remove_admins: true
+    remove_auditors: true
+team_map:
+  backend-team:
+    organization: Engineering
+    users: ["cn=backend-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
+  frontend-team:
+    organization: Engineering
+    users: ["cn=frontend-team,ou=teams,dc=praetor,dc=local"]
+    remove: true
