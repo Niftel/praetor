@@ -64,7 +64,19 @@ while IFS= read -r node; do
 done < <(k3d node list --no-headers | awk -v cluster="k3d-$CLUSTER-" '$1 ~ "^" cluster {print $1}')
 (( ${#cluster_nodes[@]} > 0 )) || { echo "error: no nodes found for k3d cluster $CLUSTER" >&2; exit 1; }
 for node in "${cluster_nodes[@]}"; do
-  imported_images="$(docker exec "$node" k3s ctr --namespace k8s.io images list --quiet)"
+  imported_images=""
+  for _ in {1..15}; do
+    imported_images="$(kubectl get node "$node" -o jsonpath='{range .status.images[*].names[*]}{.}{"\n"}{end}')"
+    missing_image=false
+    for image in "${validation_images[@]}"; do
+      if ! grep -Fxq "docker.io/library/$image" <<<"$imported_images" && ! grep -Fxq "$image" <<<"$imported_images"; then
+        missing_image=true
+        break
+      fi
+    done
+    [[ "$missing_image" == false ]] && break
+    sleep 1
+  done
   for image in "${validation_images[@]}"; do
     if ! grep -Fxq "docker.io/library/$image" <<<"$imported_images" && ! grep -Fxq "$image" <<<"$imported_images"; then
       echo "error: k3d image import did not load $image into $node" >&2
