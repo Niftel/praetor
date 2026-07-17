@@ -5,6 +5,7 @@ import { Workflow, WorkflowRunSummary } from '../types';
 import { Plus, Trash2, Rocket, GitFork, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
+import { useCapabilities } from '../lib/useCapabilities';
 
 const runTone = (s: string): { text: string; dot: string } => {
   if (s === 'successful') return { text: 'text-ok', dot: 'bg-ok' };
@@ -23,6 +24,8 @@ const WorkflowsPage = () => {
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
   const [launching, setLaunching] = useState<Workflow | null>(null);
+  const { capabilities: orgCapabilities, loading: orgCapabilitiesLoading } = useCapabilities('organization', orgId);
+  const canCreate = !!orgCapabilities.add_workflow_template;
 
   // silent=true for background polls so the list stays live without flashing the
   // full-page spinner or disturbing scroll.
@@ -88,41 +91,26 @@ const WorkflowsPage = () => {
             <h1 className="text-[21px] font-semibold tracking-tight mt-1.5 flex items-center gap-2"><GitFork size={20} className="text-acc2" /> {orgName} · Workflows</h1>
             <p className="mt-2 text-[12.5px] text-mut max-w-[560px] leading-relaxed">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
           </div>
-          <button
-            onClick={() => navigate(`/workflows/org/${orgId}/builder`)}
-            className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-          >
-            <Plus size={15} /> New workflow
-          </button>
+          {!orgCapabilitiesLoading && canCreate && (
+            <button
+              onClick={() => navigate(`/workflows/org/${orgId}/builder`)}
+              className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            >
+              <Plus size={15} /> New workflow
+            </button>
+          )}
         </div>
 
         {/* Catalog */}
         <div className="rounded-2xl border border-line overflow-hidden mb-8">
-          {workflows.map(wf => {
-            const nodeCount = (wf as any).nodes?.length;
-            return (
-              <div key={wf.id} onClick={() => edit(wf)} className="group flex items-center gap-3 px-5 py-4 border-b border-line last:border-0 hover:bg-white/[0.02] cursor-pointer">
-                <span className="w-9 h-9 rounded-lg border border-line2 grid place-items-center text-acc2 shrink-0"><GitFork size={17} /></span>
-                <div className="min-w-0">
-                  <div className="text-[14px] font-semibold tracking-tight truncate">{wf.name}</div>
-                  <div className="font-mono text-[11px] text-dim mt-0.5">
-                    {typeof nodeCount === 'number' ? `${nodeCount} node${nodeCount === 1 ? '' : 's'}` : 'DAG'}
-                    {(wf as any).webhook_enabled ? ' · webhook trigger' : ''}
-                  </div>
-                </div>
-                <div className="ml-auto flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                  <button onClick={() => edit(wf)} className="h-8 px-2.5 rounded-md text-[12px] font-medium flex items-center gap-1.5 text-ink2 hover:bg-white/5"><Pencil size={13} /> Edit</button>
-                  <button onClick={() => setLaunching(wf)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>
-                  <button onClick={() => remove(wf)} className="w-8 h-8 grid place-items-center rounded-md text-faint hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={15} /></button>
-                </div>
-              </div>
-            );
-          })}
+          {workflows.map(wf => (
+            <WorkflowCatalogRow key={wf.id} workflow={wf} edit={edit} launch={setLaunching} remove={remove} />
+          ))}
           {workflows.length === 0 && !loading && (
             <div className="px-6 py-12 text-center">
               <GitFork size={34} className="mx-auto mb-3 text-dim opacity-40" />
               <p className="text-sm text-dim mb-4">No workflows in this organization yet.</p>
-              <button onClick={() => navigate(`/workflows/org/${orgId}/builder`)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2"><Plus size={15} /> New workflow</button>
+              {!orgCapabilitiesLoading && canCreate && <button onClick={() => navigate(`/workflows/org/${orgId}/builder`)} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2"><Plus size={15} /> New workflow</button>}
             </div>
           )}
         </div>
@@ -159,6 +147,39 @@ const WorkflowsPage = () => {
         </div>
         <WorkflowLaunchModal isOpen={!!launching} workflowName={launching?.name || 'Workflow'} organizationId={orgId} onClose={() => setLaunching(null)} onLaunch={launch} />
       </div>
+    </div>
+  );
+};
+
+const WorkflowCatalogRow: React.FC<{
+  workflow: Workflow;
+  edit: (workflow: Workflow) => void;
+  launch: (workflow: Workflow) => void;
+  remove: (workflow: Workflow) => void;
+}> = ({ workflow, edit, launch, remove }) => {
+  const { capabilities, loading } = useCapabilities('workflow_template', workflow.id);
+  const nodeCount = (workflow as any).nodes?.length;
+  const canManage = !loading && capabilities.manage;
+  const canLaunch = !loading && capabilities.execute;
+  return (
+    <div onClick={canManage ? () => edit(workflow) : undefined}
+      className={`group flex items-center gap-3 px-5 py-4 border-b border-line last:border-0 hover:bg-white/[0.02] ${canManage ? 'cursor-pointer' : ''}`}>
+      <span className="w-9 h-9 rounded-lg border border-line2 grid place-items-center text-acc2 shrink-0"><GitFork size={17} /></span>
+      <div className="min-w-0">
+        <div className="text-[14px] font-semibold tracking-tight truncate">{workflow.name}</div>
+        <div className="font-mono text-[11px] text-dim mt-0.5">
+          {typeof nodeCount === 'number' ? `${nodeCount} node${nodeCount === 1 ? '' : 's'}` : 'DAG'}
+          {(workflow as any).webhook_enabled ? ' · webhook trigger' : ''}
+        </div>
+      </div>
+      {!loading && !canManage && !canLaunch && <span className="ml-auto font-mono text-[10px] text-dim">read only</span>}
+      {(canManage || canLaunch) && (
+        <div className="ml-auto flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+          {canManage && <button onClick={() => edit(workflow)} className="h-8 px-2.5 rounded-md text-[12px] font-medium flex items-center gap-1.5 text-ink2 hover:bg-white/5"><Pencil size={13} /> Edit</button>}
+          {canLaunch && <button onClick={() => launch(workflow)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>}
+          {canManage && <button onClick={() => remove(workflow)} className="w-8 h-8 grid place-items-center rounded-md text-faint hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={15} /></button>}
+        </div>
+      )}
     </div>
   );
 };

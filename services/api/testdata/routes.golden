@@ -30,6 +30,7 @@ DELETE  /api/v1/workflow-templates/{id}/notifications/{ntId}/{event}
 DELETE  /metrics
 GET     /api/v1/access
 GET     /api/v1/activity-stream
+GET     /api/v1/capabilities
 GET     /api/v1/credential-types/
 GET     /api/v1/credential-types/{id}
 GET     /api/v1/credentials/

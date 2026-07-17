@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -28,6 +29,52 @@ func rbacTestDB(t *testing.T) *sqlx.DB {
 		t.Skipf("cannot reach TEST_DATABASE_URL: %v", err)
 	}
 	return db
+}
+
+// TestEffectiveCapabilitiesEndpoint proves the UI permission summary is sourced
+// from the production decision point: administrators receive mutation
+// capabilities while an auditor on the same organization remains read-only.
+func TestEffectiveCapabilitiesEndpoint(t *testing.T) {
+	db := rbacTestDB(t)
+	defer db.Close()
+	resource := handlers.NewAccessResource(db, handlers.NewAuthorizer(db))
+	access := rbac.NewStore(db, testResourceTables)
+
+	uniq := time.Now().UnixNano()
+	orgID := createOrg(t, db, fmt.Sprintf("rbac-capabilities-%d", uniq))
+	adminID := createUser(t, db, fmt.Sprintf("rbac-cap-admin-%d", uniq))
+	auditorID := createUser(t, db, fmt.Sprintf("rbac-cap-auditor-%d", uniq))
+	grantObjectRole(t, access, rbac.Organization, orgID, rbac.AdminRole, adminID)
+	grantObjectRole(t, access, rbac.Organization, orgID, rbac.AuditorRole, auditorID)
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM organizations WHERE id=$1`, orgID)
+		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, adminID, auditorID)
+	})
+
+	admin := effectiveCapabilities(t, resource, orgID, middleware.UserContext{UserID: adminID})
+	if !admin["view"] || !admin["manage"] || !admin["add_inventory"] || !admin["add_workflow_template"] {
+		t.Fatalf("organization administrator capabilities = %#v, want view/manage/add inventory/add workflow", admin)
+	}
+	auditor := effectiveCapabilities(t, resource, orgID, middleware.UserContext{UserID: auditorID})
+	if !auditor["view"] || auditor["manage"] || auditor["add_inventory"] || auditor["add_workflow_template"] {
+		t.Fatalf("organization auditor capabilities = %#v, want read-only", auditor)
+	}
+}
+
+func effectiveCapabilities(t *testing.T, resource *handlers.AccessResource, objectID int64, user middleware.UserContext) map[string]bool {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/capabilities?content_type=organization&object_id=%d", objectID), nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey, user))
+	rec := httptest.NewRecorder()
+	resource.Capabilities(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capabilities: status %d (%s)", rec.Code, rec.Body)
+	}
+	var result map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode capabilities: %v", err)
+	}
+	return result
 }
 
 var testResourceTables = map[rbac.ResourceKind]string{

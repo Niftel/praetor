@@ -20,6 +20,17 @@ export interface CurrentUser {
     is_system_auditor: boolean;
 }
 
+export interface ResourceCapabilities {
+    view: boolean;
+    manage: boolean;
+    use: boolean;
+    execute: boolean;
+    update: boolean;
+    approve: boolean;
+    add_inventory?: boolean;
+    add_workflow_template?: boolean;
+}
+
 // Decode the logged-in user's identity from the JWT claims (no network call).
 // Returns null if there's no token or it can't be parsed.
 export const getCurrentUser = (): CurrentUser | null => {
@@ -271,6 +282,8 @@ export const api = {
     getResourceAccess: (contentType: string, objectId: number) => fetchWithAuth(`/access?content_type=${contentType}&object_id=${objectId}`).then(r => r.json()),
     getAssignableRoles: (contentType: string) => fetchWithAuth(`/role-definitions?content_type=${contentType}`).then(r => r.json()),
     getUserAccess: (userId: number) => fetchWithAuth(`/users/${userId}/access`).then(r => r.json()),
+    getCapabilities: (contentType: string, objectId: number): Promise<ResourceCapabilities> =>
+        fetchWithAuth(`/capabilities?content_type=${encodeURIComponent(contentType)}&object_id=${objectId}`).then(r => r.json()),
     grantAccess: (body: { content_type: string; object_id: number; role_definition_id: number; user_id?: number; team_id?: number }) =>
         fetchWithAuth('/access', { method: 'POST', body: JSON.stringify(body) }),
     revokeAccess: (body: { content_type: string; object_id: number; role_definition_id: number; user_id?: number; team_id?: number }) =>

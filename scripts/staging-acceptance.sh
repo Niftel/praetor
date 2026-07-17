@@ -32,7 +32,7 @@ cleanup() {
   [[ -z "$DB_FORWARD_PID" ]] || kill "$DB_FORWARD_PID" 2>/dev/null || true
   [[ -z "$DB_FORWARD_LOG" ]] || rm -f "$DB_FORWARD_LOG"
   if [[ "$DB_CREATED" == true ]]; then
-    kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pod praetor-staging-delegated-db service praetor-staging-delegated-db --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pod/praetor-staging-delegated-db service/praetor-staging-delegated-db --ignore-not-found --wait=false >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
