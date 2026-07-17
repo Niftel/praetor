@@ -50,7 +50,7 @@ spec:
       # PVC mounts, then drops to the praetor user (uid 1000) via gosu.
       initContainers:
         - name: wait-for-nats
-          image: busybox:1.36
+          image: {{ .Values.executor.initImage }}
           command:
             - sh
             - -c

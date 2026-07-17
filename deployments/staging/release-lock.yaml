@@ -1,0 +1,36 @@
+schemaVersion: 1
+platformVersion: 0.1.1
+registry: ghcr.io/niftel
+components:
+  api:
+    image: praetor-api
+    version: 0.1.1
+    digest: sha256:16370e1ceb5fea5c8bec990070a572eca7f016e3e841ee011f5a539f9f23eb5c
+  consumer:
+    image: praetor-consumer
+    version: 0.1.1
+    digest: sha256:d91d79fd5982577160c880cd7e7ff9f6954102fa19e2528a2f27295d86959d86
+  executor:
+    image: praetor-executor
+    version: 0.1.1
+    digest: sha256:d732a37a241f5389d5da94315783cfdc0aa0d0cad2155f279b15353a6426d9cf
+  ingestion:
+    image: praetor-ingestion
+    version: 0.1.1
+    digest: sha256:966a45f5fabcbe653f835130a898dbfa7a4b1130a32004c309f94d5dd66bddbd
+  migrator:
+    image: praetor-migrator
+    version: 0.1.1
+    digest: sha256:d6695dfe7d69e2a191f5091c206c96ba86d5721ca556db7f669ceec355707861
+  reconciler:
+    image: praetor-reconciler
+    version: 0.1.0
+    digest: sha256:6f926f3f8b9614b6ca78913334a120bbb650b50d3f4ec4f8c23bd77ab459d620
+  scheduler:
+    image: praetor-scheduler
+    version: 0.1.2
+    digest: sha256:68b0d0fb8a7a879a4d68068eef1899f21b49ce3ecde9501a8012b9f16fe3f985
+  ui:
+    image: praetor-ui
+    version: 0.1.1
+    digest: sha256:632b483283a81ceec937fddaca1dc78a11e9c08194d4b081c320781d77111fff

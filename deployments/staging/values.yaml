@@ -1,0 +1,30 @@
+image:
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - name: praetor-staging-registry
+
+secrets:
+  existingSecret: praetor-staging-runtime
+
+database:
+  bundled:
+    image: postgres:15@sha256:74e110c41804365e3915fcc09d5e7a1eff50161aaa94d5da0e58e0cd75ae509c
+    storageClass: local-path
+
+nats:
+  bundled:
+    image: nats:2.10-alpine@sha256:b83efabe3e7def1e0a4a31ec6e078999bb17c80363f881df35edc70fcb6bb927
+    storageClass: local-path
+
+executor:
+  initImage: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+  persistence:
+    jobs: { size: 5Gi, storageClass: local-path }
+    packs: { size: 10Gi, storageClass: local-path }
+    ssh: { size: 100Mi, storageClass: local-path }
+
+ingress:
+  enabled: true
+  className: traefik
+  host: praetor-staging.localhost
+  ingestionHost: ingest.praetor-staging.localhost
