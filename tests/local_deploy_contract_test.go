@@ -139,6 +139,29 @@ func TestProductValidationFixtureIsScopedAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{
+		"scripts/bootstrap-product-validation-base.sh",
+		".github/workflows/product-validation-fixture.yml",
+		"deployments/product-validation/base-datastores.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("clean fixture gate is missing %s: %v", name, err)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "product-validation-fixture.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("clean fixture workflow must contain %q", required)
+		}
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("..")

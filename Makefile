@@ -146,6 +146,9 @@ local-cluster-release:
 	./scripts/deploy-local-release.sh
 
 .PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup
+validation-fixture-bootstrap:
+	./scripts/bootstrap-product-validation-base.sh
+
 validation-fixture-create:
 	./scripts/product-validation-fixture.sh create
 

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: praetor-validation-secrets-postgres}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: praetor-validation-secrets-postgres}}
+  template:
+    metadata: {labels: {app: praetor-validation-secrets-postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.10-alpine3.23@sha256:8189a1f6e40904781fc9e2612687877791d21679866db58b1de996b31fc312e4
+          env:
+            - {name: POSTGRES_PASSWORD, value: validation-only}
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe: {exec: {command: [sh, -c, "pg_isready -U postgres"]}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: praetor-validation-secrets-postgres}
+spec: {selector: {app: praetor-validation-secrets-postgres}, ports: [{port: 5432, targetPort: postgres}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: praetor-validation-audit-postgres}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: praetor-validation-audit-postgres}}
+  template:
+    metadata: {labels: {app: praetor-validation-audit-postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.10-alpine3.23@sha256:8189a1f6e40904781fc9e2612687877791d21679866db58b1de996b31fc312e4
+          env:
+            - {name: POSTGRES_PASSWORD, value: validation-only}
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe: {exec: {command: [sh, -c, "pg_isready -U postgres"]}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: praetor-validation-audit-postgres}
+spec: {selector: {app: praetor-validation-audit-postgres}, ports: [{port: 5432, targetPort: postgres}]}
