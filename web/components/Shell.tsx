@@ -184,26 +184,26 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-bg text-ink">
       {/* top bar */}
-      <div className="h-[52px] flex-none border-b border-line flex items-center gap-3.5 px-[18px]">
-        <div className="flex items-center gap-2.5">
+      <div className="h-[52px] flex-none border-b border-line flex items-center gap-3.5 px-[18px] max-[520px]:gap-2 max-[520px]:px-3">
+        <div className="flex items-center gap-2.5 shrink-0">
           <div className="w-6 h-6 rounded-md border border-acc grid place-items-center text-acc font-mono font-bold text-[13px]">P</div>
-          <span className="font-semibold tracking-tight text-sm">Praetor</span>
+          <span className="font-semibold tracking-tight text-sm max-[520px]:hidden">Praetor</span>
         </div>
-        <div className="font-mono text-[11px] text-mut"><span className="text-ink">{section}</span></div>
+        <div className="font-mono text-[11px] text-mut max-[700px]:hidden"><span className="text-ink">{section}</span></div>
 
         <button
           onClick={openPalette}
           title="Search runs, jump to any page, or run an action"
-          className="group mx-auto w-[min(520px,42vw)] h-[34px] flex items-center gap-2.5 px-3 border border-line2 rounded-[9px] bg-panel text-left transition-colors hover:border-acc/45 hover:bg-panel2"
+          className="group mx-auto min-w-0 w-[min(520px,42vw)] h-[34px] flex items-center gap-2.5 px-3 border border-line2 rounded-[9px] bg-panel text-left transition-colors hover:border-acc/45 hover:bg-panel2 max-[700px]:w-auto max-[700px]:flex-1 max-[520px]:px-2.5"
         >
           <span className="text-acc font-mono font-semibold transition-transform group-hover:translate-x-0.5">&#10095;</span>
           <span className="text-dim text-[12.5px] flex-1 min-w-0 truncate">
             Search or <span key={ex} className="text-mut omni-ex">{OMNI_EXAMPLES[ex]}</span>
           </span>
-          <span className="font-mono text-[10px] text-mut group-hover:text-ink border border-line group-hover:border-line2 rounded-[5px] px-1.5 py-px transition-colors">⌘K</span>
+          <span className="font-mono text-[10px] text-mut group-hover:text-ink border border-line group-hover:border-line2 rounded-[5px] px-1.5 py-px transition-colors max-[520px]:hidden">⌘K</span>
         </button>
 
-        <div className="ml-auto flex items-center gap-3.5">
+        <div className="ml-auto flex items-center gap-3.5 shrink-0 max-[520px]:gap-1.5">
           <button onClick={() => navigate('/approvals')} title={`${approvalCount} pending approval${approvalCount === 1 ? '' : 's'}`} className="relative grid h-7 w-7 place-items-center rounded-lg text-dim hover:bg-panel hover:text-ink">
             <ShieldCheck size={15} />
             {approvalCount > 0 && <span className="absolute -right-1.5 -top-1.5 min-w-[17px] rounded-full bg-changed px-1 font-mono text-[9px] font-semibold leading-[17px] text-[#1a1203] tabular-nums">{approvalCount > 99 ? '99+' : approvalCount}</span>}
@@ -211,7 +211,7 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
           <button onClick={onLogout} title="Sign out" className="w-7 h-7 grid place-items-center rounded-lg text-dim hover:text-ink hover:bg-panel">
             <LogOut size={15} />
           </button>
-          <div className="w-[27px] h-[27px] rounded-[7px] bg-[#161b24] grid place-items-center text-acc font-mono text-[11px] border border-line2">{initial}</div>
+          <div className="w-[27px] h-[27px] rounded-[7px] bg-[#161b24] grid place-items-center text-acc font-mono text-[11px] border border-line2 max-[420px]:hidden">{initial}</div>
         </div>
       </div>
 
