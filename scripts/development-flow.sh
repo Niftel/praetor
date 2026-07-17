@@ -156,9 +156,10 @@ sync_issue() {
 }
 
 linked_issue() {
-  local body="$1"
-  grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' <<<"$body" |
-    grep -Eo '[0-9]+' | head -n1
+  local body="$1" issue
+  issue="$(grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' <<<"$body" |
+    grep -Eo '[0-9]+' | head -n1 || true)"
+  printf '%s\n' "$issue"
 }
 
 sync_pr() {
