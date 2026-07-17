@@ -180,6 +180,9 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
 	}
+	for _, required := range []string{"PRAETOR_E2E_SECRETS_DB_APP: praetor-validation-secrets-postgres", "PRAETOR_E2E_AUDIT_DB_APP: praetor-validation-audit-postgres"} {
+		if !strings.Contains(workflow, required) { t.Fatalf("readiness workflow must contain %q", required) }
+	}
 	recoveryRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-execution-recovery-e2e.sh"))
 	if err != nil {
 		t.Fatal(err)

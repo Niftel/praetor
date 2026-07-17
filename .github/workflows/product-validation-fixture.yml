@@ -108,6 +108,8 @@ jobs:
         env:
           PRAETOR_E2E_EVIDENCE_FILE: build/readiness-evidence/secrets-service.json
           PRAETOR_E2E_PROJECT_REF: ${{ github.head_ref || github.ref_name }}
+          PRAETOR_E2E_SECRETS_DB_APP: praetor-validation-secrets-postgres
+          PRAETOR_E2E_AUDIT_DB_APP: praetor-validation-audit-postgres
         run: |
           executor_pod="$(kubectl get pod -n praetor-secrets -l app.kubernetes.io/component=executor,app.kubernetes.io/instance=praetor -o jsonpath='{.items[0].metadata.name}')"
           executor_arch="$(kubectl exec -n praetor-secrets "$executor_pod" -- uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^x86_64$/amd64/')"

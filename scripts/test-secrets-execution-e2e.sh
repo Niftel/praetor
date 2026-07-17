@@ -18,6 +18,8 @@ PROJECT_URL="${PRAETOR_E2E_PROJECT_URL:-https://github.com/Niftel/praetor.git}"
 PLAYBOOK="${PRAETOR_E2E_PLAYBOOK:-playbooks/validate-credential-injection.yml}"
 PROJECT_REF="${PRAETOR_E2E_PROJECT_REF:-${GITHUB_HEAD_REF:-}}"
 TIMEOUT_SECONDS="${PRAETOR_E2E_TIMEOUT_SECONDS:-180}"
+SECRETS_DB_SELECTOR="app=${PRAETOR_E2E_SECRETS_DB_APP:-praetor-secrets-postgres}"
+AUDIT_DB_SELECTOR="app=${PRAETOR_E2E_AUDIT_DB_APP:-praetor-audit-postgres}"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -30,26 +32,11 @@ for command in curl jq kubectl openssl; do
   need "$command"
 done
 
-EXECUTOR_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app.kubernetes.io/component=executor,app.kubernetes.io/instance=praetor \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
-PRAETOR_DB_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app.kubernetes.io/component=postgresql,app.kubernetes.io/instance=praetor \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
-SECRETS_DB_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app=praetor-secrets-postgres \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
-AUDIT_DB_POD="$(
-  kubectl get pods -n "$NAMESPACE" \
-    -l app=praetor-audit-postgres \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
+first_pod() { kubectl get pods -n "$NAMESPACE" -l "$1" -o name | head -n1 | cut -d/ -f2; }
+EXECUTOR_POD="$(first_pod 'app.kubernetes.io/component=executor,app.kubernetes.io/instance=praetor')"
+PRAETOR_DB_POD="$(first_pod 'app.kubernetes.io/component=postgresql,app.kubernetes.io/instance=praetor')"
+SECRETS_DB_POD="$(first_pod "$SECRETS_DB_SELECTOR")"
+AUDIT_DB_POD="$(first_pod "$AUDIT_DB_SELECTOR")"
 
 for value in "$EXECUTOR_POD" "$PRAETOR_DB_POD" "$SECRETS_DB_POD" "$AUDIT_DB_POD"; do
   if [[ -z "$value" ]]; then
