@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -51,6 +51,9 @@ secrets-execution-contract-test:
 
 secrets-execution-e2e:
 	./scripts/test-secrets-execution-e2e.sh
+
+readiness-report-test:
+	go test ./internal/readiness ./cmd/readiness-report
 
 # A release preflight intentionally fails while the manifest is marked
 # development. The remote form also verifies GHCR images and Go module tags.
@@ -117,6 +120,7 @@ test:
 	$(MAKE) deployment-contract-test
 	$(MAKE) local-deploy-contract-test
 	$(MAKE) secrets-execution-contract-test
+	$(MAKE) readiness-report-test
 	go test -v ./tests/...
 	@echo "Running unit tests (incl. #39 no-wildcard-SELECT gate + column-drift checks)..."
 	go test ./services/... ./pkg/...
