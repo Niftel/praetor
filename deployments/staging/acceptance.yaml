@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: praetor-staging-acceptance-sink
+  labels: {app.kubernetes.io/part-of: praetor-staging-acceptance}
+data:
+  default.conf: |
+    log_format notification escape=none '$request_body';
+    access_log /dev/stdout notification;
+    server {
+      listen 8080;
+      location = /healthz { access_log off; return 204; }
+      location / { rewrite ^ /capture break; proxy_pass http://127.0.0.1:8080; }
+      location = /capture { access_log off; return 204; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praetor-staging-acceptance-sink
+  labels: {app.kubernetes.io/part-of: praetor-staging-acceptance}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: praetor-staging-acceptance-sink}}
+  template:
+    metadata: {labels: {app: praetor-staging-acceptance-sink, app.kubernetes.io/part-of: praetor-staging-acceptance}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: sink
+          image: nginx:alpine-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 2, periodSeconds: 3}
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+          volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d}]
+      volumes: [{name: config, configMap: {name: praetor-staging-acceptance-sink}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praetor-staging-acceptance-sink
+  labels: {app.kubernetes.io/part-of: praetor-staging-acceptance}
+spec:
+  selector: {app: praetor-staging-acceptance-sink}
+  ports: [{name: http, port: 8080, targetPort: http}]

@@ -191,3 +191,28 @@ Helm revision and then deploys the current immutable lock again. This is a chart
 rollback boundary, not permission to reverse arbitrary database migrations.
 The executable database compatibility matrix remains authoritative for schema
 rollback support.
+
+## Operator acceptance
+
+Acceptance data is synthetic and isolated to the Engineering organization. The
+committed notification sink records only webhook request bodies and has no
+service-account token. Review and seed the fixture, then run the complete
+scripted journey:
+
+```sh
+make staging-acceptance-plan
+make staging-acceptance-seed
+make staging-acceptance-run
+```
+
+The run proves LDAP login and mapping, inventory and host scope, team-only
+approval, requester self-approval denial, exact-once approval notification, and
+all delegated API scope guards. Delegated API tests use a temporary isolated
+PostgreSQL pod and never connect to or delete the persistent application
+database. Sanitized, mode-`0600` evidence is written below
+`~/.local/share/praetor/staging/acceptance/evidence/`.
+
+The scripted run is followed by the desktop and 390 x 844 UI checklist in
+[`acceptance-report.md`](acceptance-report.md). Product defects discovered by
+that pass are tracked separately and do not get silently folded into the
+acceptance implementation.

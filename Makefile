@@ -213,6 +213,19 @@ staging-recovery-restore:
 staging-recovery-exercise:
 	./scripts/staging-recovery.sh exercise
 
+.PHONY: staging-acceptance-plan staging-acceptance-seed staging-acceptance-status staging-acceptance-run
+staging-acceptance-plan:
+	./scripts/staging-acceptance.sh plan
+
+staging-acceptance-seed:
+	./scripts/staging-acceptance.sh seed
+
+staging-acceptance-status:
+	./scripts/staging-acceptance.sh status
+
+staging-acceptance-run:
+	./scripts/staging-acceptance.sh run
+
 .PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
 validation-fixture-bootstrap:
 	./scripts/bootstrap-product-validation-base.sh

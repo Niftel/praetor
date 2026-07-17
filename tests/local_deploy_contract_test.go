@@ -457,6 +457,57 @@ func TestStagingRecoveryIsEncryptedIsolatedAndNonDestructive(t *testing.T) {
 	}
 }
 
+func TestStagingAcceptanceIsScopedRepeatableAndNonDestructive(t *testing.T) {
+	root := repositoryRoot(t)
+	manifestRaw, err := os.ReadFile(filepath.Join(root, "deployments", "staging", "acceptance.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(manifestRaw)
+	for _, required := range []string{
+		"name: praetor-staging-acceptance-sink",
+		"automountServiceAccountToken: false",
+		"@sha256:",
+		"readinessProbe:",
+		"resources:",
+	} {
+		if !strings.Contains(manifest, required) {
+			t.Fatalf("staging acceptance manifest must contain %q", required)
+		}
+	}
+
+	scriptRaw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-acceptance.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptRaw)
+	for _, required := range []string{
+		"plan|seed|status|run",
+		"demo-operator mwebb fwalsh demo-auditor",
+		"Praetor Validation",
+		"expected exactly 1",
+		"praetor-staging-delegated-db",
+		"validate-delegated-api-e2e.sh",
+		"notification-delivery",
+		"chmod 0600",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("staging acceptance automation must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"kubectl delete namespace",
+		"kubectl delete pvc",
+		"k3d cluster delete",
+		"helm uninstall",
+		"praetor-staging-postgres",
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("staging acceptance automation must not contain destructive or persistent-database operation %q", forbidden)
+		}
+	}
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("..")
