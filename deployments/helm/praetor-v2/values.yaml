@@ -126,6 +126,9 @@ hostRunner:
 
 ldap:
   enabled: false
+  # Use a pre-existing ConfigMap containing ldap.yaml when a disposable
+  # validation fixture owns the directory and its configuration.
+  existingConfigMap: ""
   # Provider-neutral authenticator rules and legacy LDAP login mappings, rendered verbatim into
   # /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml for a full
   # LDAP example and docs/AUTHENTICATOR_MAPPING.md for ordered all/any/not

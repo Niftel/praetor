@@ -1,0 +1,18 @@
+---
+- name: Validate checkpointed execution recovery
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record the protected side effect
+      ansible.builtin.shell: |
+        printf '%s\n' {{ validation_run_label | quote }} >> /var/lib/praetor/recovery-side-effects.log
+      changed_when: true
+
+    - name: Hold the run open for controlled interruption
+      ansible.builtin.pause:
+        seconds: "{{ validation_pause_seconds | default(30) | int }}"
+
+    - name: Record recovery completion
+      ansible.builtin.shell: |
+        printf '%s\n' {{ validation_run_label | quote }} >> /var/lib/praetor/recovery-completions.log
+      changed_when: true
