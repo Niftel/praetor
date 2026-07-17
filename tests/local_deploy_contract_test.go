@@ -210,6 +210,16 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture bootstrap must contain %q", required)
 		}
 	}
+	fixtureRaw, err := os.ReadFile(filepath.Join(root, "deployments", "product-validation", "fixture.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := string(fixtureRaw)
+	for _, required := range []string{"log_format notification '$request_body'", "return 204", "praetor-validation-notification-sink"} {
+		if !strings.Contains(fixture, required) {
+			t.Fatalf("notification recorder must contain %q", required)
+		}
+	}
 }
 
 func repositoryRoot(t *testing.T) string {
