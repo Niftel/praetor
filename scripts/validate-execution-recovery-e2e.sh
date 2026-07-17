@@ -281,8 +281,13 @@ while IFS='|' read -r run_id count; do
   [[ -z "$run_id" || "$count" == 1 ]] || die "run $run_id resolved its credential $count times"
 done <<<"$RESOLUTION_COUNTS"
 
-jq -n \
+EVIDENCE="$(jq -n \
   --argjson recoverable_workflow_job_id "$RECOVERABLE_WORKFLOW_JOB_ID" --arg recoverable_run_id "$RECOVERABLE_RUN_ID" \
   --argjson lost_workflow_job_id "$LOST_WORKFLOW_JOB_ID" --arg lost_run_id "$LOST_RUN_ID" \
   --argjson relaunch_workflow_job_id "$RELAUNCH_WORKFLOW_JOB_ID" --arg relaunch_run_id "$RELAUNCH_RUN_ID" \
-  '{result:"pass",recoverable:{workflow_job_id:$recoverable_workflow_job_id,run_id:$recoverable_run_id},unrecoverable:{workflow_job_id:$lost_workflow_job_id,run_id:$lost_run_id},relaunch:{workflow_job_id:$relaunch_workflow_job_id,run_id:$relaunch_run_id}}'
+  '{schema_version:1,journey:"execution-recovery",result:"pass",recoverable:{workflow_job_id:$recoverable_workflow_job_id,run_id:$recoverable_run_id},unrecoverable:{workflow_job_id:$lost_workflow_job_id,run_id:$lost_run_id},relaunch:{workflow_job_id:$relaunch_workflow_job_id,run_id:$relaunch_run_id}}')"
+if [[ -n "${PRAETOR_RECOVERY_EVIDENCE_FILE:-}" ]]; then
+  umask 077
+  printf '%s\n' "$EVIDENCE" >"$PRAETOR_RECOVERY_EVIDENCE_FILE"
+fi
+printf '%s\n' "$EVIDENCE"
