@@ -593,6 +593,73 @@ gidNumber: 1000
 homeDirectory: /home/tbecker
 userPassword: praetor123
 
+# --- Purpose-named login demos -----------------------------------------------
+# All four accounts use the DEMO-ONLY password `praetor123`.
+dn: uid=demo-admin,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: demo-admin
+givenName: Demo
+sn: Administrator
+cn: Demo Administrator
+displayName: Demo Administrator
+mail: demo-admin@praetor.local
+title: Demo Platform Administrator
+uidNumber: 3001
+gidNumber: 1000
+homeDirectory: /home/demo-admin
+userPassword: praetor123
+
+dn: uid=demo-auditor,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: demo-auditor
+givenName: Demo
+sn: Auditor
+cn: Demo Auditor
+displayName: Demo Auditor
+mail: demo-auditor@praetor.local
+title: Demo Platform Auditor
+uidNumber: 3002
+gidNumber: 1000
+homeDirectory: /home/demo-auditor
+userPassword: praetor123
+
+dn: uid=demo-operator,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: demo-operator
+givenName: Demo
+sn: Operator
+cn: Demo Operator
+displayName: Demo Operator
+mail: demo-operator@praetor.local
+title: Demo Automation Operator
+departmentNumber: Engineering
+uidNumber: 3003
+gidNumber: 1000
+homeDirectory: /home/demo-operator
+userPassword: praetor123
+
+dn: uid=demo-denied,ou=users,dc=praetor,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: demo-denied
+givenName: Demo
+sn: Denied
+cn: Demo Denied User
+displayName: Demo Denied User
+mail: demo-denied@praetor.local
+title: Demo User Without Platform Access
+uidNumber: 3004
+gidNumber: 1000
+homeDirectory: /home/demo-denied
+userPassword: praetor123
+
 # =============================================================================
 # Teams (=> Praetor teams; `ou` links to the department/org)
 # =============================================================================
@@ -618,6 +685,7 @@ member: uid=blee,ou=users,dc=praetor,dc=local
 member: uid=fmuller,ou=users,dc=praetor,dc=local
 member: uid=gkim,ou=users,dc=praetor,dc=local
 member: uid=mwebb,ou=users,dc=praetor,dc=local
+member: uid=demo-operator,ou=users,dc=praetor,dc=local
 
 dn: cn=frontend-team,ou=teams,dc=praetor,dc=local
 objectClass: groupOfNames
@@ -652,6 +720,7 @@ cn: admins
 description: Privileged systems administrators (grants Praetor is_superuser)
 ou: Operations
 member: uid=opark,ou=users,dc=praetor,dc=local
+member: uid=demo-admin,ou=users,dc=praetor,dc=local
 
 # --- Security teams ----------------------------------------------------------
 dn: cn=security-team,ou=teams,dc=praetor,dc=local
@@ -669,6 +738,7 @@ description: Audit, compliance and governance
 ou: Security
 member: uid=scho,ou=users,dc=praetor,dc=local
 member: uid=ocole,ou=users,dc=praetor,dc=local
+member: uid=demo-auditor,ou=users,dc=praetor,dc=local
 
 # --- Data team ---------------------------------------------------------------
 dn: cn=data-engineering-team,ou=teams,dc=praetor,dc=local

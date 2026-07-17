@@ -20,6 +20,15 @@ func fixture(t *testing.T, name string) []byte {
 	return b
 }
 
+func rawFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(fixtureVersion, name))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	return b
+}
+
 func requireKeys(t *testing.T, payload []byte, keys ...string) map[string]json.RawMessage {
 	t.Helper()
 	var object map[string]json.RawMessage
@@ -108,6 +117,50 @@ func TestHTTPResponseContractsV1(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			requireKeys(t, fixture(t, test.name), test.keys...)
 		})
+	}
+}
+
+func TestInventoryRenderedV1(t *testing.T) {
+	payload := rawFixture(t, "inventory_rendered.ini")
+	if len(payload) == 0 || payload[len(payload)-1] != '\n' {
+		t.Fatal("rendered inventory must be non-empty and newline terminated")
+	}
+}
+
+func TestInventoryFactsV1(t *testing.T) {
+	payload := fixture(t, "inventory_facts")
+	facts := requireKeys(t, payload, "db-1", "web-1")
+	for host, raw := range facts {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &object); err != nil {
+			t.Fatalf("facts for %s are not a JSON object: %v", host, err)
+		}
+	}
+}
+
+func TestFactCacheUploadV1(t *testing.T) {
+	payload := fixture(t, "fact_cache_upload")
+	object := requireKeys(t, payload, "facts")
+	var facts map[string]json.RawMessage
+	if err := json.Unmarshal(object["facts"], &facts); err != nil {
+		t.Fatalf("facts is not a host-keyed JSON object: %v", err)
+	}
+	if len(facts) != 2 {
+		t.Fatalf("fact upload contains %d hosts, want 2", len(facts))
+	}
+}
+
+func TestInventorySyncV1(t *testing.T) {
+	payload := fixture(t, "inventory_sync")
+	object := requireKeys(t, payload, "_meta", "all", "ungrouped", "web")
+	var meta struct {
+		HostVars map[string]json.RawMessage `json:"hostvars"`
+	}
+	if err := json.Unmarshal(object["_meta"], &meta); err != nil {
+		t.Fatalf("decode _meta: %v", err)
+	}
+	if len(meta.HostVars) != 2 {
+		t.Fatalf("inventory sync contains %d hostvars, want 2", len(meta.HostVars))
 	}
 }
 

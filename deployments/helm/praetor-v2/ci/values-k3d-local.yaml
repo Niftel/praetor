@@ -60,6 +60,30 @@ ldap:
       search_base: ou=teams,dc=praetor,dc=local
       search_filter: (objectClass=groupOfNames)
       type: member_dn
+    authenticator_maps:
+    - name: deny login by default
+      order: 0
+      revoke: true
+      when:
+        always: false
+      map:
+        type: allow
+    - name: allow mapped directory groups
+      order: 10
+      when:
+        any:
+        - group: cn=platform-team,ou=teams,dc=praetor,dc=local
+        - group: cn=backend-team,ou=teams,dc=praetor,dc=local
+        - group: cn=frontend-team,ou=teams,dc=praetor,dc=local
+        - group: cn=sre-team,ou=teams,dc=praetor,dc=local
+        - group: cn=network-team,ou=teams,dc=praetor,dc=local
+        - group: cn=admins,ou=teams,dc=praetor,dc=local
+        - group: cn=security-team,ou=teams,dc=praetor,dc=local
+        - group: cn=compliance-team,ou=teams,dc=praetor,dc=local
+        - group: cn=data-engineering-team,ou=teams,dc=praetor,dc=local
+        - group: cn=qa-team,ou=teams,dc=praetor,dc=local
+      map:
+        type: allow
     organization_map:
       Data:
         remove_users: true
@@ -97,7 +121,7 @@ ldap:
       insecure_skip_verify: true
       start_tls: false
       timeout: 30s
-      url: ldap://praetor-openldap:389
+      url: ldap://ldap:389
     team_map:
       backend-team:
         organization: Engineering

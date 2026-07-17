@@ -132,11 +132,16 @@ func (c *LDAPConfig) Validate() error {
 
 	// AAP login-mapping validation (only when the new model is configured).
 	if c.UsesLoginMapping() {
+		if err := ValidateAuthenticatorMaps(c.AuthenticatorMaps); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if c.UsesGroupMapping() {
 		switch c.GroupType.Type {
 		case GroupTypeMemberDN, GroupTypeMemberOf, GroupTypePosix, GroupTypeNested:
 			// ok
 		case "":
-			errs = append(errs, "group_type.type is required when organization_map/team_map/user_flags_by_group are set")
+			errs = append(errs, "group_type.type is required when a login mapping uses groups")
 		default:
 			errs = append(errs, fmt.Sprintf("group_type.type %q must be one of: member_dn, member_of, posix, nested", c.GroupType.Type))
 		}

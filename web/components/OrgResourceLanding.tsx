@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { PageSpinner } from './ui/PageSpinner';
-import { Building2, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Building2, ChevronRight, RefreshCw } from 'lucide-react';
 
 interface Org {
     id: number;
@@ -26,9 +26,13 @@ const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath
     const [orgs, setOrgs] = useState<Org[]>([]);
     const [counts, setCounts] = useState<Record<number, number>>({});
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
         (async () => {
+            setLoading(true);
+            setError(false);
             try {
                 const [orgData, items] = await Promise.all([
                     api.getOrganizations(),
@@ -42,11 +46,12 @@ const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath
                 setCounts(c);
             } catch (e) {
                 console.error('Failed to load organizations', e);
+                setError(true);
             } finally {
                 setLoading(false);
             }
         })();
-    }, [fetchItems]);
+    }, [fetchItems, reloadKey]);
 
     if (loading) return <PageSpinner />;
 
@@ -59,7 +64,20 @@ const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath
                 <p className="text-[13px] text-mut mt-1">Choose an organization to view and manage its {title.toLowerCase()}.</p>
             </div>
 
-            {orgs.length === 0 ? (
+            {error ? (
+                <div role="alert" className="rounded-xl border border-err/30 bg-err/10 px-6 py-7 text-center">
+                    <AlertTriangle size={22} className="mx-auto text-err" aria-hidden="true" />
+                    <h2 className="mt-3 text-[15px] font-semibold text-ink">Organizations could not be loaded</h2>
+                    <p className="mt-1 text-[13px] text-mut">Your membership may be fine. The server did not complete the request.</p>
+                    <button
+                        type="button"
+                        onClick={() => setReloadKey((key) => key + 1)}
+                        className="mx-auto mt-4 inline-flex h-9 items-center gap-2 rounded-lg border border-line2 bg-panel px-3.5 text-[13px] font-medium text-ink transition-colors hover:border-acc/50 hover:text-acc2"
+                    >
+                        <RefreshCw size={14} aria-hidden="true" /> Retry
+                    </button>
+                </div>
+            ) : orgs.length === 0 ? (
                 <div className="rounded-xl border border-line bg-panel p-8 text-center text-mut text-sm">
                     You're not a member of any organization yet. Ask an administrator to add you to one.
                 </div>

@@ -4,6 +4,7 @@ import { api, unwrap } from '../services/api';
 import { Workflow, WorkflowRunSummary } from '../types';
 import { Plus, Trash2, Rocket, GitFork, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
+import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
 
 const runTone = (s: string): { text: string; dot: string } => {
   if (s === 'successful') return { text: 'text-ok', dot: 'bg-ok' };
@@ -21,20 +22,34 @@ const WorkflowsPage = () => {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
+  const [launching, setLaunching] = useState<Workflow | null>(null);
 
   // silent=true for background polls so the list stays live without flashing the
   // full-page spinner or disturbing scroll.
-  const load = (silent = false) => {
+  const load = async (silent = false) => {
     if (!silent) setLoading(true);
-    return Promise.all([
-      api.getWorkflows().catch(() => []),
-      api.getWorkflowJobs().catch(() => []),
-      api.getOrganizations().catch(() => ({})),
-    ]).then(([wf, rs, o]) => {
-      setWorkflows(unwrap<Workflow>(wf).filter(w => (w as any).organization_id === orgId));
-      setRuns(rs || []);
-      setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
-    }).finally(() => { if (!silent) setLoading(false); });
+    try {
+      const [workflowResult, runResult, organizationResult] = await Promise.allSettled([
+        api.getWorkflows(),
+        api.getWorkflowJobs(),
+        api.getOrganizations(),
+      ]);
+
+      // A background refresh must never replace confirmed data with an empty
+      // state just because one request failed. Update each slice independently
+      // only when its endpoint returned successfully.
+      if (workflowResult.status === 'fulfilled') {
+        setWorkflows(unwrap<Workflow>(workflowResult.value).filter(w => (w as any).organization_id === orgId));
+      }
+      if (runResult.status === 'fulfilled') {
+        setRuns(unwrap<WorkflowRunSummary>(runResult.value));
+      }
+      if (organizationResult.status === 'fulfilled') {
+        setOrgName(unwrap<{ id: number; name: string }>(organizationResult.value).find(x => x.id === orgId)?.name ?? `Org ${orgId}`);
+      }
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
   useEffect(() => {
     load();
@@ -53,9 +68,10 @@ const WorkflowsPage = () => {
   }, [runs]);
   const toggleGroup = (id: number) => setCollapsed(c => ({ ...c, [id]: !c[id] }));
 
-  const launch = async (wf: Workflow) => {
-    try { const res = await api.launchWorkflow(wf.id); navigate(`/workflows/runs/${res.workflow_job_id}`); }
-    catch (e: any) { toast.error(e.message || 'Launch failed.'); }
+  const launch = async (options: WorkflowLaunchOptions, signal?: AbortSignal) => {
+    if (!launching) return;
+    const res = await api.launchWorkflow(launching.id, options, signal);
+    navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
   const remove = async (wf: Workflow) => {
     if (!(await confirmDialog(`Delete workflow "${wf.name}"?`, { destructive: true, confirmText: 'Delete' }))) return;
@@ -66,12 +82,18 @@ const WorkflowsPage = () => {
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink overflow-auto scroll-tint">
       <div className="max-w-[1060px] w-full mx-auto px-8 pt-6 pb-16">
-        <div className="flex items-start gap-4 mb-6">
-          <div>
+        <div className="flex flex-wrap items-start gap-4 mb-6">
+          <div className="min-w-0 flex-1">
             <Link to="/workflows" className="inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-acc"><ArrowLeft size={14} /> Organizations</Link>
             <h1 className="text-[21px] font-semibold tracking-tight mt-1.5 flex items-center gap-2"><GitFork size={20} className="text-acc2" /> {orgName} · Workflows</h1>
             <p className="mt-2 text-[12.5px] text-mut max-w-[560px] leading-relaxed">Chain job templates into a DAG with success / failure / always edges, approval gates, and webhook steps.</p>
           </div>
+          <button
+            onClick={() => navigate(`/workflows/org/${orgId}/builder`)}
+            className="h-9 px-4 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+          >
+            <Plus size={15} /> New workflow
+          </button>
         </div>
 
         {/* Catalog */}
@@ -90,7 +112,7 @@ const WorkflowsPage = () => {
                 </div>
                 <div className="ml-auto flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                   <button onClick={() => edit(wf)} className="h-8 px-2.5 rounded-md text-[12px] font-medium flex items-center gap-1.5 text-ink2 hover:bg-white/5"><Pencil size={13} /> Edit</button>
-                  <button onClick={() => launch(wf)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>
+                  <button onClick={() => setLaunching(wf)} className="h-8 px-3 rounded-md text-[12px] font-semibold flex items-center gap-1.5 bg-acc/90 text-[#04211d] hover:bg-acc"><Rocket size={13} /> Launch</button>
                   <button onClick={() => remove(wf)} className="w-8 h-8 grid place-items-center rounded-md text-faint hover:text-err hover:bg-white/5" title="Delete"><Trash2 size={15} /></button>
                 </div>
               </div>
@@ -135,6 +157,7 @@ const WorkflowsPage = () => {
             );
           })}
         </div>
+        <WorkflowLaunchModal isOpen={!!launching} workflowName={launching?.name || 'Workflow'} organizationId={orgId} onClose={() => setLaunching(null)} onLaunch={launch} />
       </div>
     </div>
   );

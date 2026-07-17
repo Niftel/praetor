@@ -29,14 +29,14 @@ images:
 # platform-compatibility.yaml and take precedence over image.tag. The shared tag
 # remains a convenient override for local/k3d development.
 imageTags:
-  api: 0.1.0
+  api: 0.1.1
   ingestion: 0.1.1
-  scheduler: 0.1.0
+  scheduler: 0.1.2
   consumer: 0.1.1
   reconciler: 0.1.0
-  executor: 0.1.0
-  ui: 0.1.0
-  migrator: 0.1.0
+  executor: 0.1.1
+  ui: 0.1.1
+  migrator: 0.1.1
 
 serviceAccount:
   create: true
@@ -72,6 +72,18 @@ secrets:
   jwtSecret: ""            # api token signing
   internalToken: ""        # shared api<->ingestion<->executor auth; must be identical
   ldapBindPassword: ""     # only used when ldap.enabled
+
+# Provider-independent secrets service integration. Certificate material is
+# never accepted as chart values: create the referenced Kubernetes Secrets with
+# your PKI, External Secrets, Sealed Secrets, or certificate controller.
+secretsService:
+  enabled: false
+  url: ""                   # required HTTPS service URL, e.g. https://praetor-secrets.praetor-secrets.svc:8443
+  trustDomain: ""           # SPIFFE trust domain encoded in workload URI SANs
+  claimPort: 8443
+  apiIdentitySecret: ""       # keys: ca.crt, tls.crt, tls.key
+  schedulerIdentitySecret: "" # keys: ca.crt, tls.crt, tls.key, claim.crt, claim.key, executor-ca.crt
+  executorIdentitySecret: ""  # keys: ca.crt (claim server), secrets-ca.crt, tls.crt, tls.key; static mode requires executor.replicas=1
 
 database:
   # External managed Postgres wins when url is set (recommended for production).
@@ -114,10 +126,13 @@ hostRunner:
 
 ldap:
   enabled: false
-  # AAP-style login-time group→role mapping, rendered verbatim into
+  # Use a pre-existing ConfigMap containing ldap.yaml when a disposable
+  # validation fixture owns the directory and its configuration.
+  existingConfigMap: ""
+  # Provider-neutral authenticator rules and legacy LDAP login mappings, rendered verbatim into
   # /etc/praetor/ldap.yaml (see deployments/ldap/ldap-config.yaml for a full
-  # example: server, users, group_type, user_flags_by_group, organization_map,
-  # team_map). Leave empty to disable LDAP entirely (local auth only).
+  # LDAP example and docs/AUTHENTICATOR_MAPPING.md for ordered all/any/not
+  # rules). Leave empty to disable LDAP entirely (local auth only).
   config: {}
 
 api:

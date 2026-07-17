@@ -3,6 +3,7 @@ module github.com/praetordev/praetor
 go 1.26.5
 
 require (
+	github.com/Niftel/praetor-secrets v0.0.0-20260715173907-72d64f40b742
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/cors v1.2.2
 	github.com/go-chi/render v1.0.3
@@ -17,14 +18,14 @@ require (
 	github.com/praetordev/db v0.1.0
 	github.com/praetordev/eventbus v0.1.0
 	github.com/praetordev/ingestion v0.1.1
-	github.com/praetordev/launch v0.1.0
+	github.com/praetordev/launch v0.1.1
 	github.com/praetordev/models v0.2.0
 	github.com/praetordev/notify v0.1.0
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
-	github.com/praetordev/scheduler v0.1.0
-	github.com/praetordev/store v0.1.1
+	github.com/praetordev/scheduler v0.1.1
+	github.com/praetordev/store v0.1.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/crypto v0.54.0
@@ -33,8 +34,14 @@ require (
 
 require (
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/pgx/v5 v5.10.0 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/praetordev/credentials v0.1.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 )
 
 require (
@@ -68,8 +75,8 @@ require (
 	github.com/praetordev/crypto v0.1.0
 	github.com/praetordev/env v0.1.0
 	github.com/praetordev/events v0.1.0
-	github.com/praetordev/metrics v0.1.0
-	github.com/praetordev/objectstore v0.1.1
+	github.com/praetordev/metrics v0.1.1
+	github.com/praetordev/objectstore v0.1.2
 	github.com/praetordev/packspec v0.1.0
 	github.com/praetordev/registry v0.1.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect

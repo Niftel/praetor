@@ -4,34 +4,34 @@
 # Docker Compose sibling build context may override these versions for coordinated
 # development, but those overrides do not define a platform release.
 schemaVersion: 1
-platformVersion: 0.1.0
+platformVersion: 0.1.1
 releaseStatus: development
 wireContracts: v1
 
-# praetor-v2 currently applies one tag to every first-party image. Keep component
-# releases aligned with this tag until the chart supports per-component tags.
+# The chart uses each component version below through imageTags. image.tag is
+# retained as the chart/appVersion fallback and platform release identifier.
 image:
   registry: ghcr.io/niftel
-  tag: 0.1.0
+  tag: 0.1.1
 
 components:
   api:
     repository: Niftel/praetor
     image: praetor-api
-    version: 0.1.0
+    version: 0.1.1
   migrator:
     repository: Niftel/praetor
     image: praetor-migrator
-    version: 0.1.0
+    version: 0.1.1
   ui:
     repository: Niftel/praetor
     image: praetor-ui
-    version: 0.1.0
+    version: 0.1.1
   scheduler:
     repository: Niftel/scheduler
     module: github.com/praetordev/scheduler
     image: praetor-scheduler
-    version: 0.1.0
+    version: 0.1.2
   reconciler:
     repository: Niftel/reconciler
     module: github.com/praetordev/reconciler
@@ -41,7 +41,7 @@ components:
     repository: Niftel/executor
     module: github.com/praetordev/executor
     image: praetor-executor
-    version: 0.1.0
+    version: 0.1.1
   ingestion:
     repository: Niftel/ingestion
     module: github.com/praetordev/ingestion
@@ -58,12 +58,130 @@ components:
 contracts:
   github.com/praetordev/eventbus: v0.1.0
   github.com/praetordev/events: v0.1.0
-  github.com/praetordev/launch: v0.1.0
+  github.com/praetordev/launch: v0.1.1
   github.com/praetordev/models: v0.2.0
   github.com/praetordev/packspec: v0.1.0
   github.com/praetordev/rbac/v4: v4.0.0
-  github.com/praetordev/store: v0.1.1
+  github.com/praetordev/store: v0.1.2
+
+# Independently released reusable modules. This is the authoritative health and
+# release inventory; local go.work entries are development conveniences only.
+sharedModules:
+  credentials:
+    module: github.com/praetordev/credentials
+    repository: Niftel/credentials
+    version: v0.1.0
+    owner: security
+    securitySensitive: true
+  crypto:
+    module: github.com/praetordev/crypto
+    repository: Niftel/crypto
+    version: v0.1.0
+    owner: security
+    securitySensitive: true
+  db:
+    module: github.com/praetordev/db
+    repository: Niftel/db
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  env:
+    module: github.com/praetordev/env
+    repository: Niftel/env
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  eventbus:
+    module: github.com/praetordev/eventbus
+    repository: Niftel/eventbus
+    version: v0.1.0
+    owner: execution
+    securitySensitive: false
+  events:
+    module: github.com/praetordev/events
+    repository: Niftel/events
+    version: v0.1.0
+    owner: execution
+    securitySensitive: true
+  hostconn:
+    module: github.com/praetordev/hostconn
+    repository: Niftel/hostconn
+    version: v0.1.0
+    owner: execution
+    securitySensitive: false
+  launch:
+    module: github.com/praetordev/launch
+    repository: Niftel/launch
+    version: v0.1.1
+    owner: control-plane
+    securitySensitive: true
+  metrics:
+    module: github.com/praetordev/metrics
+    repository: Niftel/metrics
+    version: v0.1.1
+    owner: platform
+    securitySensitive: false
+  models:
+    module: github.com/praetordev/models
+    repository: Niftel/models
+    version: v0.2.0
+    owner: control-plane
+    securitySensitive: false
+  notify:
+    module: github.com/praetordev/notify
+    repository: Niftel/notify
+    version: v0.1.0
+    owner: integrations
+    securitySensitive: true
+  objectstore:
+    module: github.com/praetordev/objectstore
+    repository: Niftel/objectstore
+    version: v0.1.2
+    owner: execution
+    securitySensitive: false
+  packspec:
+    module: github.com/praetordev/packspec
+    repository: Niftel/packspec
+    version: v0.1.0
+    owner: execution
+    securitySensitive: true
+  plog:
+    module: github.com/praetordev/plog
+    repository: Niftel/plog
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  rbac:
+    module: github.com/praetordev/rbac/v4
+    repository: Niftel/rbac
+    version: v4.0.0
+    owner: security
+    securitySensitive: true
+  registry:
+    module: github.com/praetordev/registry
+    repository: Niftel/registry
+    version: v0.1.0
+    owner: platform
+    securitySensitive: false
+  render:
+    module: github.com/praetordev/render
+    repository: Niftel/render
+    version: v0.1.0
+    owner: control-plane
+    securitySensitive: false
+  runtoken:
+    module: github.com/praetordev/runtoken
+    repository: Niftel/runtoken
+    version: v0.1.0
+    owner: security
+    securitySensitive: true
+  store:
+    module: github.com/praetordev/store
+    repository: Niftel/store
+    version: v0.1.2
+    owner: control-plane
+    securitySensitive: true
 
 database:
   minimumMigration: 1
-  maximumMigration: 58
+  maximumMigration: 68

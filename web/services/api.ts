@@ -96,6 +96,29 @@ export const api = {
         fetchWithAuth('/tokens', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     revokeToken: (id: number) => fetchWithAuth(`/tokens/${id}`, { method: 'DELETE' }).then(r => r.json()),
 
+    // Service principals are non-human application identities. Their credentials
+    // never authenticate against the human API; explicit grants bound launches.
+    getServicePrincipals: (orgId: number) => fetchWithAuth(`/organizations/${orgId}/service-principals`).then(r => r.json()),
+    createServicePrincipal: (orgId: number, data: { name: string; description: string }) =>
+        fetchWithAuth(`/organizations/${orgId}/service-principals`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateServicePrincipal: (id: number, data: { name?: string; description?: string; enabled?: boolean }) =>
+        fetchWithAuth(`/service-principals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }).then(r => r.json()),
+    disableServicePrincipal: (id: number) => fetchWithAuth(`/service-principals/${id}`, { method: 'DELETE' }),
+    getServiceCredentials: (principalId: number) => fetchWithAuth(`/service-principals/${principalId}/credentials`).then(r => r.json()),
+    createServiceCredential: (principalId: number, data: { name: string; expires_at: string }) =>
+        fetchWithAuth(`/service-principals/${principalId}/credentials`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    rotateServiceCredential: (principalId: number, credentialId: number, data: { name: string; expires_at: string }) =>
+        fetchWithAuth(`/service-principals/${principalId}/credentials/${credentialId}/rotate`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    revokeServiceCredential: (principalId: number, credentialId: number) =>
+        fetchWithAuth(`/service-principals/${principalId}/credentials/${credentialId}`, { method: 'DELETE' }),
+    getDelegatedLaunchGrants: (principalId: number) => fetchWithAuth(`/service-principals/${principalId}/grants`).then(r => r.json()),
+    createDelegatedLaunchGrant: (principalId: number, data: any) =>
+        fetchWithAuth(`/service-principals/${principalId}/grants`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    updateDelegatedLaunchGrant: (principalId: number, grantId: number, data: any) =>
+        fetchWithAuth(`/service-principals/${principalId}/grants/${grantId}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
+    revokeDelegatedLaunchGrant: (principalId: number, grantId: number) =>
+        fetchWithAuth(`/service-principals/${principalId}/grants/${grantId}`, { method: 'DELETE' }),
+
     // Dashboard Stats (derived from jobs for now)
     getDashboardStats: async () => {
         const jobs = await fetchWithAuth('/jobs').then(r => r.json());
@@ -138,9 +161,10 @@ export const api = {
     createWorkflow: (data: any) => fetchWithAuth('/workflow-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     updateWorkflow: (id: number, data: any) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}`, { method: 'DELETE' }),
-    launchWorkflow: (id: number) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: '{}' }).then(r => r.json()),
+    launchWorkflow: (id: number, options: { extra_vars?: Record<string, unknown>; limit?: string; approval_team_id?: number } = {}, signal?: AbortSignal) => fetchWithAuth(`/workflow-templates/${id}/launch`, { method: 'POST', body: JSON.stringify(options), signal }).then(r => r.json()),
     getWorkflowJobs: () => fetchWithAuth('/workflow-jobs').then(r => r.json()),
     getWorkflowJob: (id: number) => fetchWithAuth(`/workflow-jobs/${id}`).then(r => r.json()),
+    getWorkflowApprovals: () => fetchWithAuth('/workflow-approvals', { cache: 'no-store' }).then(r => r.json()),
     approveWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/approve`, { method: 'POST' }),
     denyWorkflowNode: (nodeId: number) => fetchWithAuth(`/workflow-job-nodes/${nodeId}/deny`, { method: 'POST' }),
     // Triggers: event triggers (job outcome -> launch) + inbound webhook surface.
@@ -282,5 +306,3 @@ export const api = {
     getLdapConfig: () => fetchWithAuth('/ldap/config').then(r => r.json()),
     testLdapConnection: () => fetchWithAuth('/ldap/test-connection', { method: 'POST' }).then(r => r.json()),
 };
-
-

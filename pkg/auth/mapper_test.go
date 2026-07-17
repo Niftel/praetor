@@ -257,3 +257,66 @@ func TestMapperIntegration(t *testing.T) {
 		t.Errorf("expected ErrLocalAccount for local user, got %v", err)
 	}
 }
+
+func TestAuthenticatorMapIntegration(t *testing.T) {
+	db := mapperTestDB(t)
+	ctx := context.Background()
+	sfx := fmt.Sprintf("%d", time.Now().UnixNano())
+	orgName := "authmap-org-" + sfx
+	teamName := "authmap-team-" + sfx
+	userName := "authmap-user-" + sfx
+	operatorGroup := "cn=operators-" + sfx + ",ou=groups,dc=x"
+	suspendedGroup := "cn=suspended-" + sfx + ",ou=groups,dc=x"
+
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM role_user_assignments WHERE user_id IN (SELECT id FROM users WHERE username=$1)`, userName)
+		db.Exec(`DELETE FROM users WHERE username=$1`, userName)
+		db.Exec(`DELETE FROM teams WHERE name=$1`, teamName)
+		db.Exec(`DELETE FROM organizations WHERE name=$1`, orgName)
+	})
+
+	deny := false
+	cfg := &LDAPConfig{AuthenticatorMaps: []AuthenticatorMap{
+		{Name: "deny by default", Order: 0, When: Predicate{Always: &deny}, Map: AuthenticatorGrant{Type: MapAllow}, Revoke: true},
+		{Name: "allow operators", Order: 10, When: Predicate{Group: operatorGroup}, Map: AuthenticatorGrant{Type: MapAllow}},
+		{Name: "operator team", Order: 20, Revoke: true,
+			When: Predicate{All: []Predicate{{Group: operatorGroup}, {Not: &Predicate{Group: suspendedGroup}}}},
+			Map:  AuthenticatorGrant{Type: MapTeam, Organization: orgName, Team: teamName, Role: "Team Member"}},
+	}}
+
+	id := &UserIdentity{DN: "uid=" + userName + ",ou=users,dc=x", Username: userName, Groups: normalizeDNSet([]string{operatorGroup})}
+	u, err := Authenticate(ctx, db, cfg, fakeResolver{id: id}, userName, "pw")
+	if err != nil {
+		t.Fatalf("operator login: %v", err)
+	}
+	var orgID, teamID int64
+	if err := db.Get(&orgID, `SELECT id FROM organizations WHERE name=$1`, orgName); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&teamID, `SELECT id FROM teams WHERE organization_id=$1 AND name=$2`, orgID, teamName); err != nil {
+		t.Fatal(err)
+	}
+	if objRoleMemberCount(t, db, "team", teamID, u.ID, "member_role") != 1 {
+		t.Fatal("expected mapped team membership")
+	}
+	var membershipCount int
+	if err := db.Get(&membershipCount, `SELECT count(*) FROM team_members WHERE team_id=$1 AND user_id=$2`, teamID, u.ID); err != nil || membershipCount != 1 {
+		t.Fatalf("expected canonical team membership: count=%d err=%v", membershipCount, err)
+	}
+
+	id.Groups = normalizeDNSet([]string{operatorGroup, suspendedGroup})
+	if _, err := Authenticate(ctx, db, cfg, fakeResolver{id: id}, userName, "pw"); err != nil {
+		t.Fatalf("suspended login: %v", err)
+	}
+	if objRoleMemberCount(t, db, "team", teamID, u.ID, "member_role") != 0 {
+		t.Fatal("expected authoritative team revocation")
+	}
+	if err := db.Get(&membershipCount, `SELECT count(*) FROM team_members WHERE team_id=$1 AND user_id=$2`, teamID, u.ID); err != nil || membershipCount != 0 {
+		t.Fatalf("expected canonical team membership revocation: count=%d err=%v", membershipCount, err)
+	}
+
+	id.Groups = map[string]struct{}{}
+	if _, err := Authenticate(ctx, db, cfg, fakeResolver{id: id}, userName, "pw"); !errors.Is(err, ErrAuthenticatorMapDenied) {
+		t.Fatalf("expected fail-closed login denial, got %v", err)
+	}
+}

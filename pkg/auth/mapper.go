@@ -43,12 +43,18 @@ var ErrLocalAccount = errors.New("username belongs to a local (non-LDAP) account
 // creating orgs/teams as needed and reconciling role grants. Returns the persisted
 // user for JWT issuance. All LDAP I/O happens before the tx opens.
 func Authenticate(ctx context.Context, db *sqlx.DB, cfg *LDAPConfig, resolver GroupResolver, username, password string) (*models.User, error) {
+	if err := ValidateAuthenticatorMaps(cfg.AuthenticatorMaps); err != nil {
+		return nil, fmt.Errorf("invalid authenticator mapping configuration: %w", err)
+	}
 	id, err := resolver.AuthenticateAndResolve(username, password)
 	if err != nil {
 		return nil, err
 	}
 	if id.Groups == nil {
 		id.Groups = map[string]struct{}{}
+	}
+	if allow, _ := evaluateAuthenticatorMaps(cfg.AuthenticatorMaps, id.Claims()); !allow {
+		return nil, ErrAuthenticatorMapDenied
 	}
 
 	tx, err := db.BeginTxx(ctx, nil)
@@ -68,6 +74,12 @@ func Authenticate(ctx context.Context, db *sqlx.DB, cfg *LDAPConfig, resolver Gr
 		return nil, err
 	}
 	if err := applyTeamMap(ctx, tx, cfg, userID, id.Groups); err != nil {
+		return nil, err
+	}
+	// Provider-neutral maps are applied last so deployments can migrate from the
+	// legacy LDAP-specific maps incrementally and later ordered rules remain the
+	// authoritative result for overlapping platform targets.
+	if err := applyAuthenticatorMaps(ctx, tx, cfg, userID, id.Claims()); err != nil {
 		return nil, err
 	}
 
@@ -294,10 +306,18 @@ func applyTeamMap(ctx context.Context, tx *sqlx.Tx, cfg *LDAPConfig, userID int6
 			if err := grantRole(ctx, tx, "team", teamID, "member_role", userID); err != nil {
 				return fmt.Errorf("team_map %q: %w", name, err)
 			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO team_members (team_id,user_id)
+				VALUES ($1,$2) ON CONFLICT (team_id,user_id) DO NOTHING`, teamID, userID); err != nil {
+				return fmt.Errorf("team_map %q canonical membership: %w", name, err)
+			}
 		}
 		if revoke {
 			if err := revokeRole(ctx, tx, "team", teamID, "member_role", userID); err != nil {
 				return fmt.Errorf("team_map %q: %w", name, err)
+			}
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM team_members WHERE team_id=$1 AND user_id=$2`, teamID, userID); err != nil {
+				return fmt.Errorf("team_map %q canonical membership revoke: %w", name, err)
 			}
 		}
 	}

@@ -14,6 +14,7 @@ import InventoriesPage from './pages/InventoriesPage';
 import CredentialsPage from './pages/CredentialsPage';
 import ExecutionPacksPage from './pages/ExecutionPacksPage';
 import TokensPage from './pages/TokensPage';
+import ServicePrincipalsPage from './pages/ServicePrincipalsPage';
 import SchedulesPage from './pages/SchedulesPage';
 import UsersPage from './pages/UsersPage';
 import TeamsPage from './pages/TeamsPage';
@@ -21,6 +22,7 @@ import ActivityPage from './pages/ActivityPage';
 import OrganizationsPage from './pages/OrganizationsPage';
 import AuthProvidersPage from './pages/AuthProvidersPage';
 import SettingsPage from './pages/SettingsPage';
+import ApprovalsPage from './pages/ApprovalsPage';
 import { ProjectsLanding, InventoriesLanding, TemplatesLanding, WorkflowsLanding, CredentialsLanding, SchedulesLanding } from './pages/landings';
 import WorkflowDagPreview from './pages/WorkflowDagPreview';
 import { ToastHost } from './components/ui/toast';
@@ -66,6 +68,7 @@ const App = () => {
           <Route path="workflows/org/:orgId/builder" element={<WorkflowBuilderPage />} />
           <Route path="workflows/org/:orgId/builder/:workflowId" element={<WorkflowBuilderPage />} />
           <Route path="workflows/runs/:jobId" element={<WorkflowRunPage />} />
+          <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="projects" element={<ProjectsLanding />} />
           <Route path="projects/org/:orgId" element={<ProjectsPage />} />
           <Route path="inventories" element={<InventoriesLanding />} />
@@ -73,6 +76,7 @@ const App = () => {
           <Route path="credentials" element={<CredentialsLanding />} />
           <Route path="credentials/org/:orgId" element={<CredentialsPage />} />
           <Route path="tokens" element={<TokensPage />} />
+          <Route path="service-principals" element={<ServicePrincipalsPage />} />
           <Route path="execution-packs" element={<ExecutionPacksPage />} />
           <Route path="schedules" element={<SchedulesLanding />} />
           <Route path="schedules/org/:orgId" element={<SchedulesPage />} />

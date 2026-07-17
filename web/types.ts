@@ -66,6 +66,45 @@ export interface Group {
   modified_at: string;
 }
 
+export interface ServicePrincipal {
+  id: number;
+  organization_id: number;
+  name: string;
+  description: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  disabled_at?: string | null;
+}
+
+export interface ServiceCredential {
+  id: number;
+  service_principal_id: number;
+  name: string;
+  expires_at: string;
+  last_used_at?: string | null;
+  created_at: string;
+  revoked_at?: string | null;
+}
+
+export interface DelegatedLaunchGrant {
+  id: number;
+  organization_id: number;
+  service_principal_id: number;
+  workflow_template_id: number;
+  inventory_id: number;
+  allowed_host_ids: number[];
+  allowed_group_ids: number[];
+  max_hosts?: number | null;
+  allowed_extra_var_keys: string[];
+  approval_team_id?: number | null;
+  not_before: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  revoked_at?: string | null;
+}
+
 export interface CredentialType {
   id: number;
   name: string;
@@ -220,6 +259,8 @@ export interface WorkflowNode {
   name: string;
   webhook_url?: string;   // webhook_out: URL to POST
   webhook_body?: string;  // webhook_out: optional JSON body
+  approval_timeout_seconds?: number;
+  approval_timeout_action?: 'approved' | 'rejected';
 }
 
 export interface WorkflowEdge {
@@ -247,11 +288,17 @@ export interface WorkflowJobNode {
   run_id?: string | null;
   status: string;
   callback_url?: string; // webhook_in: populated while awaiting_event
+  approval_timeout_seconds?: number;
+  approval_timeout_action?: 'approved' | 'rejected';
+  awaiting_since?: string;
+  decided_at?: string;
+  timed_out?: boolean;
 }
 
 export interface WorkflowJob {
   id: number;
   workflow_template_id?: number;
+  organization_id?: number;
   name?: string;
   status: string;
   created_at?: string;
@@ -268,6 +315,21 @@ export interface WorkflowRunSummary {
   status: string;
   created_at: string;
   finished_at?: string | null;
+}
+
+export interface WorkflowApproval {
+  id: number;
+  workflow_job_id: number;
+  workflow_template_id: number;
+  organization_id: number;
+  workflow_name: string;
+  node_name: string;
+  node_key: string;
+  run_created_at: string;
+  awaiting_since: string;
+  requested_by?: string;
+  deadline?: string;
+  timeout_action: 'approved' | 'rejected';
 }
 
 // Infrastructure models

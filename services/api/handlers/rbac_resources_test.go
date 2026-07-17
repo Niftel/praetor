@@ -159,10 +159,16 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 		orgA, fmt.Sprintf("rbac-tmpl-proj-%d", uniq)).Scan(&projID); err != nil {
 		t.Fatalf("insert project: %v", err)
 	}
+	var inventoryID int64
+	if err := db.QueryRow(
+		`INSERT INTO inventories (organization_id, name) VALUES ($1,$2) RETURNING id`,
+		orgA, fmt.Sprintf("rbac-tmpl-inventory-%d", uniq)).Scan(&inventoryID); err != nil {
+		t.Fatalf("insert inventory: %v", err)
+	}
 
 	// Admin creates a template sourcing its playbook from the project.
 	rec := callJSON(t, tmplRes.CreateTemplate, http.MethodPost,
-		fmt.Sprintf(`{"name":"tmpl-%d","organization_id":%d,"project_id":%d,"playbook":"site.yml"}`, uniq, orgA, projID), adminUC, nil)
+		fmt.Sprintf(`{"name":"tmpl-%d","organization_id":%d,"project_id":%d,"inventory_id":%d,"playbook":"site.yml","ask_limit_on_launch":true}`, uniq, orgA, projID, inventoryID), adminUC, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("admin create template: want 201, got %d (%s)", rec.Code, rec.Body)
 	}
@@ -177,6 +183,7 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM unified_jobs WHERE unified_job_template_id = $1`, *created.UnifiedJobTemplateID)
 		_, _ = db.Exec(`DELETE FROM unified_job_templates WHERE id = $1`, *created.UnifiedJobTemplateID)
 		_, _ = db.Exec(`DELETE FROM projects WHERE id = $1`, projID)
+		_, _ = db.Exec(`DELETE FROM inventories WHERE id = $1`, inventoryID)
 		_, _ = db.Exec(`DELETE FROM organizations WHERE id = $1`, orgA)
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`, admin, operator, nobody)
 	})
@@ -184,9 +191,17 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 	// operator gets execute on the template.
 	grantObjectRole(t, access, rbac.JobTemplate, created.ID, rbac.ExecuteRole, operator)
 
-	launchBody := fmt.Sprintf(`{"unified_job_template_id":%d,"name":"launch-%d"}`, *created.UnifiedJobTemplateID, uniq)
+	launchBody := fmt.Sprintf(`{"unified_job_template_id":%d,"name":"launch-%d","limit":"web-*"}`, *created.UnifiedJobTemplateID, uniq)
 
-	// operator (execute) can launch.
+	// Template execute alone cannot use the attached inventory, even when the
+	// client tries to narrow the launch with a limit.
+	rec = callJSON(t, jobsRes.LaunchJob, http.MethodPost, launchBody, operatorUC, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("operator launch without inventory use: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+	grantObjectRole(t, access, rbac.Inventory, inventoryID, rbac.UseRole, operator)
+
+	// Execute plus inventory use can launch, including a client-supplied limit.
 	rec = callJSON(t, jobsRes.LaunchJob, http.MethodPost, launchBody, operatorUC, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("operator launch (execute): want 201, got %d (%s)", rec.Code, rec.Body)
@@ -194,7 +209,7 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 
 	// operator (execute, not admin) cannot edit the template.
 	rec = callJSON(t, tmplRes.UpdateTemplate, http.MethodPut,
-		fmt.Sprintf(`{"name":"tmpl-edited-%d","organization_id":%d,"project_id":%d,"playbook":"site.yml"}`, uniq, orgA, projID),
+		fmt.Sprintf(`{"name":"tmpl-edited-%d","organization_id":%d,"project_id":%d,"inventory_id":%d,"playbook":"site.yml"}`, uniq, orgA, projID, inventoryID),
 		operatorUC, map[string]string{"id": fmt.Sprint(created.ID)})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("operator edit template: want 403, got %d", rec.Code)

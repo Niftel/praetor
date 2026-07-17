@@ -6,6 +6,7 @@ import {
   ArrowLeft, RotateCcw, Play, Pause, ArrowDownToLine, ArrowUpFromLine,
   Check, X, Plus, Minus, Maximize2, ExternalLink, Copy,
 } from 'lucide-react';
+import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
 
 const TERMINAL = ['successful', 'failed', 'error', 'canceled'];
 const NODE_W = 158, NODE_H = 62, COL_GAP = 66, ROW_GAP = 26, MARGIN = 40;
@@ -25,6 +26,7 @@ const typeLed = (t: WorkflowNodeType, v: Vis): string =>
   v === 'pend' ? (t === 'webhook_in' ? 'bg-acc' : t === 'webhook_out' ? 'bg-violet' : 'bg-faint') : LED[v];
 const subline = (n: WorkflowJobNode): string => {
   const s = n.status;
+  if (n.timed_out) return `timed out → ${s}`;
   if (s === 'awaiting_approval') return 'awaiting approval';
   if (s === 'awaiting_event') return 'waiting for event';
   if (s === 'running') return 'running';
@@ -90,6 +92,7 @@ const WorkflowRunPage = () => {
   const [error, setError] = useState('');
   const [acting, setActing] = useState<number | null>(null);
   const [selKey, setSelKey] = useState<string | null>(null);
+  const [showRelaunch, setShowRelaunch] = useState(false);
 
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
@@ -150,10 +153,12 @@ const WorkflowRunPage = () => {
   const selected = selKey ? nodes.find(n => n.node_key === selKey) || null : null;
   const badStatus = isTerminal && job?.status !== 'successful';
 
-  const relaunch = async () => {
+  const relaunch = async (options: WorkflowLaunchOptions, signal?: AbortSignal) => {
     const wt = job?.workflow_template_id;
     if (!wt) return;
-    try { const res = await api.launchWorkflow(wt); navigate(`/workflows/runs/${res.workflow_job_id}`); } catch (e: any) { setError(e.message || 'Relaunch failed'); }
+    const res = await api.launchWorkflow(wt, options, signal);
+    setShowRelaunch(false);
+    navigate(`/workflows/runs/${res.workflow_job_id}`);
   };
 
   return (
@@ -174,7 +179,7 @@ const WorkflowRunPage = () => {
         </div>
         <div className="ml-auto flex items-center gap-2">
           {isTerminal && job?.workflow_template_id != null && (
-            <button onClick={relaunch} className="h-[30px] px-3 rounded-md text-xs font-semibold flex items-center gap-1.5 border border-line2 text-ink hover:border-white/25"><RotateCcw size={13} /> Relaunch</button>
+            <button onClick={() => setShowRelaunch(true)} className="h-[30px] px-3 rounded-md text-xs font-semibold flex items-center gap-1.5 border border-line2 text-ink hover:border-white/25"><RotateCcw size={13} /> Relaunch</button>
           )}
         </div>
       </div>
@@ -255,6 +260,13 @@ const WorkflowRunPage = () => {
         <span><b className="text-mut">click</b> inspect node</span><span><b className="text-mut">drag</b> pan</span><span><b className="text-mut">⌘+scroll</b> zoom</span>
         <span className="ml-auto">run #{id} · {nodes.length} nodes · {running} running{gateNode ? ' · 1 gate' : ''}</span>
       </div>
+      <WorkflowLaunchModal
+        isOpen={showRelaunch}
+        workflowName={job?.name || 'Workflow'}
+        organizationId={job?.organization_id}
+        onClose={() => setShowRelaunch(false)}
+        onLaunch={relaunch}
+      />
     </div>
   );
 };
@@ -290,7 +302,12 @@ const Inspector: React.FC<{
           <span className={`w-2 h-2 rounded-full ${LED[v]} ${v === 'run' ? 'ring-[3px] ring-run/20' : ''}`} />
           <span className="text-[14px] font-semibold">{node.name || node.node_key}</span>
         </div>
-        <div className="font-mono text-[11px] text-mut mt-1.5">{node.node_type} · {node.status}</div>
+        <div className="font-mono text-[11px] text-mut mt-1.5">{node.node_type} · {node.timed_out ? `timed out → ${node.status}` : node.status}</div>
+        {node.status === 'awaiting_approval' && (
+          <div className="mt-2 rounded-md border border-changed/30 bg-changed/10 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-changed">
+            Automatically denies after 24 hours and follows the failure edge.
+          </div>
+        )}
       </div>
 
       {node.run_id && (

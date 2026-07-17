@@ -206,7 +206,7 @@ const WorkflowBuilderPage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_360px] flex-1 min-h-0 max-[960px]:grid-cols-1">
+      <div className="grid grid-cols-[minmax(0,1fr)_360px] flex-1 min-h-0 max-[720px]:grid-cols-1 max-[720px]:grid-rows-[minmax(260px,1fr)_minmax(220px,42%)]">
         {/* Canvas workspace */}
         <div ref={viewRef} onWheel={onWheel} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           className="relative overflow-hidden cursor-grab active:cursor-grabbing"
@@ -268,7 +268,7 @@ const WorkflowBuilderPage = () => {
         </div>
 
         {/* Editor panel */}
-        <div className="border-l border-line bg-panel2 flex flex-col min-h-0 overflow-auto scroll-tint max-[960px]:hidden">
+        <div className="border-l border-line bg-panel2 flex flex-col min-h-0 overflow-auto scroll-tint max-[720px]:border-l-0 max-[720px]:border-t">
           {/* Nodes */}
           <div className="px-4 py-3 border-b border-line">
             <div className="flex items-center mb-2.5">
@@ -308,6 +308,11 @@ const WorkflowBuilderPage = () => {
                           <input value={n.webhook_url || ''} onChange={e => updateNode(n.node_key, { webhook_url: e.target.value })} placeholder="https://…/hook" className={`${psel} ${urlBad ? '!border-err' : ''}`} />
                         )}
                         {n.node_type === 'webhook_in' && <p className="font-mono text-[10px] text-violet">Pauses until an external system POSTs its callback URL (shown on the run page).</p>}
+                        {n.node_type === 'approval' && (
+                          <p className="rounded-md border border-line bg-panel2 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-dim">
+                            Approval expires after 24 hours and follows the failure edge.
+                          </p>
+                        )}
                         <button onClick={() => removeNode(n.node_key)} className="flex items-center gap-1.5 text-[11.5px] text-err/90 hover:text-err"><Trash2 size={13} /> Remove node</button>
                       </div>
                     )}

@@ -35,10 +35,11 @@ spec:
       labels:
         {{- include "praetor.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: executor
-      {{- with .Values.executor.podAnnotations }}
       annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.executor.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "praetor.serviceAccountName" . }}
       {{- with .Values.image.pullSecrets }}
@@ -64,9 +65,25 @@ spec:
                 name: {{ include "praetor.configMapName" . }}
             - secretRef:
                 name: {{ include "praetor.secretName" . }}
-          {{- with .Values.executor.extraEnv }}
+          {{- if or .Values.executor.extraEnv .Values.secretsService.enabled }}
           env:
+            {{- with .Values.executor.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.secretsService.enabled }}
+            - name: PRAETOR_SCHEDULER_CLAIM_URL
+              value: {{ printf "https://%s-scheduler:%v" (include "praetor.fullname" .) .Values.secretsService.claimPort | quote }}
+            - name: PRAETOR_SCHEDULER_CA_FILE
+              value: /var/run/secrets/praetor-secrets/ca.crt
+            - name: PRAETOR_EXECUTOR_CERT_FILE
+              value: /var/run/secrets/praetor-secrets/tls.crt
+            - name: PRAETOR_EXECUTOR_KEY_FILE
+              value: /var/run/secrets/praetor-secrets/tls.key
+            - name: PRAETOR_SECRETS_URL
+              value: {{ .Values.secretsService.url | quote }}
+            - name: PRAETOR_SECRETS_CA_FILE
+              value: /var/run/secrets/praetor-secrets/secrets-ca.crt
+            {{- end }}
           {{- end }}
           volumeMounts:
             - name: jobs
@@ -77,6 +94,11 @@ spec:
               mountPath: /home/praetor/.ssh
             - name: dshm
               mountPath: /dev/shm
+            {{- if .Values.secretsService.enabled }}
+            - name: secrets-service-identity
+              mountPath: /var/run/secrets/praetor-secrets
+              readOnly: true
+            {{- end }}
           {{- with .Values.executor.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -86,6 +108,23 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.executor.shmSize }}
+        {{- if .Values.secretsService.enabled }}
+        - name: secrets-service-identity
+          secret:
+            secretName: {{ .Values.secretsService.executorIdentitySecret | quote }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: secrets-ca.crt
+                path: secrets-ca.crt
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+            # The entrypoint drops from root to uid 1000 before starting the
+            # executor; projected Secret files remain root-owned.
+            defaultMode: 0444
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: jobs

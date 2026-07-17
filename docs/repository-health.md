@@ -2,10 +2,10 @@
 
 Baseline date: 2026-07-14
 
-This report covers the five deployable services extracted from the Praetor
-integration repository. Checks were run from clean sibling working trees with
-`GOWORK=off`, so local workspace replacements could not hide an undeclared
-dependency.
+This baseline covers the five extracted deployable services and every
+independently released shared module declared under `sharedModules` in
+`platform-compatibility.yaml`. Checks run with `GOWORK=off`, so local workspace
+replacements cannot hide an undeclared dependency.
 
 ## Results
 
@@ -43,6 +43,24 @@ This is a stronger starting point than the repository layout initially implied:
 the primary remaining problem is cross-repository release coordination, not the
 absence of service-level CI.
 
+## Shared-module inventory
+
+The compatibility manifest is authoritative. Each entry records:
+
+- module path and GitHub repository;
+- released semantic version;
+- owning subsystem; and
+- whether the module is security-sensitive.
+
+The current inventory covers contracts/domain vocabulary (`models`, `events`,
+`launch`, `packspec`), infrastructure adapters (`db`, `eventbus`, `objectstore`,
+`metrics`, `hostconn`), security modules (`crypto`, `credentials`, `runtoken`,
+`rbac`), and application utilities (`env`, `plog`, `render`, `registry`,
+`notify`, `store`).
+
+Every module is checked for `gofmt`, `go vet`, `go build`, and `go test` with an
+isolated build cache and shared isolated module cache.
+
 ## Repeat the check
 
 With the service repositories checked out beside `praetor`:
@@ -57,8 +75,9 @@ Use `PRAETOR_WORKSPACE_DIR` when the repositories share a different parent:
 PRAETOR_WORKSPACE_DIR=/path/to/workspace make workspace-health
 ```
 
-The command deliberately fails for a missing repository or any failed vet,
-build, or test check. It does not mutate sibling repositories.
+The command deliberately fails for a missing repository, missing manifest
+metadata, formatting drift, or any failed vet, build, or test check. It does not
+mutate sibling repositories.
 
 Pass service names directly for a focused check:
 
@@ -66,20 +85,19 @@ Pass service names directly for a focused check:
 ./scripts/check-workspace-health.sh scheduler executor
 ```
 
-## Remaining gaps
+Check only local shared-module siblings:
 
-1. Promotion is still initiated manually; there is not yet one workflow that
-   tags every component repository and waits for all image publications.
-2. Database compatibility is represented by the supported migration range, but
-   cross-version upgrade/downgrade scenarios are not yet executable tests.
-3. Shared modules have not yet received the same standalone health inventory.
+```bash
+make shared-module-health
+```
 
-The RBAC v1-to-v4 consumer migration is complete. Praetor now uses the native
-`github.com/praetordev/rbac/v4` loader, an embedded versioned policy, atomic
-last-known-good refresh, integrity pinning, and v4 decision provenance.
+Check clean clones of the exact released tags, as CI and remote release
+preflight do:
 
-The compatibility gate validates the declared component set, Helm image tags,
-Go dependency versions, wire-contract fixture version, and migration range on
-every pull request. The remote release preflight additionally verifies every
-component repository tag, deployable image, component module, and shared
-contract module declared in `platform-compatibility.yaml`.
+```bash
+make shared-module-health-remote
+```
+
+The `Shared module health` workflow runs this released-tag matrix when its
+inventory or checker changes. Remote platform release preflight repeats it after
+verifying component images, repository tags, and downloadable Go modules.
