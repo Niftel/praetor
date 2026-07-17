@@ -133,6 +133,7 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 		return fmt.Errorf("prepare credential files: %w", err)
 	}
 	defer cleanupCredentialFiles()
+	log.Printf("credential injectors prepared: %d environment entries, %d private files", len(req.JobManifest.CredentialEnv), len(credentialFileEnv))
 
 	// Detect a resume up front: a usable checkpoint means a previous invocation
 	// was interrupted (commonly a host reboot) and we are continuing it. We reuse
