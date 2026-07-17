@@ -80,6 +80,69 @@ func (h *AccessResource) UserAccess(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, rows)
 }
 
+// Capabilities GET /api/v1/capabilities?content_type=&object_id=
+// reports the authenticated user's effective permissions on one object. The
+// result comes from the same policy decision point used by mutation handlers,
+// including inherited team roles and break-glass access, so clients do not
+// have to reconstruct RBAC from role names.
+func (h *AccessResource) Capabilities(w http.ResponseWriter, r *http.Request) {
+	kind := accesscontrol.ResourceKind(r.URL.Query().Get("content_type"))
+	objectID, err := strconv.ParseInt(r.URL.Query().Get("object_id"), 10, 64)
+	if err != nil || objectID <= 0 || !capabilityResourceKind(kind) {
+		render.ErrInvalidRequest(nil).Render(w, r)
+		return
+	}
+
+	resource := accesscontrol.Object(kind, objectID)
+	verbs := []accesscontrol.Verb{
+		accesscontrol.View,
+		accesscontrol.Manage,
+		accesscontrol.Use,
+		accesscontrol.Execute,
+		accesscontrol.Update,
+		accesscontrol.Approve,
+	}
+	out := make(map[string]bool, len(verbs)+2)
+	for _, verb := range verbs {
+		if !accesscontrol.IsCapability(kind, verb) {
+			out[string(verb)] = false
+			continue
+		}
+		allowed, decisionErr := h.authz.Can(r.Context(), h.subject(r), verb, resource)
+		if decisionErr != nil {
+			render.ErrInternal(decisionErr).Render(w, r)
+			return
+		}
+		out[string(verb)] = allowed
+	}
+
+	if kind == accesscontrol.Organization {
+		for name, childKind := range map[string]accesscontrol.ResourceKind{
+			"add_inventory":         accesscontrol.Inventory,
+			"add_workflow_template": accesscontrol.WorkflowTemplate,
+		} {
+			allowed, decisionErr := h.authz.CanCapability(r.Context(), h.subject(r), accesscontrol.Capability(childKind, accesscontrol.Add), resource)
+			if decisionErr != nil {
+				render.ErrInternal(decisionErr).Render(w, r)
+				return
+			}
+			out[name] = allowed
+		}
+	}
+	render.JSON(w, r, out)
+}
+
+func capabilityResourceKind(kind accesscontrol.ResourceKind) bool {
+	switch kind {
+	case accesscontrol.Organization, accesscontrol.Team, accesscontrol.Project,
+		accesscontrol.Inventory, accesscontrol.Credential, accesscontrol.JobTemplate,
+		accesscontrol.WorkflowTemplate:
+		return true
+	default:
+		return false
+	}
+}
+
 // AssignableRoles GET /api/v1/role-definitions?content_type= — the RoleDefinitions that
 // can be granted on an object of the given type (populates the access picker).
 func (h *AccessResource) AssignableRoles(w http.ResponseWriter, r *http.Request) {

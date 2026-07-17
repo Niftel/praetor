@@ -487,6 +487,7 @@ func TestStagingAcceptanceIsScopedRepeatableAndNonDestructive(t *testing.T) {
 		"Praetor Validation",
 		"expected exactly 1",
 		"praetor-staging-delegated-db",
+		"delete pod/praetor-staging-delegated-db service/praetor-staging-delegated-db",
 		"validate-delegated-api-e2e.sh",
 		"notification-delivery",
 		"chmod 0600",

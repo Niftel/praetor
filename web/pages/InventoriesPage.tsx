@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
+import { useCapabilities } from '../lib/useCapabilities';
 
 // Coerce an edited string back toward its JSON-native type (number / bool /
 // object) so round-tripping a var through the editor doesn't stringify it.
@@ -42,6 +43,7 @@ const InventoriesPage = () => {
   const [credentials, setCredentials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { capabilities: orgCapabilities, loading: orgCapabilitiesLoading } = useCapabilities('organization', orgId);
 
   const [selectedHostId, setSelectedHostId] = useState<number | null>(null);
   const [hostGroups, setHostGroups] = useState<number[]>([]);
@@ -227,6 +229,9 @@ const InventoriesPage = () => {
 
   const selectedInv = inventories.find(i => i.id === selectedInventoryId);
   const selectedHost = hosts.find(h => h.id === selectedHostId);
+  const { capabilities: inventoryCapabilities, loading: inventoryCapabilitiesLoading } = useCapabilities('inventory', selectedInventoryId);
+  const canCreateInventory = !orgCapabilitiesLoading && !!orgCapabilities.add_inventory;
+  const canManageInventory = !inventoryCapabilitiesLoading && inventoryCapabilities.manage;
 
   // Build the tree: groups (filtered) each with member hosts, then ungrouped.
   const tree = useMemo(() => {
@@ -283,9 +288,9 @@ const InventoriesPage = () => {
                   {inv.id === selectedInventoryId && <Check size={13} />}
                 </button>
               ))}
-              <div className="border-t border-line mt-1 pt-1">
+              {canCreateInventory && <div className="border-t border-line mt-1 pt-1">
                 <button onMouseDown={() => setShowInventoryModal(true)} className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-mut hover:text-ink hover:bg-white/5"><Plus size={14} /> New inventory</button>
-              </div>
+              </div>}
             </div>
           )}
         </div>
@@ -296,12 +301,12 @@ const InventoriesPage = () => {
             <span><b className="text-mut font-medium">{sources.length}</b> sources</span>
           </div>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        {canManageInventory && <div className="ml-auto flex items-center gap-1">
           <button onClick={() => setShowImportModal(true)} className="h-8 px-3 rounded-md text-xs font-medium flex items-center gap-1.5 text-mut hover:text-ink hover:bg-white/5 transition-colors"><Upload size={14} /> Import</button>
           {selectedInv && (
             <button onClick={() => deleteInventory(selectedInv.id)} className="w-8 h-8 grid place-items-center rounded-md text-dim hover:text-err hover:bg-white/5 transition-colors" title="Delete inventory"><Trash2 size={15} /></button>
           )}
-        </div>
+        </div>}
       </div>
 
       {!selectedInv ? (
@@ -309,7 +314,7 @@ const InventoriesPage = () => {
           <div className="text-center">
             <Server size={40} className="mx-auto mb-3 opacity-20" />
             <p className="text-sm mb-4">No inventories in {orgName} yet.</p>
-            <Button icon={<Plus size={15} />} onClick={() => setShowInventoryModal(true)}>New inventory</Button>
+            {canCreateInventory && <Button icon={<Plus size={15} />} onClick={() => setShowInventoryModal(true)}>New inventory</Button>}
           </div>
         </div>
       ) : (
@@ -322,7 +327,7 @@ const InventoriesPage = () => {
             </div>
             <div className="flex items-center h-[34px] px-4 mt-1.5 shrink-0">
               <span className="font-mono text-[9px] tracking-[0.16em] uppercase text-dim">Structure</span>
-              <div className="ml-auto relative">
+              {canManageInventory && <div className="ml-auto relative">
                 <button onClick={() => setAddMenu(v => !v)} onBlur={() => setTimeout(() => setAddMenu(false), 150)} className="text-dim hover:text-ink" title="Add"><Plus size={15} /></button>
                 {addMenu && (
                   <div className="absolute z-30 top-6 right-0 w-40 bg-panel border border-line2 rounded-lg shadow-2xl py-1.5">
@@ -331,7 +336,7 @@ const InventoriesPage = () => {
                     <button onMouseDown={() => setShowSourceModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add source</button>
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
             <div className="flex-1 overflow-auto scroll-tint px-2.5 pb-6">
               {tree.groupNodes.map(({ group, members }) => {
@@ -391,8 +396,8 @@ const InventoriesPage = () => {
                     <span className="font-mono text-[10.5px] text-dim flex items-center gap-1.5">
                       {dirty ? <><span className="w-1.5 h-1.5 rounded-full bg-changed" /> unsaved</> : <><Check size={12} className="text-faint" /> saved</>}
                     </span>
-                    <Button size="sm" disabled={!dirty || savingHost} onClick={saveHost} icon={savingHost ? <Loader size={13} className="animate-spin" /> : undefined}>Save</Button>
-                    <HostActions host={selectedHost} settingRunner={settingRunner} onRunner={() => setRunner(selectedHost.id)} onDelete={() => deleteHost(selectedHost.id)} />
+                    {canManageInventory && <Button size="sm" disabled={!dirty || savingHost} onClick={saveHost} icon={savingHost ? <Loader size={13} className="animate-spin" /> : undefined}>Save</Button>}
+                    {canManageInventory && <HostActions host={selectedHost} settingRunner={settingRunner} onRunner={() => setRunner(selectedHost.id)} onDelete={() => deleteHost(selectedHost.id)} />}
                   </div>
                 </div>
 
@@ -400,12 +405,12 @@ const InventoriesPage = () => {
                   <div className="max-w-[640px]">
                     {/* Connection */}
                     <Section title="Connection">
-                      <ConnRow label="Address" varName="ansible_host" value={connForm.ansible_host} placeholder={selectedHost.name} onChange={v => setConnForm({ ...connForm, ansible_host: v })} />
-                      <ConnRow label="Port" varName="ansible_port" value={connForm.ansible_port} placeholder="22" sm onChange={v => setConnForm({ ...connForm, ansible_port: v })} />
-                      <ConnRow label="User" varName="ansible_user" value={connForm.ansible_user} placeholder="root" onChange={v => setConnForm({ ...connForm, ansible_user: v })} />
+                      <ConnRow readOnly={!canManageInventory} label="Address" varName="ansible_host" value={connForm.ansible_host} placeholder={selectedHost.name} onChange={v => setConnForm({ ...connForm, ansible_host: v })} />
+                      <ConnRow readOnly={!canManageInventory} label="Port" varName="ansible_port" value={connForm.ansible_port} placeholder="22" sm onChange={v => setConnForm({ ...connForm, ansible_port: v })} />
+                      <ConnRow readOnly={!canManageInventory} label="User" varName="ansible_user" value={connForm.ansible_user} placeholder="root" onChange={v => setConnForm({ ...connForm, ansible_user: v })} />
                       <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5">
                         <div className="text-[12.5px] text-mut">Transport<span className="block font-mono text-[9.5px] text-faint mt-0.5">ansible_connection</span></div>
-                        <select value={connForm.ansible_connection} onChange={e => setConnForm({ ...connForm, ansible_connection: e.target.value })}
+                        <select disabled={!canManageInventory} value={connForm.ansible_connection} onChange={e => setConnForm({ ...connForm, ansible_connection: e.target.value })}
                           className="max-w-[120px] bg-transparent border-b border-line focus:border-acc text-ink font-mono text-[13px] py-1.5 outline-none hover:border-line2">
                           <option value="" className="bg-panel">ssh</option>
                           <option value="ssh" className="bg-panel">ssh</option>
@@ -413,26 +418,26 @@ const InventoriesPage = () => {
                           <option value="paramiko" className="bg-panel">paramiko</option>
                         </select>
                       </div>
-                      <ConnRow label="Python" varName="ansible_python_interpreter" value={connForm.ansible_python_interpreter} placeholder="/usr/bin/python3" onChange={v => setConnForm({ ...connForm, ansible_python_interpreter: v })} />
+                      <ConnRow readOnly={!canManageInventory} label="Python" varName="ansible_python_interpreter" value={connForm.ansible_python_interpreter} placeholder="/usr/bin/python3" onChange={v => setConnForm({ ...connForm, ansible_python_interpreter: v })} />
                     </Section>
 
                     {/* Defined vars */}
-                    <Section title="Defined on this host" hint={`host_vars · ${Object.keys(extraVars).length}`} action={<button onClick={openVarsModal} className="font-mono text-[11px] text-dim hover:text-acc">edit as JSON</button>}>
+                    <Section title="Defined on this host" hint={`host_vars · ${Object.keys(extraVars).length}`} action={canManageInventory ? <button onClick={openVarsModal} className="font-mono text-[11px] text-dim hover:text-acc">edit as JSON</button> : undefined}>
                       {Object.keys(extraVars).length === 0 && <p className="font-mono text-[12px] text-faint py-1">No host-specific variables.</p>}
                       {Object.entries(extraVars).map(([k, v]) => (
                         <div key={k} className="flex items-center gap-3.5 py-2 group">
                           <span className="w-1.5 h-1.5 rounded-full bg-acc shrink-0" />
                           <span className="font-mono text-[13px] text-ink min-w-[158px]">{k}</span>
                           <span className="text-faint font-mono">=</span>
-                          <input value={v} onChange={e => setExtraVars(p => ({ ...p, [k]: e.target.value }))}
+                          <input readOnly={!canManageInventory} value={v} onChange={e => setExtraVars(p => ({ ...p, [k]: e.target.value }))}
                             className="flex-1 bg-transparent border-b border-transparent group-hover:border-line focus:border-acc text-ink2 font-mono text-[13px] pb-0.5 outline-none" />
-                          <button onClick={() => setExtraVars(p => { const n = { ...p }; delete n[k]; return n; })} className="text-faint hover:text-err opacity-0 group-hover:opacity-100" title="Remove"><Trash2 size={13} /></button>
+                          {canManageInventory && <button onClick={() => setExtraVars(p => { const n = { ...p }; delete n[k]; return n; })} className="text-faint hover:text-err opacity-0 group-hover:opacity-100" title="Remove"><Trash2 size={13} /></button>}
                         </div>
                       ))}
-                      <button onClick={() => { let i = 1; let key = 'new_var'; while (key in extraVars) key = `new_var_${i++}`; setExtraVars(p => ({ ...p, [key]: '' })); }}
+                      {canManageInventory && <button onClick={() => { let i = 1; let key = 'new_var'; while (key in extraVars) key = `new_var_${i++}`; setExtraVars(p => ({ ...p, [key]: '' })); }}
                         className="flex items-center gap-2 pt-3 ml-5 font-mono text-[12px] text-dim hover:text-acc">
                         <Plus size={13} /> add variable
-                      </button>
+                      </button>}
                     </Section>
 
                     {/* Membership */}
@@ -442,7 +447,7 @@ const InventoriesPage = () => {
                           {groups.map(g => {
                             const isIn = hostGroups.includes(g.id);
                             return (
-                              <button key={g.id} onClick={() => toggleMembership(g.id, isIn)}
+                              <button key={g.id} disabled={!canManageInventory} onClick={() => toggleMembership(g.id, isIn)}
                                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-mono text-[12px] border transition-colors ${isIn ? 'bg-grp/10 text-grp border-grp/30' : 'text-mut border-line hover:border-line2'}`}>
                                 {isIn && <Check size={12} />} {g.name}
                               </button>
@@ -459,9 +464,9 @@ const InventoriesPage = () => {
               <div className="flex-1 overflow-auto scroll-tint px-10 pt-7 pb-16 max-[820px]:px-5">
                 <div className="max-w-[720px]">
                   <h1 className="text-[21px] font-semibold tracking-tight">{selectedInv.name}</h1>
-                  <p className="text-sm text-mut mt-1">Select a host in the structure to edit its connection and variables.</p>
+                  <p className="text-sm text-mut mt-1">Select a host in the structure to {canManageInventory ? 'edit' : 'inspect'} its connection and variables.</p>
 
-                  <Section title="Sources" hint={`${sources.length}`} action={<button onClick={() => setShowSourceModal(true)} className="font-mono text-[11px] text-dim hover:text-acc">add source</button>}>
+                  <Section title="Sources" hint={`${sources.length}`} action={canManageInventory ? <button onClick={() => setShowSourceModal(true)} className="font-mono text-[11px] text-dim hover:text-acc">add source</button> : undefined}>
                     {sources.length === 0 ? <p className="font-mono text-[12px] text-faint py-1">No dynamic sources. Add one to populate hosts (e.g. AWS).</p> : (
                       <div className="space-y-0">
                         {sources.map(s => (
@@ -469,8 +474,8 @@ const InventoriesPage = () => {
                             <span className="text-[13px] text-ink font-medium">{s.name}</span>
                             <span className="font-mono text-[11px] text-dim">{s.source_kind}</span>
                             <span className="ml-auto font-mono text-[11px] text-dim">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
-                            <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>
-                            <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>
+                            {canManageInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
+                            {canManageInventory && <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>}
                           </div>
                         ))}
                       </div>
@@ -478,7 +483,7 @@ const InventoriesPage = () => {
                   </Section>
 
                   <Section title="Access" icon={<Shield size={13} className="text-dim" />}>
-                    <ResourceAccess contentType="inventory" objectId={selectedInv.id} />
+                    <ResourceAccess contentType="inventory" objectId={selectedInv.id} canManage={canManageInventory} />
                   </Section>
                 </div>
               </div>
@@ -488,14 +493,14 @@ const InventoriesPage = () => {
       )}
 
       {/* ── Modals ─────────────────────────────────────────────────────── */}
-      <Modal isOpen={showInventoryModal} onClose={() => setShowInventoryModal(false)} title={`New inventory in ${orgName}`}>
+      <Modal isOpen={canCreateInventory && showInventoryModal} onClose={() => setShowInventoryModal(false)} title={`New inventory in ${orgName}`}>
         <div className="space-y-4">
           <Input label="Name" value={newInventoryName} onChange={e => setNewInventoryName(e.target.value)} placeholder="My inventory" />
           <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowInventoryModal(false)}>Cancel</Button><Button onClick={createInventory}>Create</Button></div>
         </div>
       </Modal>
 
-      <Modal isOpen={showHostModal} onClose={() => setShowHostModal(false)} title="New host">
+      <Modal isOpen={canManageInventory && showHostModal} onClose={() => setShowHostModal(false)} title="New host">
         <div className="space-y-4">
           <Input label="Hostname" value={newHostName} onChange={e => setNewHostName(e.target.value)} placeholder="web-01" />
           <div className="grid grid-cols-2 gap-3">
@@ -508,14 +513,14 @@ const InventoriesPage = () => {
         </div>
       </Modal>
 
-      <Modal isOpen={showGroupModal} onClose={() => setShowGroupModal(false)} title="New group">
+      <Modal isOpen={canManageInventory && showGroupModal} onClose={() => setShowGroupModal(false)} title="New group">
         <div className="space-y-4">
           <Input label="Group name" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="webservers" />
           <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowGroupModal(false)}>Cancel</Button><Button onClick={createGroup}>Create</Button></div>
         </div>
       </Modal>
 
-      <Modal isOpen={showImportModal} onClose={() => setShowImportModal(false)} title="Import inventory" size="lg">
+      <Modal isOpen={canManageInventory && showImportModal} onClose={() => setShowImportModal(false)} title="Import inventory" size="lg">
         <div className="space-y-4">
           <Select label="Format" value={importFormat} onChange={e => setImportFormat(e.target.value as 'ini' | 'yaml')}>
             <option value="ini">INI (Ansible format)</option>
@@ -527,7 +532,7 @@ const InventoriesPage = () => {
         </div>
       </Modal>
 
-      <Modal isOpen={showSourceModal} onClose={() => setShowSourceModal(false)} title="New inventory source" size="lg">
+      <Modal isOpen={canManageInventory && showSourceModal} onClose={() => setShowSourceModal(false)} title="New inventory source" size="lg">
         <div className="space-y-4">
           <Input label="Name" value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
           <Select label="Kind" value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
@@ -543,7 +548,7 @@ const InventoriesPage = () => {
         </div>
       </Modal>
 
-      <Modal isOpen={showVarsModal} onClose={() => setShowVarsModal(false)} title="Edit host variables (JSON)" size="lg">
+      <Modal isOpen={canManageInventory && showVarsModal} onClose={() => setShowVarsModal(false)} title="Edit host variables (JSON)" size="lg">
         <div className="space-y-4">
           <Textarea rows={14} className="font-mono text-xs" value={varsDraft} onChange={e => setVarsDraft(e.target.value)} />
           <p className="text-[11px] text-dim">Connection fields (ansible_host, ansible_port…) are edited above; this covers everything else.</p>
@@ -595,10 +600,10 @@ const Section: React.FC<{ title: string; hint?: string; icon?: React.ReactNode; 
   </div>
 );
 
-const ConnRow: React.FC<{ label: string; varName: string; value: string; placeholder?: string; sm?: boolean; onChange: (v: string) => void }> = ({ label, varName, value, placeholder, sm, onChange }) => (
+const ConnRow: React.FC<{ label: string; varName: string; value: string; placeholder?: string; sm?: boolean; readOnly?: boolean; onChange: (v: string) => void }> = ({ label, varName, value, placeholder, sm, readOnly, onChange }) => (
   <div className="grid grid-cols-[118px_1fr] items-center gap-5 py-1.5">
     <div className="text-[12.5px] text-mut">{label}<span className="block font-mono text-[9.5px] text-faint mt-0.5">{varName}</span></div>
-    <input value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
+    <input readOnly={readOnly} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
       className={`${sm ? 'max-w-[120px]' : 'max-w-[300px]'} w-full bg-transparent border-b border-line focus:border-acc text-ink font-mono text-[13px] py-1.5 outline-none hover:border-line2 placeholder:text-faint`} />
   </div>
 );

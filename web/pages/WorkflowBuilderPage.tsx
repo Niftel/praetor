@@ -5,6 +5,8 @@ import { WorkflowNode, WorkflowEdge, WorkflowNodeType, WorkflowEdgeType } from '
 import { Input } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import { toast } from '../components/ui/toast';
+import { PageSpinner } from '../components/ui/PageSpinner';
+import { useCapabilities } from '../lib/useCapabilities';
 import {
   ArrowLeft, Check, Play, Pause, ArrowDownToLine, ArrowUpFromLine, Plus, Trash2,
   Minus, Maximize2, GitFork, ChevronRight, ChevronDown,
@@ -63,6 +65,8 @@ const WorkflowBuilderPage = () => {
   const orgId = Number(orgIdStr);
   const editingId = workflowId ? Number(workflowId) : null;
   const navigate = useNavigate();
+  const { capabilities: orgCapabilities, loading: orgCapabilityLoading } = useCapabilities('organization', editingId ? null : orgId);
+  const { capabilities: workflowCapabilities, loading: workflowCapabilityLoading } = useCapabilities('workflow_template', editingId);
 
   const [orgName, setOrgName] = useState('');
   const [templates, setTemplates] = useState<any[]>([]);
@@ -187,6 +191,21 @@ const WorkflowBuilderPage = () => {
   };
 
   const selected = selKey ? nodes.find(n => n.node_key === selKey) || null : null;
+
+  const permissionLoading = editingId ? workflowCapabilityLoading : orgCapabilityLoading;
+  const permitted = editingId ? workflowCapabilities.manage : !!orgCapabilities.add_workflow_template;
+  if (permissionLoading) return <PageSpinner />;
+  if (!permitted) {
+    return (
+      <div className="h-full grid place-items-center bg-bg text-ink px-6">
+        <div className="max-w-md text-center">
+          <h1 className="text-xl font-semibold">Read-only access</h1>
+          <p className="mt-2 text-sm text-mut">You can inspect this workflow from its organization page, but your role cannot create or edit workflows.</p>
+          <Button className="mt-5" variant="secondary" onClick={() => navigate(`/workflows/org/${orgId}`)}>Back to workflows</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex flex-col h-full min-h-0 bg-bg text-ink transition-opacity duration-200 ease-out ${entered ? 'opacity-100' : 'opacity-0'}`}>

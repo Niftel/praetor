@@ -208,6 +208,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		r.Get("/access", access.ResourceAccess)
 		r.Post("/access", access.GrantAccess)
 		r.Delete("/access", access.RevokeAccess)
+		r.Get("/capabilities", access.Capabilities)
 		r.Get("/role-definitions", access.AssignableRoles)
 
 		// =======================================================================
