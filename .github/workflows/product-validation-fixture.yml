@@ -79,6 +79,7 @@ jobs:
         run: |
           ./scripts/product-validation-fixture.sh create
           ./scripts/product-validation-fixture.sh create
+          ./scripts/validate-ldap-operator-journey.sh
           ./scripts/product-validation-fixture.sh cleanup
           if ./scripts/product-validation-fixture.sh status; then
             echo 'fixture status unexpectedly passed after cleanup' >&2

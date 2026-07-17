@@ -143,6 +143,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, name := range []string{
 		"scripts/bootstrap-product-validation-base.sh",
+		"scripts/validate-ldap-operator-journey.sh",
 		".github/workflows/product-validation-fixture.yml",
 		"deployments/product-validation/base-datastores.yaml",
 	} {
@@ -155,9 +156,19 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
+		}
+	}
+	journeyRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-ldap-operator-journey.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	journey := string(journeyRaw)
+	for _, required := range []string{"demo-operator", "mwebb", "fwalsh", "demo-auditor", "expected 403", "requested_by", "activity-stream", "workflow finished with status"} {
+		if !strings.Contains(journey, required) {
+			t.Fatalf("LDAP operator journey must contain %q", required)
 		}
 	}
 	bootstrapRaw, err := os.ReadFile(filepath.Join(root, "scripts", "bootstrap-product-validation-base.sh"))
