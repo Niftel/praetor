@@ -151,7 +151,7 @@ local-cluster-update:
 local-cluster-release:
 	./scripts/deploy-local-release.sh
 
-.PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey
+.PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
 validation-fixture-bootstrap:
 	./scripts/bootstrap-product-validation-base.sh
 
@@ -166,6 +166,9 @@ validation-fixture-cleanup:
 
 validation-ldap-operator-journey:
 	./scripts/validate-ldap-operator-journey.sh
+
+validation-execution-recovery:
+	./scripts/validate-execution-recovery-e2e.sh
 
 # Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
 # tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run

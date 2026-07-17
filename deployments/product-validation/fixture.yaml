@@ -57,11 +57,15 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: sink
-          image: registry.k8s.io/e2e-test-images/agnhost@sha256:99c6b4bb4a1e1df3f0b3752168c89358794d02258ebebc26bf21c29399011a85
-          args: ["netexec", "--http-port=8080"]
+          image: nginx:alpine-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef
           ports: [{name: http, containerPort: 8080}]
           readinessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 2, periodSeconds: 3}
           resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+          volumeMounts:
+            - {name: config, mountPath: /etc/nginx/conf.d}
+      volumes:
+        - name: config
+          configMap: {name: praetor-validation-notification-sink}
 ---
 apiVersion: v1
 kind: Service
@@ -71,3 +75,25 @@ metadata:
 spec:
   selector: {app: praetor-validation-notification-sink}
   ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: praetor-validation-notification-sink
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+data:
+  default.conf: |
+    log_format notification escape=none '$request_body';
+    access_log /dev/stdout notification;
+    server {
+      listen 8080;
+      location = /healthz { access_log off; return 204; }
+      # Proxying forces nginx to consume the request body before access_log
+      # evaluates $request_body. The internal endpoint is not logged, keeping
+      # exactly one JSON log record per notification delivery.
+      location / {
+        rewrite ^ /capture break;
+        proxy_pass http://127.0.0.1:8080;
+      }
+      location = /capture { access_log off; return 204; }
+    }

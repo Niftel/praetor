@@ -43,6 +43,41 @@ k3d image import --cluster "$CLUSTER" \
   "praetor-ingestion:$validation_tag" \
   "praetor-consumer:$validation_tag" \
   "praetor-reconciler:$validation_tag"
+
+# Do not start Helm when an image import was incomplete. Without this check,
+# Kubernetes falls back to Docker Hub and the fixture wastes several minutes in
+# ImagePullBackOff before Helm eventually times out.
+validation_images=(
+  "$SECRETS_IMAGE"
+  "praetor-api:$validation_tag"
+  "praetor-migrator:$validation_tag"
+  "praetor-ui:$validation_tag"
+  "praetor-scheduler:$validation_tag"
+  "praetor-executor:$validation_tag"
+  "praetor-ingestion:$validation_tag"
+  "praetor-consumer:$validation_tag"
+  "praetor-reconciler:$validation_tag"
+)
+probe_index=0
+for image in "${validation_images[@]}"; do
+  probe="praetor-image-probe-$probe_index"
+  kubectl run "$probe" --image="$image" --image-pull-policy=Never --restart=Never \
+    --command -- /bin/sh -c 'exit 0' >/dev/null
+  phase=""
+  for _ in {1..20}; do
+    phase="$(kubectl get pod "$probe" -o jsonpath='{.status.phase}')"
+    [[ "$phase" == Succeeded || "$phase" == Failed ]] && break
+    sleep 1
+  done
+  if [[ "$phase" != Succeeded ]]; then
+    echo "error: imported image $image could not start with imagePullPolicy=Never" >&2
+    kubectl describe pod "$probe" >&2 || true
+    kubectl delete pod "$probe" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    exit 1
+  fi
+  kubectl delete pod "$probe" --wait=false >/dev/null
+  probe_index=$((probe_index + 1))
+done
 secrets_repository="${SECRETS_IMAGE%:*}"
 secrets_tag="${SECRETS_IMAGE##*:}"
 
