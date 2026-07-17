@@ -33,6 +33,25 @@ approval, successful completion, and requester/approver attribution in the
 auditor-visible activity stream. Its final output is sanitized JSON containing
 only the workflow run ID, terminal status, and synthetic actor/team names.
 
+## Execution recovery lifecycle
+
+The recovery gate uses the same synthetic identities and notification receiver,
+but runs a real checkpointed playbook through the scheduler, executor, host
+runner, ingestion, consumer, and Secrets Service:
+
+```sh
+make validation-execution-recovery
+```
+
+It interrupts ingestion, restarts scheduler and consumer, and deletes the
+executor pod while the play is paused. The executor's persistent WAL and
+checkpoint must resume the original run without repeating its completed side
+effect or resolving its credential again. A second run has its WAL deliberately
+removed and must become clearly `lost`/`error`; a subsequent relaunch must create
+new run IDs while retaining the initiating user and approval-team boundary.
+Approval and terminal webhooks, terminal events, activity-stream actors, and
+credential resolution counts are asserted exactly once.
+
 ## Credential execution lifecycle
 
 With an architecture-matched Execution Pack in `build/runtime`, the live secrets

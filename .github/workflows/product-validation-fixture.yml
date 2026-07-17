@@ -9,6 +9,8 @@ on:
       - 'deployments/helm/praetor-v2/**'
       - 'scripts/bootstrap-product-validation-base.sh'
       - 'scripts/product-validation-fixture.sh'
+      - 'scripts/validate-execution-recovery-e2e.sh'
+      - 'playbooks/validate-execution-recovery.yml'
   workflow_dispatch:
 
 permissions:
@@ -80,6 +82,9 @@ jobs:
           ./scripts/product-validation-fixture.sh create
           ./scripts/product-validation-fixture.sh create
           ./scripts/validate-ldap-operator-journey.sh
+          PRAETOR_EXECUTOR_ROOT="${{ github.workspace }}/executor" \
+            PRAETOR_RECOVERY_PROJECT_REF="${{ github.head_ref }}" \
+            ./scripts/validate-execution-recovery-e2e.sh
           ./scripts/product-validation-fixture.sh cleanup
           if ./scripts/product-validation-fixture.sh status; then
             echo 'fixture status unexpectedly passed after cleanup' >&2

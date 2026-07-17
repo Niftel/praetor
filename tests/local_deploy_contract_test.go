@@ -175,9 +175,19 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
+		}
+	}
+	recoveryRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-execution-recovery-e2e.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := string(recoveryRaw)
+	for _, required := range []string{"RESUMED_FROM_CHECKPOINT", "recovery-side-effects.log", "deployment/praetor-ingestion --replicas=0", "state='reconciling'", "activity-stream?limit=500", "resolution_count", "notification_count"} {
+		if !strings.Contains(recovery, required) {
+			t.Fatalf("execution recovery journey must contain %q", required)
 		}
 	}
 	journeyRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-ldap-operator-journey.sh"))
