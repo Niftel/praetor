@@ -1,0 +1,155 @@
+name: Product validation fixture
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/product-validation-fixture.yml'
+      - 'deployments/product-validation/**'
+      - 'deployments/helm/praetor-v2/**'
+      - 'scripts/bootstrap-product-validation-base.sh'
+      - 'scripts/product-validation-fixture.sh'
+      - 'scripts/generate-readiness-report.sh'
+      - 'scripts/test-secrets-execution-e2e.sh'
+      - 'scripts/validate-delegated-api-e2e.sh'
+      - 'scripts/validate-ldap-operator-journey.sh'
+      - 'scripts/validate-execution-recovery-e2e.sh'
+      - 'cmd/readiness-report/**'
+      - 'internal/readiness/**'
+      - 'playbooks/validate-execution-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with: {version: v3.18.4}
+      - name: Install pinned k3d
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64 \
+            --output /usr/local/bin/k3d
+          chmod 0755 /usr/local/bin/k3d
+          test "$(k3d version | awk '/k3d version/ {print $3}')" = v5.8.3
+      - name: Check out Secrets Service
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/praetor-secrets
+          path: praetor-secrets
+      - name: Check out Scheduler
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/scheduler
+          path: scheduler
+      - name: Check out Executor
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/executor
+          path: executor
+      - name: Check out Ingestion
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/ingestion
+          path: ingestion
+      - name: Check out Consumer
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/consumer
+          path: consumer
+      - name: Check out Reconciler
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Niftel/reconciler
+          path: reconciler
+      - name: Create clean cluster and integrated base
+        timeout-minutes: 15
+        env:
+          PRAETOR_SECRETS_ROOT: ${{ github.workspace }}/praetor-secrets
+          PRAETOR_SCHEDULER_ROOT: ${{ github.workspace }}/scheduler
+          PRAETOR_EXECUTOR_ROOT: ${{ github.workspace }}/executor
+          PRAETOR_INGESTION_ROOT: ${{ github.workspace }}/ingestion
+          PRAETOR_CONSUMER_ROOT: ${{ github.workspace }}/consumer
+          PRAETOR_RECONCILER_ROOT: ${{ github.workspace }}/reconciler
+          PRAETOR_K3D_CLUSTER: praetor-validation
+        run: |
+          k3d cluster create praetor-validation --wait
+          ./scripts/bootstrap-product-validation-base.sh
+      - name: Exercise complete fixture lifecycle
+        run: |
+          mkdir -p build/readiness-evidence
+          ./scripts/product-validation-fixture.sh create
+          ./scripts/product-validation-fixture.sh create
+          PRAETOR_LDAP_EVIDENCE_FILE=build/readiness-evidence/ldap-operator.json \
+            ./scripts/validate-ldap-operator-journey.sh
+          PRAETOR_EXECUTOR_ROOT="${{ github.workspace }}/executor" \
+            PRAETOR_RECOVERY_PROJECT_REF="${{ github.head_ref }}" \
+            PRAETOR_RECOVERY_EVIDENCE_FILE=build/readiness-evidence/execution-recovery.json \
+            ./scripts/validate-execution-recovery-e2e.sh
+          ./scripts/product-validation-fixture.sh cleanup
+          if ./scripts/product-validation-fixture.sh status; then
+            echo 'fixture status unexpectedly passed after cleanup' >&2
+            exit 1
+          fi
+          ./scripts/product-validation-fixture.sh create
+      - name: Capture live Secrets Service evidence
+        timeout-minutes: 8
+        env:
+          PRAETOR_E2E_EVIDENCE_FILE: build/readiness-evidence/secrets-service.json
+          PRAETOR_E2E_PROJECT_REF: ${{ github.head_ref || github.ref_name }}
+          PRAETOR_E2E_SECRETS_DB_APP: praetor-validation-secrets-postgres
+          PRAETOR_E2E_AUDIT_DB_APP: praetor-validation-audit-postgres
+        run: |
+          executor_pod="$(kubectl get pod -n praetor-secrets -l app.kubernetes.io/component=executor,app.kubernetes.io/instance=praetor -o jsonpath='{.items[0].metadata.name}')"
+          executor_arch="$(kubectl exec -n praetor-secrets "$executor_pod" -- uname -m | sed -e 's/^aarch64$/arm64/' -e 's/^x86_64$/amd64/')"
+          mkdir -p build/runtime
+          kubectl exec -n praetor-secrets "$executor_pod" -- tar -czf "/tmp/ansible-runtime-linux-$executor_arch.tar.gz" -C /opt/praetor/packs ansible-runtime
+          kubectl cp "praetor-secrets/$executor_pod:/tmp/ansible-runtime-linux-$executor_arch.tar.gz" "build/runtime/ansible-runtime-linux-$executor_arch.tar.gz"
+          ./scripts/test-secrets-execution-e2e.sh
+      - name: Capture delegated API evidence
+        timeout-minutes: 5
+        run: |
+          cleanup() { docker rm -f praetor-readiness-postgres >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name praetor-readiness-postgres \
+            -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=praetor \
+            -p 55434:5432 postgres:15 >/dev/null
+          until docker exec praetor-readiness-postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+          DATABASE_URL='postgres://postgres:postgres@localhost:55434/praetor?sslmode=disable' go run ./cmd/migrator >/dev/null
+          TEST_DATABASE_URL='postgres://postgres:postgres@localhost:55434/praetor?sslmode=disable' \
+            PRAETOR_DELEGATED_EVIDENCE_FILE=build/readiness-evidence/delegated-api.json \
+            ./scripts/validate-delegated-api-e2e.sh
+      - name: Generate production-candidate decision
+        env:
+          PRAETOR_REVISION: ${{ github.sha }}
+          PRAETOR_FIXTURE_REVISION: ${{ github.sha }}
+          PRAETOR_READINESS_EVIDENCE_DIR: build/readiness-evidence
+          PRAETOR_READINESS_REPORT: build/production-candidate-readiness.json
+        run: |
+          PRAETOR_SECRETS_REVISION="$(git -C "${{ github.workspace }}/praetor-secrets" rev-parse HEAD)" \
+            ./scripts/generate-readiness-report.sh
+      - name: Upload sanitized readiness evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-candidate-readiness-${{ github.sha }}
+          path: |
+            build/readiness-evidence/*.json
+            build/production-candidate-readiness.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl get events -A --sort-by=.lastTimestamp | tail -n 100

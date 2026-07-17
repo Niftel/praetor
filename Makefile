@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -42,9 +42,21 @@ secrets-execution-contract-test:
 	grep -q 'exactly one credential resolution attempt' ./scripts/test-secrets-execution-e2e.sh
 	grep -q 'JOB_COMPLETED' ./scripts/test-secrets-execution-e2e.sh
 	grep -q 'PRAETOR_E2E_EVIDENCE_FILE' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'POSTGRES_USER:-postgres' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'terminal executor manifest retained planted secret material' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'completed-run credential replay' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'wrong-workload credential resolution' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'expired binding resolution' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'retired credential binding registration' ./scripts/test-secrets-execution-e2e.sh
+	grep -q 'Scanning API, audit, database, and workload artifacts' ./scripts/test-secrets-execution-e2e.sh
 
 secrets-execution-e2e:
 	./scripts/test-secrets-execution-e2e.sh
+
+readiness-report-test:
+	go test ./internal/readiness ./cmd/readiness-report
+	bash -n ./scripts/generate-readiness-report.sh
+	bash -n ./scripts/validate-delegated-api-e2e.sh
 
 # A release preflight intentionally fails while the manifest is marked
 # development. The remote form also verifies GHCR images and Go module tags.
@@ -111,6 +123,7 @@ test:
 	$(MAKE) deployment-contract-test
 	$(MAKE) local-deploy-contract-test
 	$(MAKE) secrets-execution-contract-test
+	$(MAKE) readiness-report-test
 	go test -v ./tests/...
 	@echo "Running unit tests (incl. #39 no-wildcard-SELECT gate + column-drift checks)..."
 	go test ./services/... ./pkg/...
@@ -144,6 +157,25 @@ local-cluster-update:
 # Deploy the exact image set declared by platform-compatibility.yaml.
 local-cluster-release:
 	./scripts/deploy-local-release.sh
+
+.PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
+validation-fixture-bootstrap:
+	./scripts/bootstrap-product-validation-base.sh
+
+validation-fixture-create:
+	./scripts/product-validation-fixture.sh create
+
+validation-fixture-status:
+	./scripts/product-validation-fixture.sh status
+
+validation-fixture-cleanup:
+	./scripts/product-validation-fixture.sh cleanup
+
+validation-ldap-operator-journey:
+	./scripts/validate-ldap-operator-journey.sh
+
+validation-execution-recovery:
+	./scripts/validate-execution-recovery-e2e.sh
 
 # Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
 # tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run

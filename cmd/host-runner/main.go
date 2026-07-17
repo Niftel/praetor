@@ -134,6 +134,9 @@ func runJob(jobDir, apiURL, runID string) error {
 	// syncers above drain its persisted WAL. This is the recovery path for a run that
 	// finished while ingestion was unreachable and is now being re-driven.
 	if isTerminalStatus(jobDir) {
+		if err := scrubManifestSecrets(filepath.Join(jobDir, "manifest.json")); err != nil {
+			log.Printf("Warning: could not scrub already-terminal manifest secrets: %v", err)
+		}
 		log.Printf("job %s already terminal — delivering persisted results without re-running", jobDir)
 		return nil
 	}
