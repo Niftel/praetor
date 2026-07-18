@@ -180,6 +180,9 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
 	}
+	if strings.Count(workflow, "github.event.pull_request.head.sha || github.sha") != 2 {
+		t.Fatal("validation SCM journeys must use the immutable PR head SHA with a push fallback")
+	}
 	for _, required := range []string{"PRAETOR_E2E_SECRETS_DB_APP: praetor-validation-secrets-postgres", "PRAETOR_E2E_AUDIT_DB_APP: praetor-validation-audit-postgres"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("readiness workflow must contain %q", required)

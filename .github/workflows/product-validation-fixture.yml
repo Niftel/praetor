@@ -94,7 +94,7 @@ jobs:
           PRAETOR_LDAP_EVIDENCE_FILE=build/readiness-evidence/ldap-operator.json \
             ./scripts/validate-ldap-operator-journey.sh
           PRAETOR_EXECUTOR_ROOT="${{ github.workspace }}/executor" \
-            PRAETOR_RECOVERY_PROJECT_REF="${{ github.head_ref }}" \
+            PRAETOR_RECOVERY_PROJECT_REF="${{ github.event.pull_request.head.sha || github.sha }}" \
             PRAETOR_RECOVERY_EVIDENCE_FILE=build/readiness-evidence/execution-recovery.json \
             ./scripts/validate-execution-recovery-e2e.sh
           ./scripts/product-validation-fixture.sh cleanup
@@ -107,7 +107,7 @@ jobs:
         timeout-minutes: 8
         env:
           PRAETOR_E2E_EVIDENCE_FILE: build/readiness-evidence/secrets-service.json
-          PRAETOR_E2E_PROJECT_REF: ${{ github.head_ref || github.ref_name }}
+          PRAETOR_E2E_PROJECT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
           PRAETOR_E2E_SECRETS_DB_APP: praetor-validation-secrets-postgres
           PRAETOR_E2E_AUDIT_DB_APP: praetor-validation-audit-postgres
         run: |
