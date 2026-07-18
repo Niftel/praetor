@@ -274,9 +274,9 @@ wait_target_marker() {
 }
 
 wait_actionable_failure_log() {
-  local token="$1" run_id="$2" deadline=$((SECONDS + 45)) log=""
+  local since_time="$1" deadline=$((SECONDS + 45)) log=""
   while (( SECONDS < deadline )); do
-    log="$(get_as "$token" "jobs/runs/$run_id/logs" 2>/dev/null || true)"
+    log="$(kubectl --context "$CONTEXT" -n "$NAMESPACE" logs "statefulset/$RELEASE-executor" -c executor --since-time="$since_time" 2>/dev/null || true)"
     if grep -Eiq '(UNREACHABLE|timed out|No route|connect)' <<<"$log"; then
       printf '%s' "$log"
       return
@@ -330,12 +330,13 @@ run_faults() {
   echo "==> Unreachable pilot target fails within a bounded deadline with diagnostics"
   docker network disconnect praetor-pilot "$PILOT_TARGET"
   TARGET_DISCONNECTED=1
+  unreachable_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   unreachable_started=$SECONDS
   unreachable="$(launch_fault "$operator_token" "$approver_token")"
   unreachable_job="$(jq -r .workflow_job_id <<<"$unreachable")"; unreachable_run="$(jq -r .run_id <<<"$unreachable")"
   wait_fault_terminal "$operator_token" "$unreachable_job" failed >/dev/null
   (( SECONDS - unreachable_started <= 120 )) || die "unreachable host exceeded the 120-second failure boundary"
-  unreachable_log="$(wait_actionable_failure_log "$operator_token" "$unreachable_run")"
+  unreachable_log="$(wait_actionable_failure_log "$unreachable_since")"
   docker network connect --ip "${PRAETOR_PILOT_ADDRESS:-172.29.50.10}" praetor-pilot "$PILOT_TARGET"
   TARGET_DISCONNECTED=0
   "$ROOT/scripts/pilot-host.sh" status >/dev/null
