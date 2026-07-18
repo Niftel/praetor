@@ -40,6 +40,42 @@ func TestStagingProfileFailsClosedWhenUIAcceptanceFails(t *testing.T) {
 	}
 }
 
+func TestManagedHostPilotProfileRequiresScopedEvidenceAndRevisions(t *testing.T) {
+	manifest := validManifest()
+	manifest.Profile = "managed-host-pilot"
+	manifest.Journeys = nil
+	for _, name := range pilotJourneys {
+		manifest.Journeys = append(manifest.Journeys, JourneyEvidence{Name: name, Result: "pass", EvidenceSHA256: digest})
+	}
+	manifest.Revisions.Components = make(map[string]string, len(stagingComponents))
+	for _, name := range stagingComponents {
+		manifest.Revisions.Components[name] = "sha256:" + digest
+	}
+	manifest.Revisions.ExecutionPack = "sha256:" + digest
+	manifest.Revisions.TargetImage = "sha256:" + digest
+	report, err := Generate(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Decision.Status != "go" || !strings.Contains(report.Decision.Rationale, "managed-host pilot") {
+		t.Fatalf("unexpected pilot decision: %+v", report.Decision)
+	}
+
+	manifest.Revisions.TargetImage = ""
+	manifest.Journeys = manifest.Journeys[:2]
+	manifest.Findings = []Finding{{ID: "pilot-blocker-999", Category: "reliability", Classification: "release-blocking", Status: "open", Issue: "https://github.com/Niftel/praetor/issues/999"}}
+	report, err = Generate(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := strings.Join(report.Decision.Reasons, ",")
+	for _, required := range []string{"missing-or-invalid-revision:target_image", "missing-journey:secrets-service", "open-release-blocker:pilot-blocker-999"} {
+		if !strings.Contains(reasons, required) {
+			t.Fatalf("pilot NO-GO reasons %q are missing %q", reasons, required)
+		}
+	}
+}
+
 func TestGenerateGoReport(t *testing.T) {
 	report, err := Generate(validManifest())
 	if err != nil {
