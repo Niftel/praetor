@@ -86,6 +86,25 @@ func TestPilotCredentialFaultMatrixUsesPersistentStagingBoundaries(t *testing.T)
 	}
 }
 
+func TestPilotReadinessDecisionIsFailClosedAndSanitized(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "generate-pilot-readiness-report.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := string(raw) + readMakefile(t, root)
+	for _, required := range []string{
+		"staging-pilot-readiness", "managed-host-pilot", "managed-host-pilot-faults",
+		"credential-faults.json", "PRAETOR_EXECUTION_PACK_REVISION", "PRAETOR_TARGET_IMAGE_REVISION",
+		"release-blocking", `select(.number != 173 and .number != 178)`, "chmod 0600",
+		"sensitive material appeared in pilot readiness report",
+	} {
+		if !strings.Contains(contract, required) {
+			t.Fatalf("pilot readiness decision is missing %q", required)
+		}
+	}
+}
+
 func readMakefile(t *testing.T, root string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(root, "Makefile"))

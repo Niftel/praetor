@@ -9,6 +9,8 @@ SECRETS_REVISION="${PRAETOR_SECRETS_REVISION:-}"
 FIXTURE_REVISION="${PRAETOR_FIXTURE_REVISION:-$PRAETOR_REVISION}"
 FINDINGS_FILE="${PRAETOR_READINESS_FINDINGS_FILE:-}"
 COMPONENTS_FILE="${PRAETOR_READINESS_COMPONENTS_FILE:-}"
+EXECUTION_PACK_REVISION="${PRAETOR_EXECUTION_PACK_REVISION:-}"
+TARGET_IMAGE_REVISION="${PRAETOR_TARGET_IMAGE_REVISION:-}"
 PROFILE="${PRAETOR_READINESS_PROFILE:-product-validation}"
 GENERATED_AT="${PRAETOR_READINESS_GENERATED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
@@ -20,6 +22,10 @@ journeys=(ldap-operator secrets-service delegated-api execution-recovery)
 if [[ "$PROFILE" == staging-release-candidate ]]; then
   journeys+=(staging-health staging-recovery ui-acceptance)
   [[ -n "$COMPONENTS_FILE" ]] || die "PRAETOR_READINESS_COMPONENTS_FILE is required for the staging-release-candidate profile"
+elif [[ "$PROFILE" == managed-host-pilot ]]; then
+  journeys=(managed-host-pilot managed-host-pilot-faults secrets-service)
+  [[ -n "$COMPONENTS_FILE" ]] || die "PRAETOR_READINESS_COMPONENTS_FILE is required for the managed-host-pilot profile"
+  [[ -n "$EXECUTION_PACK_REVISION" && -n "$TARGET_IMAGE_REVISION" ]] || die "pilot execution-pack and target-image revisions are required"
 elif [[ "$PROFILE" != product-validation ]]; then
   die "unsupported readiness profile $PROFILE"
 fi
@@ -64,10 +70,12 @@ jq -n \
   --arg praetor "$PRAETOR_REVISION" \
   --arg secrets "$SECRETS_REVISION" \
   --arg fixture "$FIXTURE_REVISION" \
+  --arg execution_pack "$EXECUTION_PACK_REVISION" \
+  --arg target_image "$TARGET_IMAGE_REVISION" \
   --argjson journeys "$(cat "$work/journeys.json")" \
   --argjson findings "$(cat "$work/findings.json")" \
   --argjson components "$(cat "$work/components.json")" \
-  '{schema_version:1,profile:$profile,generated_at:$generated_at,revisions:{praetor:$praetor,secrets_service:$secrets,fixture:$fixture,components:$components},journeys:$journeys,findings:$findings}' \
+  '{schema_version:1,profile:$profile,generated_at:$generated_at,revisions:{praetor:$praetor,secrets_service:$secrets,fixture:$fixture,components:$components,execution_pack:$execution_pack,target_image:$target_image},journeys:$journeys,findings:$findings}' \
   >"$work/manifest.json"
 
 mkdir -p "$(dirname "$OUTPUT")"

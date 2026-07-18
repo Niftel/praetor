@@ -20,6 +20,7 @@ var (
 
 var productJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery"}
 var stagingJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "staging-health", "staging-recovery", "ui-acceptance"}
+var pilotJourneys = []string{"managed-host-pilot", "managed-host-pilot-faults", "secrets-service"}
 var stagingComponents = []string{"api", "consumer", "executor", "ingestion", "migrator", "reconciler", "scheduler", "ui"}
 
 type Manifest struct {
@@ -36,6 +37,8 @@ type Revisions struct {
 	SecretsService string            `json:"secrets_service"`
 	Fixture        string            `json:"fixture"`
 	Components     map[string]string `json:"components,omitempty"`
+	ExecutionPack  string            `json:"execution_pack,omitempty"`
+	TargetImage    string            `json:"target_image,omitempty"`
 }
 
 type JourneyEvidence struct {
@@ -110,6 +113,19 @@ func Generate(manifest Manifest) (Report, error) {
 				reasons = append(reasons, "missing-component-revision:"+name)
 			}
 		}
+	case "managed-host-pilot":
+		requiredJourneys = pilotJourneys
+		if !digestPattern.MatchString(strings.TrimPrefix(manifest.Revisions.ExecutionPack, "sha256:")) {
+			reasons = append(reasons, "missing-or-invalid-revision:execution_pack")
+		}
+		if !digestPattern.MatchString(strings.TrimPrefix(manifest.Revisions.TargetImage, "sha256:")) {
+			reasons = append(reasons, "missing-or-invalid-revision:target_image")
+		}
+		for _, name := range stagingComponents {
+			if _, ok := manifest.Revisions.Components[name]; !ok {
+				reasons = append(reasons, "missing-component-revision:"+name)
+			}
+		}
 	default:
 		return Report{}, fmt.Errorf("unsupported profile %q", manifest.Profile)
 	}
@@ -119,8 +135,11 @@ func Generate(manifest Manifest) (Report, error) {
 		}
 	}
 
-	known := make(map[string]bool, len(stagingJourneys))
+	known := make(map[string]bool, len(stagingJourneys)+len(pilotJourneys))
 	for _, name := range stagingJourneys {
+		known[name] = true
+	}
+	for _, name := range pilotJourneys {
 		known[name] = true
 	}
 	seen := make(map[string]bool, len(manifest.Journeys))
@@ -189,6 +208,12 @@ func Generate(manifest Manifest) (Report, error) {
 	if len(reasons) > 0 {
 		status = "no-go"
 		rationale = "Production-candidate promotion is blocked until every listed reason is resolved."
+	}
+	if manifest.Profile == "managed-host-pilot" {
+		rationale = "All required managed-host pilot journeys passed and no pilot blockers remain."
+		if len(reasons) > 0 {
+			rationale = "Managed-host pilot use is blocked until every listed reason is resolved."
+		}
 	}
 	return Report{SchemaVersion: SchemaVersion, Profile: manifest.Profile, GeneratedAt: manifest.GeneratedAt, Revisions: manifest.Revisions, Journeys: journeys, Findings: findings, Decision: Decision{Status: status, Rationale: rationale, Reasons: reasons}}, nil
 }
