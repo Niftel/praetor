@@ -67,6 +67,25 @@ func TestPilotFaultMatrixCoversManagedHostFailureBoundaries(t *testing.T) {
 	}
 }
 
+func TestPilotCredentialFaultMatrixUsesPersistentStagingBoundaries(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-pilot-credential-faults.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := string(raw) + readMakefile(t, root)
+	for _, required := range []string{
+		"staging-pilot-credential-faults", "test-secrets-execution-e2e.sh",
+		"praetor-staging-secrets-postgres", "praetor-staging-audit-postgres",
+		"praetor_secrets", "praetor_audit", "credential-faults.json",
+		`current Kubernetes context is not`, `(.checks | length == 9)`,
+	} {
+		if !strings.Contains(contract, required) {
+			t.Fatalf("pilot credential fault matrix is missing %q", required)
+		}
+	}
+}
+
 func readMakefile(t *testing.T, root string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(root, "Makefile"))
