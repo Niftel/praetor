@@ -125,7 +125,7 @@ jobs:
           docker run -d --name praetor-readiness-postgres \
             -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=praetor \
             -p 55434:5432 postgres:15 >/dev/null
-          until docker exec praetor-readiness-postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+          POSTGRES_DB=praetor ./scripts/wait-for-postgres.sh praetor-readiness-postgres 60
           DATABASE_URL='postgres://postgres:postgres@localhost:55434/praetor?sslmode=disable' go run ./cmd/migrator >/dev/null
           TEST_DATABASE_URL='postgres://postgres:postgres@localhost:55434/praetor?sslmode=disable' \
             PRAETOR_DELEGATED_EVIDENCE_FILE=build/readiness-evidence/delegated-api.json \
