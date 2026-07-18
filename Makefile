@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset staging-pilot-access-plan staging-pilot-access-seed staging-pilot-access-status
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -180,6 +180,15 @@ pilot-host-status:
 
 pilot-host-reset:
 	./scripts/pilot-host.sh reset
+
+staging-pilot-access-plan:
+	./scripts/staging-pilot-access.sh plan
+
+staging-pilot-access-seed:
+	./scripts/staging-pilot-access.sh seed
+
+staging-pilot-access-status:
+	./scripts/staging-pilot-access.sh status
 
 .PHONY: staging-release-plan staging-release-deploy staging-release-status
 staging-release-plan:

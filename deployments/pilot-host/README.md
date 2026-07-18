@@ -26,6 +26,20 @@ make pilot-host-provision
 make pilot-host-status
 ```
 
+After the target is healthy, bind it to the Engineering/backend-team boundary
+through Praetor and its Secrets Service:
+
+```sh
+make staging-pilot-access-plan
+make staging-pilot-access-seed
+make staging-pilot-access-status
+```
+
+The seed submits the SSH private key through a mode-0600 request file to the
+credential API. Praetor retains only sealed placeholders and the opaque Secrets
+Service credential UUID/version; the status gate verifies the audit event and
+team allow/deny matrix without resolving plaintext.
+
 The default target address is `172.29.50.10:22`. Provisioning rejects an
 overlapping Docker subnet. Override the subnet and address together only when
 required:
