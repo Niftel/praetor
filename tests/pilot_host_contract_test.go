@@ -26,11 +26,15 @@ func TestPilotHostIsIsolatedAndKeyOnly(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"--read-only", "--cap-drop ALL", "--cap-add AUDIT_WRITE", "--cap-add CHOWN", "--cap-add KILL", "--cap-add SYS_CHROOT", "PermitRootLogin no", "PasswordAuthentication no",
+		"--read-only", "--cap-drop ALL", "--cap-add AUDIT_WRITE", "--cap-add CHOWN", "--cap-add DAC_OVERRIDE", "--cap-add DAC_READ_SEARCH", "--cap-add KILL", "--cap-add SYS_CHROOT", "PermitRootLogin no", "PasswordAuthentication no",
 		"AllowUsers praetor", "id_ed25519.pub:/run/praetor/authorized_keys:ro",
 		"k3d-praetor-staging-", "timeout 3 telnet", "rockylinux:9@sha256:", "StrictHostKeyChecking=yes",
 		"UserKnownHostsFile=/run/praetor/known_hosts", "praetor@$TARGET", "root@$TARGET", ".HostConfig.Privileged == false",
-		"desired_image=", "docker inspect \"$TARGET\" --format '{{.Image}}'",
+		"desired_image=", "docker inspect \"$TARGET\" --format '{{.Image}}'", "passwd -d praetor", "sudo -n mkdir",
+		"--tmpfs /var/lib/praetor:rw,nosuid,size=128m", "--tmpfs /opt/praetor:rw,exec,nosuid,size=512m",
+		"--tmpfs /usr/local/bin:rw,exec,nosuid,size=32m", "--tmpfs /usr/local/share/praetor:rw,nosuid,size=16m",
+		"staging_load_balancer", "--alias ingest.praetor-staging.localhost", "authenticated staging ingestion route",
+		"PRAETOR_PILOT_SKIP_BUILD", "build-skipping reprovision",
 	} {
 		if !strings.Contains(script+dockerfile+sshd, required) {
 			t.Fatalf("pilot target is missing security contract %q", required)

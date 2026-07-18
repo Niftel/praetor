@@ -1,0 +1,22 @@
+---
+- name: Validate the isolated Praetor pilot host
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Install pilot marker
+      ansible.builtin.copy:
+        content: "praetor managed-host pilot v1\n"
+        dest: /home/praetor/.praetor-pilot-marker
+        mode: "0644"
+
+    - name: Inspect pilot marker
+      ansible.builtin.stat:
+        path: /home/praetor/.praetor-pilot-marker
+      register: pilot_marker
+
+    - name: Assert pilot marker is present
+      ansible.builtin.assert:
+        that:
+          - pilot_marker.stat.exists
+          - pilot_marker.stat.pw_name == "praetor"
+          - pilot_marker.stat.mode == "0644"

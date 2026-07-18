@@ -40,6 +40,22 @@ credential API. Praetor retains only sealed placeholders and the opaque Secrets
 Service credential UUID/version; the status gate verifies the audit event and
 team allow/deny matrix without resolving plaintext.
 
+Run the complete team-approved managed-host journey after the access boundary
+is healthy:
+
+```sh
+make staging-pilot-journey-plan
+make staging-pilot-journey-seed
+make staging-pilot-journey-status
+make staging-pilot-journey-run
+```
+
+The run gate performs the workflow twice. The first run must install the pilot
+marker and the second must report no change. Both runs require a different
+backend-team approver, resolve the credential exactly once, collect Rocky Linux
+facts, deliver one approval notification, and write sanitized evidence beneath
+the staging data root.
+
 The default target address is `172.29.50.10:22`. Provisioning rejects an
 overlapping Docker subnet. Override the subnet and address together only when
 required:
