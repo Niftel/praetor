@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,6 +103,49 @@ func TestPilotReadinessDecisionIsFailClosedAndSanitized(t *testing.T) {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("pilot readiness decision is missing %q", required)
 		}
+	}
+}
+
+func TestRecordedPilotDecisionIsSanitizedAndComplete(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "deployments", "pilot", "managed-host-pilot-readiness.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		Profile   string `json:"profile"`
+		Revisions struct {
+			Praetor        string            `json:"praetor"`
+			SecretsService string            `json:"secrets_service"`
+			Components     map[string]string `json:"components"`
+			ExecutionPack  string            `json:"execution_pack"`
+			TargetImage    string            `json:"target_image"`
+		} `json:"revisions"`
+		Journeys []struct {
+			EvidenceSHA256 string `json:"evidence_sha256"`
+		} `json:"journeys"`
+		Findings []any `json:"findings"`
+		Decision struct {
+			Status  string   `json:"status"`
+			Reasons []string `json:"reasons"`
+		} `json:"decision"`
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Profile != "managed-host-pilot" || report.Decision.Status != "go" || len(report.Decision.Reasons) != 0 || len(report.Findings) != 0 {
+		t.Fatalf("unexpected recorded pilot decision: %+v", report.Decision)
+	}
+	if len(report.Revisions.Praetor) != 40 || len(report.Revisions.SecretsService) != 40 || len(report.Revisions.Components) != 8 || len(report.Journeys) != 3 {
+		t.Fatal("recorded pilot decision is missing exact revisions or journey digests")
+	}
+	for _, value := range append([]string{report.Revisions.ExecutionPack, report.Revisions.TargetImage}, report.Journeys[0].EvidenceSHA256, report.Journeys[1].EvidenceSHA256, report.Journeys[2].EvidenceSHA256) {
+		if len(strings.TrimPrefix(value, "sha256:")) != 64 {
+			t.Fatalf("invalid recorded digest %q", value)
+		}
+	}
+	if strings.Contains(strings.ToLower(string(raw)), "password") || strings.Contains(string(raw), "172.29.") {
+		t.Fatal("recorded pilot decision contains sensitive material")
 	}
 }
 
