@@ -37,3 +37,29 @@ func TestJobsSurfaceUsesUnifiedTypeAwareExecutionList(t *testing.T) {
 		}
 	}
 }
+
+func TestTemplatesSurfaceUsesUnifiedAutomationCatalog(t *testing.T) {
+	path := filepath.Join(repositoryRoot(t), "web", "pages", "TemplatesPage.tsx")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(body)
+	for _, contract := range []string{
+		"Automation templates",
+		"api.getTemplates()",
+		"api.getWorkflows()",
+		"Job template",
+		"Workflow",
+		"Last status",
+		"Last run",
+		"New workflow template",
+		"New job template",
+		"setLaunchWorkflow",
+		"openLaunch",
+	} {
+		if !strings.Contains(source, contract) {
+			t.Errorf("TemplatesPage must retain unified automation-catalog contract %q", contract)
+		}
+	}
+}

@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
-import { Template, Project, Inventory, Credential, SurveyQuestion } from '../types';
+import { Template, Project, Inventory, Credential, SurveyQuestion, Workflow, Job, WorkflowRunSummary } from '../types';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
-import { Plus, Search, Check, Trash2, Play, ArrowLeft, Rocket } from 'lucide-react';
+import { Plus, Search, Check, Trash2, Play, ArrowLeft, GitFork, FileText, Pencil } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
+import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
 
 type Editing = number | 'new' | null;
 
@@ -43,10 +44,14 @@ const SLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 const TemplatesPage = () => {
+  const navigate = useNavigate();
   const { orgId: orgIdStr } = useParams();
   const orgId = Number(orgIdStr);
   const [orgName, setOrgName] = useState('');
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRunSummary[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [credentials, setCredentials] = useState<Credential[]>([]);
@@ -73,6 +78,7 @@ const TemplatesPage = () => {
   const [launchLimit, setLaunchLimit] = useState('');
   const [launchAnswers, setLaunchAnswers] = useState<Record<string, string>>({});
   const [launchMsg, setLaunchMsg] = useState('');
+  const [launchWorkflow, setLaunchWorkflow] = useState<Workflow | null>(null);
 
   const blankQuestion = (): SurveyQuestion => ({ variable: '', question_name: '', type: 'text', required: false, default: '' });
   const updateQ = (i: number, patch: Partial<SurveyQuestion>) => setSurvey(prev => prev.map((q, j) => (j === i ? { ...q, ...patch } : q)));
@@ -81,11 +87,14 @@ const TemplatesPage = () => {
     (async () => {
       try {
         setLoading(true);
-        const [t, p, i, c, packs, orgs] = await Promise.all([
-          api.getTemplates(), api.getProjects(), api.getInventories(), api.getCredentials(), api.getExecutionPacks(), api.getOrganizations().catch(() => []),
+        const [t, w, j, wr, p, i, c, packs, orgs] = await Promise.all([
+          api.getTemplates(), api.getWorkflows(), api.getJobs(), api.getWorkflowJobs(), api.getProjects(), api.getInventories(), api.getCredentials(), api.getExecutionPacks(), api.getOrganizations().catch(() => []),
         ]);
         const byOrg = <T extends { organization_id?: number }>(arr: T[]) => arr.filter(x => x.organization_id === orgId);
         setTemplates(byOrg(unwrap<Template>(t)));
+        setWorkflows(byOrg(unwrap<Workflow>(w)));
+        setJobs(unwrap<Job>(j));
+        setWorkflowRuns(byOrg(unwrap<WorkflowRunSummary>(wr)));
         setProjects(byOrg(unwrap<Project>(p)));
         setInventories(byOrg(unwrap<Inventory>(i)));
         setCredentials(byOrg(unwrap<Credential>(c)));
@@ -183,10 +192,32 @@ const TemplatesPage = () => {
     catch (err) { setLaunchMsg('Launch failed'); console.error(err); }
   };
 
+  const doLaunchWorkflow = async (options: WorkflowLaunchOptions, signal?: AbortSignal) => {
+    if (!launchWorkflow) return;
+    const response = await api.launchWorkflow(launchWorkflow.id, options, signal);
+    setLaunchWorkflow(null);
+    navigate(`/workflows/runs/${response.workflow_job_id}`);
+  };
+
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return q ? templates.filter(t => t.name.toLowerCase().includes(q) || (t.playbook || '').toLowerCase().includes(q)) : templates;
   }, [templates, filter]);
+
+  const catalog = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const latestJob = (template: Template) => jobs
+      .filter(job => job.unified_job_template_id === (template.unified_job_template_id || template.id))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    const latestWorkflow = (workflow: Workflow) => workflowRuns
+      .filter(run => run.workflow_template_id === workflow.id)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    return [
+      ...templates.map(template => ({ key: `job-${template.id}`, kind: 'job' as const, id: template.id, name: template.name, description: template.playbook || 'No playbook selected', item: template, latest: latestJob(template) })),
+      ...workflows.map(workflow => ({ key: `workflow-${workflow.id}`, kind: 'workflow' as const, id: workflow.id, name: workflow.name, description: workflow.nodes?.length ? `${workflow.nodes.length} workflow nodes` : 'Workflow template', item: workflow, latest: latestWorkflow(workflow) })),
+    ].filter(item => !q || item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [templates, workflows, jobs, workflowRuns, filter]);
 
   const set = (patch: Partial<Template>) => setFormData(f => ({ ...f, ...patch }));
 
@@ -196,10 +227,54 @@ const TemplatesPage = () => {
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
       <div className="flex items-center gap-4 h-[54px] px-6 border-b border-line shrink-0">
         <Link to="/templates" className="w-7 h-7 grid place-items-center rounded-md border border-line2 text-mut hover:text-ink hover:border-white/20 transition-colors" title="All organizations"><ArrowLeft size={15} /></Link>
-        <span className="text-[15px] font-semibold tracking-tight">Templates</span>
-        <span className="font-mono text-[11px] text-dim">{orgName} · {templates.length} template{templates.length === 1 ? '' : 's'}</span>
+        <span className="text-[15px] font-semibold tracking-tight">Automation templates</span>
+        <span className="font-mono text-[11px] text-dim">{orgName} · {templates.length + workflows.length} templates</span>
       </div>
 
+      {editing === null ? (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex flex-wrap items-center gap-2 px-6 py-3 border-b border-line shrink-0">
+            <label className="relative min-w-[260px] max-[700px]:w-full">
+              <span className="sr-only">Search automation templates</span>
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none" />
+              <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search templates by name or content" className="h-[30px] w-full pl-8 pr-3 rounded-md bg-panel border border-line2 text-xs text-ink placeholder:text-mut hover:border-white/20 focus:border-acc/60" />
+            </label>
+            <div className="ml-auto flex items-center gap-2 max-[700px]:ml-0">
+              <button onClick={() => navigate(`/workflows/org/${orgId}/builder`)} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-ink hover:border-white/20 inline-flex items-center gap-1.5"><GitFork size={12} /> New workflow template</button>
+              <button onClick={startNew} className="h-8 px-3 rounded-md bg-acc text-[#04211d] text-[11px] font-semibold hover:bg-acc2 inline-flex items-center gap-1.5"><Plus size={13} /> New job template</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-[minmax(260px,1fr)_130px_160px_190px_170px] items-center h-[34px] px-6 border-b border-line font-mono text-[9.5px] tracking-[0.1em] uppercase text-dim max-[900px]:grid-cols-[minmax(220px,1fr)_130px_150px]">
+            <span>Name</span><span>Type</span><span>Last status</span><span className="max-[900px]:hidden">Last run</span><span className="text-right">Actions</span>
+          </div>
+          <div className="flex-1 overflow-auto scroll-tint">
+            {catalog.map(entry => {
+              const latest = entry.latest as Job | WorkflowRunSummary | undefined;
+              const latestDate = latest?.created_at ? new Date(latest.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Never run';
+              const status = latest?.status || 'never run';
+              const isWorkflow = entry.kind === 'workflow';
+              const TypeIcon = isWorkflow ? GitFork : FileText;
+              return (
+                <div key={entry.key} className="grid grid-cols-[minmax(260px,1fr)_130px_160px_190px_170px] items-center min-h-[54px] px-6 border-b border-line hover:bg-white/[0.025] max-[900px]:grid-cols-[minmax(220px,1fr)_130px_150px]">
+                  <button onClick={() => isWorkflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="min-w-0 text-left pr-4 group">
+                    <span className="block text-[13px] font-medium text-ink2 truncate group-hover:text-acc">{entry.name}</span>
+                    <span className="block font-mono text-[10.5px] text-dim mt-0.5 truncate">{entry.description}</span>
+                  </button>
+                  <span className="inline-flex items-center gap-1.5 text-[11px] text-mut"><TypeIcon size={12} /> {isWorkflow ? 'Workflow' : 'Job template'}</span>
+                  <span className={`text-[11px] ${status === 'successful' ? 'text-ok' : status === 'failed' || status === 'error' ? 'text-err' : status === 'running' ? 'text-run' : 'text-mut'}`}>{status}</span>
+                  <span className="font-mono text-[11px] text-mut tabular-nums max-[900px]:hidden">{latestDate}</span>
+                  <div className="flex justify-end gap-1.5">
+                    <button onClick={() => isWorkflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="h-8 px-2.5 rounded-md text-[11px] text-mut hover:text-ink hover:bg-white/5 inline-flex items-center gap-1.5"><Pencil size={12} /> Edit</button>
+                    <button onClick={() => isWorkflow ? setLaunchWorkflow(entry.item as Workflow) : openLaunch(entry.item as Template)} className="h-8 px-3 rounded-md bg-acc/90 text-[#04211d] text-[11px] font-semibold hover:bg-acc inline-flex items-center gap-1.5"><Play size={12} /> Launch</button>
+                  </div>
+                </div>
+              );
+            })}
+            {catalog.length === 0 && <div className="px-6 py-12 text-center text-sm text-mut">No automation templates match this search.</div>}
+          </div>
+        </div>
+      ) : (
       <div className="grid grid-cols-[288px_1fr] flex-1 min-h-0 max-[820px]:grid-cols-1">
         {/* Catalog */}
         <div className="flex flex-col min-h-0 border-r border-line bg-tree max-[820px]:hidden">
@@ -231,16 +306,7 @@ const TemplatesPage = () => {
           </div>
         </div>
 
-        {/* Editor */}
-        {editing === null ? (
-          <div className="grid place-items-center text-dim">
-            <div className="text-center">
-              <Rocket size={38} className="mx-auto mb-3 opacity-20" />
-              <p className="text-sm mb-4">Select a template to edit, or create one.</p>
-              <Button icon={<Plus size={15} />} onClick={startNew}>New template</Button>
-            </div>
-          </div>
-        ) : (
+        {/* Job template editor */}
           <div className="flex flex-col min-h-0 bg-bg">
             <div className="flex items-start gap-5 px-10 pt-5 pb-4 border-b border-line shrink-0 max-[820px]:px-5">
               <div className="flex-1 min-w-0">
@@ -397,8 +463,8 @@ const TemplatesPage = () => {
               </div>
             </div>
           </div>
-        )}
       </div>
+      )}
 
       {/* Launch modal */}
       <Modal isOpen={!!launchTpl} onClose={() => setLaunchTpl(null)} title={launchTpl ? `Launch: ${launchTpl.name}` : 'Launch'} size="md">
@@ -423,6 +489,13 @@ const TemplatesPage = () => {
           </div>
         )}
       </Modal>
+      <WorkflowLaunchModal
+        isOpen={!!launchWorkflow}
+        workflowName={launchWorkflow?.name || 'Workflow'}
+        organizationId={orgId}
+        onClose={() => setLaunchWorkflow(null)}
+        onLaunch={doLaunchWorkflow}
+      />
     </div>
   );
 };
