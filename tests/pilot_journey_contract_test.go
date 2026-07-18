@@ -39,6 +39,62 @@ func TestPilotJourneyCoversRealManagedHostBoundary(t *testing.T) {
 	}
 }
 
+func TestPilotFaultMatrixCoversManagedHostFailureBoundaries(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-pilot-journey.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	for _, required := range []string{
+		"staging-pilot-journey-faults", "jobs/$canceled_unified/cancel", "post-cancel task",
+		"duplicate active workflow launch", "rollout restart", "deployment/$RELEASE-scheduler",
+		"docker network disconnect praetor-pilot", "120-second failure boundary", "actionable diagnostics",
+		"binding_state", "notification_count", "activity-stream?limit=500", "managed-host-faults.json",
+	} {
+		if !strings.Contains(script+readMakefile(t, root), required) {
+			t.Fatalf("pilot fault matrix is missing %q", required)
+		}
+	}
+	playbook, err := os.ReadFile(filepath.Join(root, "playbooks", "pilot-managed-host-fault.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"Record fault run start", "Hold the run open for fault injection", "Record fault run completion", "ansible.builtin.pause"} {
+		if !strings.Contains(string(playbook), required) {
+			t.Fatalf("pilot fault playbook is missing %q", required)
+		}
+	}
+}
+
+func TestPilotCredentialFaultMatrixUsesPersistentStagingBoundaries(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-pilot-credential-faults.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := string(raw) + readMakefile(t, root)
+	for _, required := range []string{
+		"staging-pilot-credential-faults", "test-secrets-execution-e2e.sh",
+		"praetor-staging-secrets-postgres", "praetor-staging-audit-postgres",
+		"praetor_secrets", "praetor_audit", "credential-faults.json",
+		`current Kubernetes context is not`, `(.checks | length == 9)`,
+	} {
+		if !strings.Contains(contract, required) {
+			t.Fatalf("pilot credential fault matrix is missing %q", required)
+		}
+	}
+}
+
+func readMakefile(t *testing.T, root string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
 func TestPilotPlaybookIsIdempotentAndCollectsFacts(t *testing.T) {
 	root := repositoryRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "playbooks", "pilot-managed-host.yml"))

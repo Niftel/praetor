@@ -1,0 +1,20 @@
+---
+- name: Exercise bounded Praetor pilot faults
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Record fault run start
+      ansible.builtin.copy:
+        content: "started\n"
+        dest: /home/praetor/.praetor-fault-started
+        mode: "0644"
+
+    - name: Hold the run open for fault injection
+      ansible.builtin.pause:
+        seconds: 45
+
+    - name: Record fault run completion
+      ansible.builtin.copy:
+        content: "completed\n"
+        dest: /home/praetor/.praetor-fault-completed
+        mode: "0644"

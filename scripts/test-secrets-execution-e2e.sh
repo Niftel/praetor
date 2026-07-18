@@ -487,7 +487,18 @@ if [[ -n "${PRAETOR_E2E_EVIDENCE_FILE:-}" ]]; then
       project_id:$project_id,
       job_id:$job_id,
       run_id:$run_id,
-      status:$status
+      status:$status,
+      checks:[
+        "credential-encrypted-at-rest",
+        "credential-metadata-scoped",
+        "credential-resolved-once",
+        "completed-run-replay-denied",
+        "explicit-cancellation-closed-binding",
+        "wrong-workload-resolution-denied",
+        "expired-binding-resolution-denied",
+        "retired-credential-registration-denied",
+        "plaintext-absent-from-artifacts"
+      ]
     }' >"$PRAETOR_E2E_EVIDENCE_FILE"
 fi
 

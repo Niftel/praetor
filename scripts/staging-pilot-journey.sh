@@ -11,6 +11,7 @@ API_PORT="${PRAETOR_PILOT_JOURNEY_PORT:-18084}"
 API="http://127.0.0.1:$API_PORT/api/v1"
 PASSWORD="${PRAETOR_STAGING_ACCEPTANCE_PASSWORD:-praetor123}"
 PROJECT_REF="${PRAETOR_PILOT_PROJECT_REF:-main}"
+FAULT_PROJECT_REF="${PRAETOR_PILOT_FAULT_PROJECT_REF:-$PROJECT_REF}"
 PREFIX="${PRAETOR_PILOT_JOURNEY_PREFIX:-Pilot Managed Host}"
 PROJECT_NAME="$PREFIX Project"
 JOB_NAME="$PREFIX Job"
@@ -20,6 +21,11 @@ HOST_NAME="pilot-managed-host"
 CREDENTIAL_NAME="Pilot SSH Credential"
 NOTIFICATION_NAME="$PREFIX Notifications"
 PLAYBOOK="playbooks/pilot-managed-host.yml"
+FAULT_PLAYBOOK="playbooks/pilot-managed-host-fault.yml"
+FAULT_REF_KEY="$(tr -cs '[:alnum:]._' '-' <<<"$FAULT_PROJECT_REF" | sed 's/^-//; s/-$//')"
+FAULT_PROJECT_NAME="$PREFIX Fault Project $FAULT_REF_KEY"
+FAULT_JOB_NAME="$PREFIX Fault Job $FAULT_REF_KEY"
+FAULT_WORKFLOW_NAME="$PREFIX Fault Workflow $FAULT_REF_KEY"
 PACK_NAME="ansible-runtime"
 DATA_ROOT="${PRAETOR_STAGING_DATA_ROOT:-$HOME/.local/share/praetor/staging}"
 EVIDENCE_ROOT="$DATA_ROOT/pilot/evidence"
@@ -29,18 +35,22 @@ PACK_REMOTE="/tmp/build/runtime/ansible-runtime-linux-arm64.tar.gz"
 PILOT_TARGET="${PRAETOR_PILOT_TARGET:-praetor-pilot-target}"
 PORT_FORWARD_PID=""
 PORT_FORWARD_LOG=""
+TARGET_DISCONNECTED=0
 TOKEN=""
 STATUS=""
 RESPONSE=""
 
-usage() { echo "usage: $0 <plan|seed|status|run>" >&2; exit 2; }
+usage() { echo "usage: $0 <plan|seed|status|run|faults>" >&2; exit 2; }
 die() { echo "error: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"; }
 for tool in curl docker git jq kubectl shasum; do need "$tool"; done
-[[ "$COMMAND" =~ ^(plan|seed|status|run)$ ]] || usage
+[[ "$COMMAND" =~ ^(plan|seed|status|run|faults)$ ]] || usage
 umask 077
 
 cleanup() {
+  if [[ "$TARGET_DISCONNECTED" == 1 ]]; then
+    docker network connect --ip "${PRAETOR_PILOT_ADDRESS:-172.29.50.10}" praetor-pilot "$PILOT_TARGET" >/dev/null 2>&1 || true
+  fi
   [[ -z "$PORT_FORWARD_PID" ]] || kill "$PORT_FORWARD_PID" 2>/dev/null || true
   [[ -z "$PORT_FORWARD_LOG" ]] || rm -f "$PORT_FORWARD_LOG"
 }
@@ -142,8 +152,11 @@ lookup() {
   HOST_ID="$(find_id "inventories/$INVENTORY_ID/hosts/" "$HOST_NAME")"; [[ -n "$HOST_ID" ]] || die "$HOST_NAME is missing"
   CREDENTIAL_ID="$(find_id credentials "$CREDENTIAL_NAME")"; [[ -n "$CREDENTIAL_ID" ]] || die "$CREDENTIAL_NAME is missing"
   PROJECT_ID="$(find_id projects "$PROJECT_NAME")"; [[ -n "$PROJECT_ID" ]] || die "$PROJECT_NAME is missing"
+  FAULT_PROJECT_ID="$(find_id projects "$FAULT_PROJECT_NAME")"; [[ -n "$FAULT_PROJECT_ID" ]] || die "$FAULT_PROJECT_NAME is missing"
   JOB_ID="$(find_id job-templates "$JOB_NAME")"; [[ -n "$JOB_ID" ]] || die "$JOB_NAME is missing"
   WORKFLOW_ID="$(find_id workflow-templates "$WORKFLOW_NAME")"; [[ -n "$WORKFLOW_ID" ]] || die "$WORKFLOW_NAME is missing"
+  FAULT_JOB_ID="$(find_id job-templates "$FAULT_JOB_NAME")"; [[ -n "$FAULT_JOB_ID" ]] || die "$FAULT_JOB_NAME is missing"
+  FAULT_WORKFLOW_ID="$(find_id workflow-templates "$FAULT_WORKFLOW_NAME")"; [[ -n "$FAULT_WORKFLOW_ID" ]] || die "$FAULT_WORKFLOW_NAME is missing"
   NOTIFICATION_ID="$(find_id "notification-templates?organization_id=$ORG_ID" "$NOTIFICATION_NAME")"; [[ -n "$NOTIFICATION_ID" ]] || die "$NOTIFICATION_NAME is missing"
   PACK_ID="$(find_id execution-packs "$PACK_NAME")"; [[ -n "$PACK_ID" ]] || die "$PACK_NAME execution pack is missing"
 }
@@ -173,15 +186,25 @@ seed() {
   project_branch="$(get projects | items | jq -r --argjson id "$PROJECT_ID" '.[] | select(.id == $id) | .scm_branch // ""')"
   [[ "$project_branch" == "$PROJECT_REF" ]] || die "$PROJECT_NAME uses branch '$project_branch', expected '$PROJECT_REF'"
   grant_team_role project "$PROJECT_ID" "Project Use" "$TEAM_ID"
+  FAULT_PROJECT_ID="$(ensure projects projects "$FAULT_PROJECT_NAME" "$(jq -nc --argjson org "$ORG_ID" --arg name "$FAULT_PROJECT_NAME" --arg branch "$FAULT_PROJECT_REF" '{organization_id:$org,name:$name,scm_type:"git",scm_url:"https://github.com/Niftel/praetor.git",scm_branch:$branch}')")"
+  fault_project_branch="$(get projects | items | jq -r --argjson id "$FAULT_PROJECT_ID" '.[] | select(.id == $id) | .scm_branch // ""')"
+  [[ "$fault_project_branch" == "$FAULT_PROJECT_REF" ]] || die "$FAULT_PROJECT_NAME uses branch '$fault_project_branch', expected '$FAULT_PROJECT_REF'"
+  grant_team_role project "$FAULT_PROJECT_ID" "Project Use" "$TEAM_ID"
   JOB_ID="$(ensure job-templates job-templates "$JOB_NAME" "$(jq -nc --argjson org "$ORG_ID" --argjson inv "$INVENTORY_ID" --argjson project "$PROJECT_ID" --argjson credential "$CREDENTIAL_ID" --argjson pack "$PACK_ID" --arg name "$JOB_NAME" --arg playbook "$PLAYBOOK" --arg limit "$HOST_NAME" '{organization_id:$org,inventory_id:$inv,project_id:$project,credential_id:$credential,execution_pack_id:$pack,name:$name,playbook:$playbook,job_type:"run",forks:1,limit:$limit,use_fact_cache:true}')")"
   WORKFLOW_ID="$(ensure workflow-templates workflow-templates "$WORKFLOW_NAME" "$(jq -nc --argjson org "$ORG_ID" --argjson job "$JOB_ID" --arg name "$WORKFLOW_NAME" '{organization_id:$org,name:$name,nodes:[{node_key:"approval",node_type:"approval",name:"Backend team approval"},{node_key:"execute",node_type:"job",job_template_id:$job,name:"Apply pilot marker"}],edges:[{parent_key:"approval",child_key:"execute",edge_type:"success"}]}')")"
+  FAULT_JOB_ID="$(ensure job-templates job-templates "$FAULT_JOB_NAME" "$(jq -nc --argjson org "$ORG_ID" --argjson inv "$INVENTORY_ID" --argjson project "$FAULT_PROJECT_ID" --argjson credential "$CREDENTIAL_ID" --argjson pack "$PACK_ID" --arg name "$FAULT_JOB_NAME" --arg playbook "$FAULT_PLAYBOOK" --arg limit "$HOST_NAME" '{organization_id:$org,inventory_id:$inv,project_id:$project,credential_id:$credential,execution_pack_id:$pack,name:$name,playbook:$playbook,job_type:"run",forks:1,limit:$limit}')")"
+  FAULT_WORKFLOW_ID="$(ensure workflow-templates workflow-templates "$FAULT_WORKFLOW_NAME" "$(jq -nc --argjson org "$ORG_ID" --argjson job "$FAULT_JOB_ID" --arg name "$FAULT_WORKFLOW_NAME" '{organization_id:$org,name:$name,allow_simultaneous:false,nodes:[{node_key:"approval",node_type:"approval",name:"Backend team fault approval"},{node_key:"execute",node_type:"job",job_template_id:$job,name:"Exercise pilot fault"}],edges:[{parent_key:"approval",child_key:"execute",edge_type:"success"}]}')")"
   grant_team_role workflow_template "$WORKFLOW_ID" "Workflow Template Execute" "$TEAM_ID"
   grant_team_role workflow_template "$WORKFLOW_ID" "Workflow Template Approve" "$TEAM_ID"
+  grant_team_role workflow_template "$FAULT_WORKFLOW_ID" "Workflow Template Execute" "$TEAM_ID"
+  grant_team_role workflow_template "$FAULT_WORKFLOW_ID" "Workflow Template Approve" "$TEAM_ID"
   NOTIFICATION_ID="$(ensure notification-templates "notification-templates?organization_id=$ORG_ID" "$NOTIFICATION_NAME" "$(jq -nc --argjson org "$ORG_ID" --arg name "$NOTIFICATION_NAME" '{organization_id:$org,name:$name,notification_type:"webhook",config:{url:"http://praetor-staging-acceptance-sink:8080/echo"}}')")"
-  attachments="$(get "workflow-templates/$WORKFLOW_ID/notifications")"
-  if ! jq -e --argjson id "$NOTIFICATION_ID" '.[] | select(.notification_template_id == $id and .event == "approval")' <<<"$attachments" >/dev/null; then
-    post "workflow-templates/$WORKFLOW_ID/notifications" "$(jq -nc --argjson id "$NOTIFICATION_ID" '{notification_template_id:$id,event:"approval"}')" >/dev/null
-  fi
+  for workflow_id in "$WORKFLOW_ID" "$FAULT_WORKFLOW_ID"; do
+    attachments="$(get "workflow-templates/$workflow_id/notifications")"
+    if ! jq -e --argjson id "$NOTIFICATION_ID" '.[] | select(.notification_template_id == $id and .event == "approval")' <<<"$attachments" >/dev/null; then
+      post "workflow-templates/$workflow_id/notifications" "$(jq -nc --argjson id "$NOTIFICATION_ID" '{notification_template_id:$id,event:"approval"}')" >/dev/null
+    fi
+  done
   echo "seeded pilot project $PROJECT_ID, job $JOB_ID, workflow $WORKFLOW_ID, pack $PACK_ID"
 }
 
@@ -197,7 +220,141 @@ status_check() {
   jq -e --argjson inv "$INVENTORY_ID" --argjson cred "$CREDENTIAL_ID" --argjson pack "$PACK_ID" --arg playbook "$PLAYBOOK" --arg limit "$HOST_NAME" \
     '.inventory_id == $inv and .credential_id == $cred and .execution_pack_id == $pack and .playbook == $playbook and .limit == $limit and .use_fact_cache == true' <<<"$template" >/dev/null || die "pilot job template is not pinned to the expected inventory, credential, pack, playbook, and host limit"
   [[ "$(get "credentials/$CREDENTIAL_ID" | jq -r '.inputs.ssh_private_key')" == '$encrypted$' ]] || die "pilot credential is not sealed"
+  fault_template="$(get "job-templates/$FAULT_JOB_ID")"
+  jq -e --argjson inv "$INVENTORY_ID" --argjson project "$FAULT_PROJECT_ID" --argjson cred "$CREDENTIAL_ID" --arg playbook "$FAULT_PLAYBOOK" --arg limit "$HOST_NAME" \
+    '.inventory_id == $inv and .project_id == $project and .credential_id == $cred and .playbook == $playbook and .limit == $limit' <<<"$fault_template" >/dev/null || die "pilot fault template is not pinned to the expected host, project ref, and credential"
   echo "healthy: pilot workflow is pinned to one inventory, host, sealed credential, playbook, and execution pack"
+}
+
+wait_fault_terminal() {
+  local token="$1" workflow_job_id="$2" expected="$3" deadline=$((SECONDS + 180)) run status=""
+  while (( SECONDS < deadline )); do
+    run="$(get_as "$token" "workflow-jobs/$workflow_job_id")"
+    status="$(jq -r .status <<<"$run")"
+    [[ "$status" =~ ^(successful|failed|error|canceled)$ ]] && break
+    sleep 2
+  done
+  [[ "$status" == "$expected" ]] || die "fault workflow $workflow_job_id finished with '${status:-unknown}', expected $expected"
+  printf '%s' "$run"
+}
+
+launch_fault() {
+  local operator_token="$1" approver_token="$2" workflow_job_id approval_id="" approvals run job_id run_id deadline
+  post_status "$operator_token" "workflow-templates/$FAULT_WORKFLOW_ID/launch" "$(jq -nc --argjson team "$TEAM_ID" --arg limit "$HOST_NAME" '{approval_team_id:$team,limit:$limit}')"
+  [[ "$STATUS" == 201 ]] || die "fault workflow launch returned HTTP $STATUS: $RESPONSE"
+  workflow_job_id="$(jq -er .workflow_job_id <<<"$RESPONSE")"
+  for _ in $(seq 1 60); do
+    approvals="$(get_as "$approver_token" workflow-approvals)"
+    approval_id="$(jq -r --argjson job "$workflow_job_id" '.[] | select(.workflow_job_id == $job) | .id' <<<"$approvals" | head -n1)"
+    [[ -n "$approval_id" ]] && break
+    sleep 1
+  done
+  [[ -n "$approval_id" ]] || die "fault approval was not delivered for workflow $workflow_job_id"
+  post_status "$approver_token" "workflow-job-nodes/$approval_id/approve"
+  [[ "$STATUS" == 204 ]] || die "fault approval returned HTTP $STATUS: $RESPONSE"
+  deadline=$((SECONDS + 120)); job_id=""; run_id=""
+  while (( SECONDS < deadline )); do
+    run="$(get_as "$operator_token" "workflow-jobs/$workflow_job_id")"
+    job_id="$(jq -r '.nodes[] | select(.node_key == "execute") | .unified_job_id // empty' <<<"$run")"
+    run_id="$(jq -r '.nodes[] | select(.node_key == "execute") | .run_id // empty' <<<"$run")"
+    [[ -n "$job_id" && -n "$run_id" ]] && break
+    sleep 1
+  done
+  [[ -n "$job_id" && -n "$run_id" ]] || die "fault workflow $workflow_job_id did not create an execution run"
+  jq -nc --argjson workflow_job_id "$workflow_job_id" --argjson approval_id "$approval_id" --argjson job_id "$job_id" --arg run_id "$run_id" '{workflow_job_id:$workflow_job_id,approval_id:$approval_id,job_id:$job_id,run_id:$run_id}'
+}
+
+wait_target_marker() {
+  local marker="$1" deadline=$((SECONDS + 90))
+  while (( SECONDS < deadline )); do
+    docker exec "$PILOT_TARGET" test -f "$marker" >/dev/null 2>&1 && return
+    sleep 1
+  done
+  die "pilot marker $marker did not appear"
+}
+
+wait_actionable_failure_log() {
+  local since_time="$1" deadline=$((SECONDS + 45)) log=""
+  while (( SECONDS < deadline )); do
+    log="$(kubectl --context "$CONTEXT" -n "$NAMESPACE" logs "statefulset/$RELEASE-executor" -c executor --since-time="$since_time" 2>/dev/null || true)"
+    if grep -Eiq '(UNREACHABLE|timed out|No route|connect)' <<<"$log"; then
+      printf '%s' "$log"
+      return
+    fi
+    sleep 1
+  done
+  die "unreachable host failure did not publish actionable diagnostics within 45 seconds"
+}
+
+binding_state() {
+  kubectl --context "$CONTEXT" -n "$NAMESPACE" exec "$SECRETS_DB_POD" -- psql -U postgres -d praetor_secrets -At -F '|' -c "select state,resolution_count from run_bindings where run_id='$1'"
+}
+
+notification_count() {
+  local workflow_job_id="$1" event="$2"
+  kubectl --context "$CONTEXT" -n "$NAMESPACE" logs deployment/praetor-staging-acceptance-sink --since=30m 2>/dev/null |
+    jq -Rr --argjson job "$workflow_job_id" --arg event "$event" 'fromjson? | select(.job_id == $job and .event == $event) | 1' | wc -l | tr -d ' '
+}
+
+run_faults() {
+  status_check >/dev/null
+  install -d -m 0700 "$EVIDENCE_ROOT"
+  operator_token="$TOKEN"
+  approver_token="$(login mwebb | jq -er .token)"
+  auditor_token="$(login demo-auditor | jq -er .token)"
+
+  echo "==> Cancellation stops the managed-host play and closes its credential claim"
+  docker exec "$PILOT_TARGET" rm -f /home/praetor/.praetor-fault-started /home/praetor/.praetor-fault-completed
+  canceled="$(launch_fault "$operator_token" "$approver_token")"
+  canceled_job="$(jq -r .workflow_job_id <<<"$canceled")"; canceled_run="$(jq -r .run_id <<<"$canceled")"; canceled_unified="$(jq -r .job_id <<<"$canceled")"
+  wait_target_marker /home/praetor/.praetor-fault-started
+  post_status "$operator_token" "jobs/$canceled_unified/cancel"
+  [[ "$STATUS" == 200 ]] || die "running job cancellation returned HTTP $STATUS: $RESPONSE"
+  wait_fault_terminal "$operator_token" "$canceled_job" canceled >/dev/null
+  docker exec "$PILOT_TARGET" test ! -f /home/praetor/.praetor-fault-completed || die "canceled play executed its post-cancel task"
+  [[ "$(binding_state "$canceled_run")" == canceled\|1 ]] || die "canceled run credential claim was not resolved once and closed"
+
+  echo "==> Duplicate launch is rejected while a run survives control-plane restart"
+  docker exec "$PILOT_TARGET" rm -f /home/praetor/.praetor-fault-started /home/praetor/.praetor-fault-completed
+  recovered="$(launch_fault "$operator_token" "$approver_token")"
+  recovered_job="$(jq -r .workflow_job_id <<<"$recovered")"; recovered_run="$(jq -r .run_id <<<"$recovered")"
+  wait_target_marker /home/praetor/.praetor-fault-started
+  post_status "$operator_token" "workflow-templates/$FAULT_WORKFLOW_ID/launch" "$(jq -nc --argjson team "$TEAM_ID" '{approval_team_id:$team}')"
+  [[ "$STATUS" == 409 ]] || die "duplicate active workflow launch returned HTTP $STATUS, expected 409"
+  kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout restart deployment/$RELEASE-scheduler deployment/$RELEASE-consumer >/dev/null
+  for workload in scheduler consumer; do kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status "deployment/$RELEASE-$workload" --timeout=180s >/dev/null; done
+  wait_fault_terminal "$operator_token" "$recovered_job" successful >/dev/null
+  wait_target_marker /home/praetor/.praetor-fault-completed
+  [[ "$(binding_state "$recovered_run")" == canceled\|1 ]] || die "recovered run credential claim was not resolved once and closed"
+
+  echo "==> Unreachable pilot target fails within a bounded deadline with diagnostics"
+  docker network disconnect praetor-pilot "$PILOT_TARGET"
+  TARGET_DISCONNECTED=1
+  unreachable_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  unreachable_started=$SECONDS
+  unreachable="$(launch_fault "$operator_token" "$approver_token")"
+  unreachable_job="$(jq -r .workflow_job_id <<<"$unreachable")"; unreachable_run="$(jq -r .run_id <<<"$unreachable")"
+  wait_fault_terminal "$operator_token" "$unreachable_job" failed >/dev/null
+  (( SECONDS - unreachable_started <= 120 )) || die "unreachable host exceeded the 120-second failure boundary"
+  unreachable_log="$(wait_actionable_failure_log "$unreachable_since")"
+  docker network connect --ip "${PRAETOR_PILOT_ADDRESS:-172.29.50.10}" praetor-pilot "$PILOT_TARGET"
+  TARGET_DISCONNECTED=0
+  "$ROOT/scripts/pilot-host.sh" status >/dev/null
+  [[ "$(binding_state "$unreachable_run")" == canceled\|1 ]] || die "unreachable run credential claim was not resolved once and closed"
+
+  for job in "$canceled_job" "$recovered_job" "$unreachable_job"; do
+    [[ "$(notification_count "$job" approval)" == 1 ]] || die "workflow $job approval notification was not delivered exactly once"
+  done
+  audit="$(get_as "$auditor_token" 'activity-stream?limit=500')"
+  jq -e --arg path "/api/v1/jobs/$canceled_unified/cancel" '.[] | select(.username == "demo-operator" and .path == $path and .status_code == 200)' <<<"$audit" >/dev/null || die "cancellation audit attribution is missing"
+
+  fault_evidence="$EVIDENCE_ROOT/managed-host-faults.json"
+  jq -n --arg recorded_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg source_revision "$(git -C "$ROOT" rev-parse HEAD)" \
+    --argjson canceled "$canceled" --argjson recovered "$recovered" --argjson unreachable "$unreachable" \
+    '{schema_version:1,journey:"managed-host-pilot-faults",result:"pass",recorded_at:$recorded_at,source_revision:$source_revision,runs:{canceled:$canceled,recovered:$recovered,unreachable:$unreachable},checks:["bounded-unreachable-timeout","actionable-unreachable-diagnostics","in-flight-cancellation","post-cancel-task-blocked","credential-binding-cleanup","duplicate-launch-rejected","control-plane-restart-recovered","notification-exact-once","audit-attributed"]}' >"$fault_evidence"
+  chmod 0600 "$fault_evidence"
+  grep -Eiq '(private.?key|bearer |password|token|BEGIN [A-Z ]+ KEY|172\.29\.)' "$fault_evidence" && die "sensitive material appeared in fault evidence"
+  echo "pilot managed-host fault matrix passed; sanitized evidence: $fault_evidence"
 }
 
 launch_and_approve() {
@@ -283,4 +440,5 @@ case "$COMMAND" in
   seed) seed ;;
   status) status_check ;;
   run) run_journey ;;
+  faults) run_faults ;;
 esac
