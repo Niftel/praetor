@@ -24,9 +24,10 @@ executor:
     ssh: { size: 100Mi, storageClass: local-path }
 
 hostRunner:
-  # Localhost executions run inside the executor pod and must not resolve the
-  # host-only .localhost ingress name back to their own loopback interface.
-  callbackUrl: http://praetor-staging-ingestion:8081
+  # Remote pilot runners report through the staging-only load-balancer alias.
+  # The pilot network publishes no host port and ingestion still requires the
+  # per-run token. Localhost executions can use this route from the executor too.
+  callbackUrl: http://ingest.praetor-staging.localhost
 
 ldap:
   enabled: true

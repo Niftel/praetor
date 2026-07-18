@@ -8,6 +8,7 @@ NETWORK="praetor-pilot"
 TARGET="praetor-pilot-target"
 SUBNET="${PRAETOR_PILOT_SUBNET:-172.29.50.0/24}"
 ADDRESS="${PRAETOR_PILOT_ADDRESS:-172.29.50.10}"
+SKIP_BUILD="${PRAETOR_PILOT_SKIP_BUILD:-0}"
 DATA_ROOT="${PRAETOR_PILOT_DATA_ROOT:-$HOME/.local/share/praetor/pilot-host}"
 STAGING_PREFIX="k3d-praetor-staging-"
 
@@ -18,6 +19,10 @@ for command in docker jq ssh-keygen; do need "$command"; done
 
 staging_nodes() {
   docker ps --format '{{.Names}}' | grep -E "^${STAGING_PREFIX}(server|agent)-" || true
+}
+
+staging_load_balancer() {
+  docker ps --format '{{.Names}}' | grep -Fx "${STAGING_PREFIX}serverlb" || true
 }
 
 check_subnet_available() {
@@ -49,6 +54,9 @@ status() {
     .[0].HostConfig.ReadonlyRootfs == true and
     (.[0].HostConfig.PortBindings | length) == 0 and
     (.[0].HostConfig.Binds | all(endswith(":ro"))) and
+    ((.[0].HostConfig.Tmpfs | keys) as $tmpfs | ["/run", "/tmp", "/home/praetor", "/var/lib/praetor", "/opt/praetor", "/usr/local/bin", "/usr/local/share/praetor"] | all(. as $path | $tmpfs | index($path) != null)) and
+    ((.[0].HostConfig.Tmpfs["/opt/praetor"] | split(",")) | index("exec") != null) and
+    ((.[0].HostConfig.Tmpfs["/usr/local/bin"] | split(",")) | index("exec") != null) and
     (.[0].HostConfig.CapDrop | index("ALL")) != null
   ' >/dev/null || {
     echo "error: pilot target runtime isolation contract is not satisfied" >&2; exit 1;
@@ -64,6 +72,15 @@ status() {
     -o UserKnownHostsFile=/run/praetor/known_hosts \
     "praetor@$TARGET" /usr/bin/id -u)"
   [[ "$ssh_uid" == 1000 ]] || { echo "error: pilot key did not authenticate as non-root UID 1000" >&2; exit 1; }
+  docker run --rm --network "$NETWORK" --read-only --cap-drop ALL \
+    -v "$DATA_ROOT/ssh/id_ed25519:/run/praetor/id_ed25519:ro" \
+    -v "$DATA_ROOT/ssh/known_hosts:/run/praetor/known_hosts:ro" \
+    --entrypoint /usr/bin/ssh "$IMAGE" -i /run/praetor/id_ed25519 \
+    -o BatchMode=yes -o StrictHostKeyChecking=yes \
+    -o UserKnownHostsFile=/run/praetor/known_hosts \
+    "praetor@$TARGET" 'sudo -n mkdir -p /var/lib/praetor/.bootstrap-check && sudo -n rmdir /var/lib/praetor/.bootstrap-check' || {
+      echo "error: pilot target does not permit the executor's non-interactive bootstrap" >&2; exit 1;
+    }
   if docker run --rm --network "$NETWORK" --read-only --cap-drop ALL \
       -v "$DATA_ROOT/ssh/id_ed25519:/run/praetor/id_ed25519:ro" \
       -v "$DATA_ROOT/ssh/known_hosts:/run/praetor/known_hosts:ro" \
@@ -84,6 +101,17 @@ status() {
       echo "error: $node cannot reach pilot SSH at $ADDRESS:22" >&2; exit 1;
     }
   done <<<"$nodes"
+  load_balancer="$(staging_load_balancer)"
+  [[ -n "$load_balancer" ]] || { echo "error: persistent staging load balancer is not running" >&2; exit 1; }
+  docker network inspect "$NETWORK" --format '{{json .Containers}}' | jq -e --arg name "$load_balancer" 'any(.[]; .Name == $name)' >/dev/null || {
+    echo "error: staging load balancer is not attached to $NETWORK" >&2; exit 1;
+  }
+  [[ "$(docker exec "$TARGET" getent ahostsv4 ingest.praetor-staging.localhost | awk 'NR==1 {print $1}')" == "$(docker inspect "$load_balancer" --format "{{(index .NetworkSettings.Networks \"$NETWORK\").IPAddress}}")" ]] || {
+    echo "error: pilot target cannot resolve the private staging ingestion alias" >&2; exit 1;
+  }
+  [[ "$(docker exec "$TARGET" curl -sS -o /dev/null -w '%{http_code}' "http://ingest.praetor-staging.localhost/api/v1/runs/00000000-0000-0000-0000-000000000000/logs/cursor")" == 401 ]] || {
+    echo "error: pilot target cannot reach the authenticated staging ingestion route" >&2; exit 1;
+  }
   echo "healthy: isolated pilot target is reachable from persistent staging at $ADDRESS:22"
 }
 
@@ -104,6 +132,7 @@ fi
 if [[ "$COMMAND" == reset ]]; then
   docker rm -f "$TARGET" >/dev/null 2>&1 || true
   while IFS= read -r node; do [[ -z "$node" ]] || docker network disconnect "$NETWORK" "$node" >/dev/null 2>&1 || true; done < <(staging_nodes)
+  load_balancer="$(staging_load_balancer)"; [[ -z "$load_balancer" ]] || docker network disconnect "$NETWORK" "$load_balancer" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm "$IMAGE" >/dev/null 2>&1 || true
   rm -rf "$DATA_ROOT"
@@ -123,12 +152,21 @@ chmod 644 "$DATA_ROOT/ssh/id_ed25519.pub" "$DATA_ROOT/hostkeys/ssh_host_ed25519_
 printf '%s %s\n' "$TARGET" "$(cat "$DATA_ROOT/hostkeys/ssh_host_ed25519_key.pub")" >"$DATA_ROOT/ssh/known_hosts"
 chmod 600 "$DATA_ROOT/ssh/known_hosts"
 
-echo "==> Building digest-pinned pilot target image"
-docker build -t "$IMAGE" "$ROOT/deployments/pilot-host"
+if [[ "$SKIP_BUILD" == 1 ]]; then
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "error: $IMAGE is not available for a build-skipping reprovision" >&2; exit 1; }
+else
+  echo "==> Building digest-pinned pilot target image"
+  docker build -t "$IMAGE" "$ROOT/deployments/pilot-host"
+fi
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create --driver bridge --subnet "$SUBNET" "$NETWORK" >/dev/null
 while IFS= read -r node; do
   [[ -z "$node" ]] || docker network connect "$NETWORK" "$node" >/dev/null 2>&1 || true
 done < <(staging_nodes)
+load_balancer="$(staging_load_balancer)"
+if [[ -n "$load_balancer" ]]; then
+  docker network disconnect "$NETWORK" "$load_balancer" >/dev/null 2>&1 || true
+  docker network connect --alias ingest.praetor-staging.localhost "$NETWORK" "$load_balancer"
+fi
 
 if docker inspect "$TARGET" >/dev/null 2>&1; then
   desired_image="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
@@ -139,8 +177,13 @@ if docker inspect "$TARGET" >/dev/null 2>&1; then
     .[0].HostConfig.Privileged == false and
     .[0].HostConfig.ReadonlyRootfs == true and
     (.[0].HostConfig.PortBindings | length) == 0 and
+    ((.[0].HostConfig.Tmpfs | keys) as $tmpfs | ["/run", "/tmp", "/home/praetor", "/var/lib/praetor", "/opt/praetor", "/usr/local/bin", "/usr/local/share/praetor"] | all(. as $path | $tmpfs | index($path) != null)) and
+    ((.[0].HostConfig.Tmpfs["/opt/praetor"] | split(",")) | index("exec") != null) and
+    ((.[0].HostConfig.Tmpfs["/usr/local/bin"] | split(",")) | index("exec") != null) and
     (.[0].HostConfig.CapDrop | index("ALL")) != null and
     (.[0].HostConfig.CapAdd | index("CAP_AUDIT_WRITE")) != null and
+    (.[0].HostConfig.CapAdd | index("CAP_DAC_OVERRIDE")) != null and
+    (.[0].HostConfig.CapAdd | index("CAP_DAC_READ_SEARCH")) != null and
     (.[0].HostConfig.CapAdd | index("CAP_KILL")) != null and
     (.[0].HostConfig.CapAdd | index("CAP_SYS_CHROOT")) != null
   ')"
@@ -148,8 +191,11 @@ if docker inspect "$TARGET" >/dev/null 2>&1; then
 fi
 if ! docker inspect "$TARGET" >/dev/null 2>&1; then
   docker run -d --name "$TARGET" --hostname "$TARGET" --network "$NETWORK" --ip "$ADDRESS" \
-    --read-only --tmpfs /run:rw,noexec,nosuid,size=16m --tmpfs /tmp:rw,noexec,nosuid,size=16m \
-    --tmpfs /home/praetor:rw,nosuid,size=16m --cap-drop ALL --cap-add AUDIT_WRITE --cap-add CHOWN --cap-add KILL --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT \
+    --read-only --tmpfs /run:rw,noexec,nosuid,size=16m --tmpfs /tmp:rw,nosuid,size=64m \
+    --tmpfs /home/praetor:rw,nosuid,size=32m --tmpfs /var/lib/praetor:rw,nosuid,size=128m \
+    --tmpfs /opt/praetor:rw,exec,nosuid,size=512m --tmpfs /usr/local/bin:rw,exec,nosuid,size=32m \
+    --tmpfs /usr/local/share/praetor:rw,nosuid,size=16m \
+    --cap-drop ALL --cap-add AUDIT_WRITE --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add DAC_READ_SEARCH --cap-add KILL --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE --cap-add SYS_CHROOT \
     -v "$DATA_ROOT/ssh/id_ed25519.pub:/run/praetor/authorized_keys:ro" \
     -v "$DATA_ROOT/hostkeys:/run/praetor/hostkeys:ro" "$IMAGE" >/dev/null
 fi

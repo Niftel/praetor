@@ -12,9 +12,11 @@ PASSWORD="${PRAETOR_STAGING_ACCEPTANCE_PASSWORD:-praetor123}"
 PILOT_ROOT="${PRAETOR_PILOT_DATA_ROOT:-$HOME/.local/share/praetor/pilot-host}"
 PRIVATE_KEY="$PILOT_ROOT/ssh/id_ed25519"
 INVENTORY_NAME="Pilot Engineering Inventory"
-HOST_NAME="Pilot Managed Host"
+HOST_NAME="pilot-managed-host"
+LEGACY_HOST_NAME="Pilot Managed Host"
 CREDENTIAL_NAME="Pilot SSH Credential"
 TARGET_ADDRESS="${PRAETOR_PILOT_ADDRESS:-172.29.50.10}"
+ROTATE_CREDENTIAL="${PRAETOR_PILOT_ROTATE_CREDENTIAL:-0}"
 PORT_FORWARD_PID=""
 PORT_FORWARD_LOG=""
 SECRET_REQUEST=""
@@ -47,13 +49,25 @@ start_tunnel() {
 }
 
 login() {
-  curl -fsS -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg username "$1" --arg password "$PASSWORD" '{username:$username,password:$password}')" \
-    "$API/auth/login"
+  local username="$1" body headers status retry_after attempt
+  body="$(mktemp "${TMPDIR:-/tmp}/praetor-pilot-access-login.XXXXXX")"
+  headers="$(mktemp "${TMPDIR:-/tmp}/praetor-pilot-access-headers.XXXXXX")"
+  for attempt in $(seq 1 6); do
+    status="$(curl -sS -D "$headers" -o "$body" -w '%{http_code}' -H 'Content-Type: application/json' \
+      -d "$(jq -nc --arg username "$username" --arg password "$PASSWORD" '{username:$username,password:$password}')" "$API/auth/login")"
+    if [[ "$status" == 200 ]]; then cat "$body"; rm -f "$body" "$headers"; return; fi
+    if [[ "$status" != 429 || "$attempt" == 6 ]]; then
+      response="$(cat "$body")"; rm -f "$body" "$headers"; die "login for $username returned HTTP $status: $response"
+    fi
+    retry_after="$(awk 'BEGIN {IGNORECASE=1} /^Retry-After:/ {gsub("\\r", "", $2); print $2; exit}' "$headers")"
+    [[ "$retry_after" =~ ^[0-9]+$ ]] || retry_after=$((attempt * 2)); (( retry_after > 15 )) && retry_after=15
+    sleep "$retry_after"
+  done
 }
 get_as() { curl -fsS -H "Authorization: Bearer $1" "$API/$2"; }
 get() { get_as "$TOKEN" "$1"; }
 post() { curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$2" "$API/$1"; }
+put() { curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$2" "$API/$1"; }
 items() { jq 'if type == "object" and has("items") then .items else . end'; }
 find_id() { get "$1" | items | jq -r --arg name "$2" '.[] | select(.name == $name) | .id' | head -n1; }
 ensure() {
@@ -96,19 +110,26 @@ seed() {
   "$ROOT/scripts/staging-integrations.sh" status >/dev/null
   [[ -s "$PRIVATE_KEY" ]] || die "pilot private key is missing; run make pilot-host-provision"
   start_tunnel
-  for username in demo-operator fwalsh demo-auditor; do login "$username" >/dev/null; done
   TOKEN="$(login demo-operator | jq -er .token)"
   ORG_ID="$(find_id organizations Engineering)"; [[ -n "$ORG_ID" ]] || die "Engineering organization is missing"
   TEAM_ID="$(find_id teams backend-team)"; [[ -n "$TEAM_ID" ]] || die "backend-team is missing"
   INVENTORY_ID="$(ensure inventories inventories "$INVENTORY_NAME" "$(jq -nc --argjson org "$ORG_ID" --arg name "$INVENTORY_NAME" '{organization_id:$org,name:$name,kind:"static"}')")"
   HOST_ID="$(find_id "inventories/$INVENTORY_ID/hosts/" "$HOST_NAME")"
+  if [[ -z "$HOST_ID" ]]; then
+    HOST_ID="$(find_id "inventories/$INVENTORY_ID/hosts/" "$LEGACY_HOST_NAME")"
+    [[ -z "$HOST_ID" ]] || put "hosts/$HOST_ID" "$(jq -nc --arg name "$HOST_NAME" '{name:$name}')" >/dev/null
+  fi
   [[ -n "$HOST_ID" ]] || HOST_ID="$(post "inventories/$INVENTORY_ID/hosts/" "$(jq -nc --arg name "$HOST_NAME" --arg address "$TARGET_ADDRESS" '{name:$name,enabled:true,variables:{ansible_host:$address,ansible_user:"praetor",ansible_port:22}}')" | jq -er .id)"
   CREDENTIAL_ID="$(find_id credentials "$CREDENTIAL_NAME")"
-  if [[ -z "$CREDENTIAL_ID" ]]; then
+  if [[ -z "$CREDENTIAL_ID" || "$ROTATE_CREDENTIAL" == 1 ]]; then
     SECRET_REQUEST="$(mktemp "${TMPDIR:-/tmp}/praetor-pilot-credential.XXXXXX")"
     jq -nc --argjson organization_id "$ORG_ID" --arg name "$CREDENTIAL_NAME" --rawfile key "$PRIVATE_KEY" \
       '{organization_id:$organization_id,credential_type_id:1,name:$name,description:"Disposable pilot managed-host identity",inputs:{username:"praetor",ssh_private_key:$key}}' >"$SECRET_REQUEST"
-    response="$(curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary "@$SECRET_REQUEST" "$API/credentials")"
+    if [[ -z "$CREDENTIAL_ID" ]]; then
+      response="$(curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary "@$SECRET_REQUEST" "$API/credentials")"
+    else
+      response="$(curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary "@$SECRET_REQUEST" "$API/credentials/$CREDENTIAL_ID")"
+    fi
     rm -f "$SECRET_REQUEST"; SECRET_REQUEST=""
     CREDENTIAL_ID="$(jq -er .id <<<"$response")"
     [[ "$(jq -r '.inputs.ssh_private_key' <<<"$response")" == '$encrypted$' ]] || die "credential response was not sealed"

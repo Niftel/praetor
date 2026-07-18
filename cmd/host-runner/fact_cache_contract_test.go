@@ -53,3 +53,29 @@ func TestPostFactsMatchesV1Contract(t *testing.T) {
 		t.Fatalf("fact upload mismatch:\ngot  %s\nwant %s", gotCanonical, wantCanonical)
 	}
 }
+
+func TestCollectFactsNormalizesAnsible219JsonfileFormat(t *testing.T) {
+	jobDir := t.TempDir()
+	dir := factCacheDir(jobDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"ansible_distribution":"Rocky","ansible_distribution_major_version":"9"}`
+	wrapper, _ := json.Marshal(map[string]string{"__payload__": payload})
+	if err := os.WriteFile(filepath.Join(dir, "s1_pilot-managed-host"), wrapper, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	facts := collectFacts(jobDir)
+	raw, ok := facts["pilot-managed-host"]
+	if !ok {
+		t.Fatalf("normalized host is missing: %v", facts)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["ansible_distribution"] != "Rocky" || got["ansible_distribution_major_version"] != "9" {
+		t.Fatalf("unexpected normalized facts: %v", got)
+	}
+}

@@ -1,4 +1,4 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset staging-pilot-access-plan staging-pilot-access-seed staging-pilot-access-status
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset staging-pilot-access-plan staging-pilot-access-seed staging-pilot-access-status staging-pilot-journey-plan staging-pilot-journey-seed staging-pilot-journey-status staging-pilot-journey-run
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
@@ -189,6 +189,18 @@ staging-pilot-access-seed:
 
 staging-pilot-access-status:
 	./scripts/staging-pilot-access.sh status
+
+staging-pilot-journey-plan:
+	./scripts/staging-pilot-journey.sh plan
+
+staging-pilot-journey-seed:
+	./scripts/staging-pilot-journey.sh seed
+
+staging-pilot-journey-status:
+	./scripts/staging-pilot-journey.sh status
+
+staging-pilot-journey-run:
+	./scripts/staging-pilot-journey.sh run
 
 .PHONY: staging-release-plan staging-release-deploy staging-release-status
 staging-release-plan:

@@ -275,7 +275,7 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 		return nil
 	}
 	cmd.WaitDelay = 10 * time.Second
-	cmd.Env = append(os.Environ(), "ANSIBLE_FORCE_COLOR=1")
+	cmd.Env = append(os.Environ(), ansibleRuntimeEnv(r.JobDir)...)
 	// Point Ansible at the bundled interpreter explicitly (no system symlinks —
 	// the runtime stays entirely under /opt/praetor). This makes module execution
 	// on the runner host use the bundled Python.
@@ -374,6 +374,18 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 	// a lost one. The runner returns once the playbook finishes; the deferred
 	// syncer/heartbeat shutdown in main.go then performs a final flush.
 	return err
+}
+
+// ansibleRuntimeEnv keeps Ansible's controller-side state inside the bounded
+// per-run directory. Remote bootstrap commonly starts the runner through sudo,
+// where HOME would otherwise be /root; hardened targets deliberately keep that
+// filesystem read-only.
+func ansibleRuntimeEnv(jobDir string) []string {
+	return []string{
+		"ANSIBLE_FORCE_COLOR=1",
+		"HOME=" + jobDir,
+		"ANSIBLE_LOCAL_TEMP=" + filepath.Join(jobDir, ".ansible", "tmp"),
+	}
 }
 
 func materializeCredentialFiles(jobDir string, values map[string]string) (map[string]string, func(), error) {

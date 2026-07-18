@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // factCacheDir is where the jsonfile cache plugin reads/writes per-host facts.
@@ -54,7 +55,26 @@ func collectFacts(jobDir string) map[string]json.RawMessage {
 		if err != nil {
 			continue
 		}
-		out[e.Name()] = json.RawMessage(data)
+		host := e.Name()
+		if prefix, remainder, ok := strings.Cut(host, "_"); ok && len(prefix) > 1 && prefix[0] == 's' {
+			onlyDigits := true
+			for _, r := range prefix[1:] {
+				if r < '0' || r > '9' {
+					onlyDigits = false
+					break
+				}
+			}
+			if onlyDigits {
+				host = remainder
+			}
+		}
+		var envelope struct {
+			Payload string `json:"__payload__"`
+		}
+		if json.Unmarshal(data, &envelope) == nil && envelope.Payload != "" && json.Valid([]byte(envelope.Payload)) {
+			data = []byte(envelope.Payload)
+		}
+		out[host] = json.RawMessage(data)
 	}
 	return out
 }
