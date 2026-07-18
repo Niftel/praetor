@@ -1,275 +1,270 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
-import { Job, Template } from '../types';
+import { Job, WorkflowRunSummary } from '../types';
 import { toast, confirmDialog } from '../components/ui/toast';
-import { Play, Square, ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, GitFork, Search, Square } from 'lucide-react';
 
-const TERMINAL = ['successful', 'failed', 'error', 'canceled'];
 const ACTIVE = ['pending', 'queued', 'running', 'waiting'];
-const isActive = (s: string) => ACTIVE.includes(s);
-const isFail = (s: string) => s === 'failed' || s === 'error';
+const isActive = (status: string) => ACTIVE.includes(status);
+const isFailure = (status: string) => status === 'failed' || status === 'error';
 
-type Filter = 'all' | 'running' | 'failed' | 'converged';
+type StatusFilter = 'all' | 'active' | 'failed' | 'successful';
+type TypeFilter = 'all' | 'playbook' | 'workflow';
+type RunKind = 'playbook' | 'workflow';
 
-const tone = (s: string): { label: string; text: string; dot: string } => {
-  if (s === 'successful') return { label: 'successful', text: 'text-ok', dot: 'bg-ok' };
-  if (isFail(s)) return { label: s, text: 'text-err', dot: 'bg-err' };
-  if (s === 'canceled') return { label: 'canceled', text: 'text-mut', dot: 'bg-mut' };
-  if (isActive(s)) return { label: s || 'running', text: 'text-run', dot: 'bg-run' };
-  return { label: s || '—', text: 'text-mut', dot: 'bg-mut' };
+type Execution = {
+  key: string;
+  id: number;
+  kind: RunKind;
+  name: string;
+  status: string;
+  createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string | null;
+  templateId?: number;
+  runId?: string;
+  job?: Job;
 };
 
-const rel = (iso?: string, ref?: number): string => {
-  if (!iso) return '';
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return '';
-  const s = Math.floor(((ref ?? Date.now()) - t) / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
+const statusTone = (status: string): { text: string; dot: string } => {
+  if (status === 'successful') return { text: 'text-ok', dot: 'bg-ok' };
+  if (isFailure(status)) return { text: 'text-err', dot: 'bg-err' };
+  if (status === 'canceled') return { text: 'text-mut', dot: 'bg-mut' };
+  if (isActive(status)) return { text: 'text-run', dot: 'bg-run' };
+  return { text: 'text-mut', dot: 'bg-mut' };
 };
 
-const clock = (ms: number): string => {
-  if (!Number.isFinite(ms) || ms < 0) return '—';
-  const s = Math.floor(ms / 1000);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const h = Math.floor(s / 3600);
-  return h > 0 ? `${h}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}` : `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
-};
-
-const dur = (job: Job, now: number): string => {
-  if (!job.started_at) return '—';
-  const start = new Date(job.started_at).getTime();
-  const end = job.finished_at ? new Date(job.finished_at).getTime() : (isActive(job.status) ? now : NaN);
-  if (!Number.isFinite(end)) return '—';
-  return clock(end - start);
-};
-
-const startClock = (iso?: string) => {
+const dateTime = (iso?: string | null) => {
   if (!iso) return '—';
-  try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return '—'; }
+  const value = new Date(iso);
+  return Number.isNaN(value.getTime()) ? '—' : value.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+};
+
+const duration = (run: Execution, now: number) => {
+  const start = run.startedAt || run.createdAt;
+  if (!start) return '—';
+  const started = new Date(start).getTime();
+  const ended = run.finishedAt ? new Date(run.finishedAt).getTime() : (isActive(run.status) ? now : NaN);
+  if (!Number.isFinite(started) || !Number.isFinite(ended)) return '—';
+  const seconds = Math.max(0, Math.floor((ended - started) / 1000));
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const hours = Math.floor(seconds / 3600);
+  return hours ? `${hours}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}` : `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
 };
 
 const JobsPage = () => {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [workflows, setWorkflows] = useState<WorkflowRunSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const launching = useRef(false);
 
-  const loadData = () => {
-    Promise.all([api.getJobs(), api.getTemplates()])
-      .then(([jobsData, templatesData]) => {
-        setJobs(unwrap(jobsData));
-        setTemplates(unwrap(templatesData));
-      })
-      .catch(err => console.error(err));
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const [jobResult, workflowResult] = await Promise.allSettled([api.getJobs(), api.getWorkflowJobs()]);
+      if (jobResult.status === 'fulfilled') setJobs(unwrap<Job>(jobResult.value));
+      if (workflowResult.status === 'fulfilled') setWorkflows(unwrap<WorkflowRunSummary>(workflowResult.value));
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
-    const poll = setInterval(loadData, 5000);
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => { clearInterval(poll); clearInterval(tick); };
+    const poll = window.setInterval(() => loadData(true), 5000);
+    const tick = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => { window.clearInterval(poll); window.clearInterval(tick); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const counts = useMemo(() => {
-    let running = 0, failed = 0, converged = 0, terminal = 0;
-    for (const j of jobs) {
-      if (isActive(j.status)) running++;
-      else if (isFail(j.status)) { failed++; terminal++; }
-      else if (j.status === 'successful') { converged++; terminal++; }
-      else terminal++;
-    }
-    return { total: jobs.length, running, failed, converged, terminal };
-  }, [jobs]);
+  const executions = useMemo<Execution[]>(() => [
+    ...jobs.map(job => ({
+      key: `playbook-${job.id}`,
+      id: job.id,
+      kind: 'playbook' as const,
+      name: job.name,
+      status: job.status,
+      createdAt: job.created_at,
+      startedAt: job.started_at,
+      finishedAt: job.finished_at,
+      templateId: job.unified_job_template_id,
+      runId: job.current_run_id,
+      job,
+    })),
+    ...workflows.map(run => ({
+      key: `workflow-${run.id}`,
+      id: run.id,
+      kind: 'workflow' as const,
+      name: run.template_name,
+      status: run.status,
+      createdAt: run.created_at,
+      finishedAt: run.finished_at,
+      templateId: run.workflow_template_id,
+    })),
+  ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()), [jobs, workflows]);
 
-  const convergedPct = counts.terminal ? Math.round((counts.converged / counts.terminal) * 100) : 0;
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return executions.filter(run => {
+      const matchesStatus = statusFilter === 'all'
+        || (statusFilter === 'active' && isActive(run.status))
+        || (statusFilter === 'failed' && isFailure(run.status))
+        || (statusFilter === 'successful' && run.status === 'successful');
+      const matchesType = typeFilter === 'all' || run.kind === typeFilter;
+      const matchesQuery = !needle || run.name.toLowerCase().includes(needle) || String(run.id).includes(needle);
+      return matchesStatus && matchesType && matchesQuery;
+    });
+  }, [executions, query, statusFilter, typeFilter]);
 
-  // 48-hour hourly histogram from real start times; red where a run failed.
-  const hist = useMemo(() => {
-    const buckets = Array.from({ length: 48 }, () => ({ ok: 0, err: 0 }));
-    const nowH = Math.floor(now / 3.6e6);
-    let failed = 0;
-    for (const j of jobs) {
-      const iso = j.started_at || j.created_at;
-      if (!iso) continue;
-      const h = Math.floor(new Date(iso).getTime() / 3.6e6);
-      const idx = 47 - (nowH - h);
-      if (idx < 0 || idx > 47) continue;
-      if (isFail(j.status)) { buckets[idx].err++; failed++; } else buckets[idx].ok++;
-    }
-    const max = Math.max(1, ...buckets.map(b => b.ok + b.err));
-    return { buckets, max, failed };
-  }, [jobs, now]);
+  const counts = useMemo(() => ({
+    all: executions.length,
+    active: executions.filter(run => isActive(run.status)).length,
+    failed: executions.filter(run => isFailure(run.status)).length,
+    successful: executions.filter(run => run.status === 'successful').length,
+  }), [executions]);
 
-  const shown = useMemo(() => jobs.filter(j => {
-    if (filter === 'running') return isActive(j.status);
-    if (filter === 'failed') return isFail(j.status);
-    if (filter === 'converged') return j.status === 'successful';
-    return true;
-  }), [jobs, filter]);
+  const openRun = (run: Execution) => navigate(run.kind === 'workflow' ? `/workflows/runs/${run.id}` : `/jobs/${run.id}`, run.job ? { state: { job: run.job } } : undefined);
 
-  const handleLaunch = async () => {
-    if (!selectedTemplate || launching.current) return;
-    const t = templates.find(t => t.id.toString() === selectedTemplate);
-    if (!t) return;
-    launching.current = true;
+  const cancel = async (run: Execution) => {
+    if (!run.job || !(await confirmDialog(`Cancel job "${run.name}"?`, { confirmText: 'Cancel job', destructive: true }))) return;
     try {
-      await api.launchJob({ unified_job_template_id: (t as any).unified_job_template_id || t.id, name: t.name });
-      setSelectedTemplate('');
-      loadData();
-    } catch { toast.error('Failed to launch job'); }
-    finally { launching.current = false; }
+      await api.cancelJob(run.id);
+      toast.info('Cancellation requested');
+      loadData(true);
+    } catch {
+      toast.error('Failed to cancel job');
+    }
   };
 
-  const cancel = async (e: React.MouseEvent, job: Job) => {
-    e.stopPropagation();
-    if (!(await confirmDialog(`Cancel job "${job.name}"?`, { confirmText: 'Cancel job', destructive: true }))) return;
-    try { await api.cancelJob(job.id); toast.info('Cancellation requested'); loadData(); }
-    catch { toast.error('Failed to cancel job'); }
-  };
-
-  const openJob = (job: Job) => navigate(`/jobs/${job.id}`, { state: { job } });
-
-  const chips: { key: Filter; label: string; n: number }[] = [
-    { key: 'all', label: 'All', n: counts.total },
-    { key: 'running', label: 'Running', n: counts.running },
-    { key: 'failed', label: 'Failed', n: counts.failed },
-    { key: 'converged', label: 'Converged', n: counts.converged },
+  const statusOptions: { key: StatusFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'active', label: 'Active' },
+    { key: 'failed', label: 'Failed' },
+    { key: 'successful', label: 'Successful' },
   ];
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
-      {/* Header: title, readout, 48h histogram */}
-      <div className="flex flex-wrap gap-x-7 gap-y-4 items-start px-6 pt-5 pb-1 shrink-0">
-        <div>
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-[19px] font-semibold tracking-tight">Jobs</h1>
-            <span className="font-mono text-xs text-dim">{counts.total} shown · {counts.running} active</span>
-          </div>
-          <div className="flex gap-6 mt-3">
-            <Readout n={counts.total} label="In view" />
-            <Readout n={`${convergedPct}%`} label="Converged" color="text-ok" />
-            <Readout n={counts.failed} label="Failed" color={counts.failed ? 'text-err' : undefined} />
-            <Readout n={counts.running} label="Running" color={counts.running ? 'text-run' : undefined} />
-          </div>
+      <header className="px-6 pt-5 pb-4 border-b border-line shrink-0">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-[19px] font-semibold tracking-tight">Jobs</h1>
+          <span className="font-mono text-xs text-dim tabular-nums">{executions.length} executions</span>
+          {counts.active > 0 && <span className="font-mono text-xs text-run tabular-nums">{counts.active} active</span>}
         </div>
-        <div className="ml-auto w-[340px] max-[720px]:w-full max-[720px]:ml-0">
-          <div className="flex justify-between font-mono text-[9.5px] tracking-[0.1em] uppercase text-dim mb-2">
-            <span>Runs · last 48h</span>
-            <span>{hist.failed} failed</span>
-          </div>
-          <div className="flex items-end gap-[2px] h-[46px]">
-            {hist.buckets.map((b, i) => (
-              <div key={i} className="flex-1 flex flex-col justify-end gap-px h-full" title={b.ok + b.err ? `${b.ok + b.err} run(s)` : ''}>
-                {b.err > 0 && <i className="w-full rounded-sm bg-err" style={{ height: `${(b.err / hist.max) * 100}%` }} />}
-                {b.ok > 0 && <i className="w-full rounded-sm bg-ok/75" style={{ height: `${(b.ok / hist.max) * 100}%` }} />}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+        <p className="mt-1.5 text-[12.5px] text-mut max-w-[68ch]">Playbook and workflow executions, ordered by most recent activity.</p>
+      </header>
 
-      {/* Toolbar: filter chips + launch */}
-      <div className="flex items-center gap-1.5 px-6 py-3 shrink-0">
-        {chips.map(c => (
-          <button
-            key={c.key}
-            onClick={() => setFilter(c.key)}
-            className={`font-mono text-[11px] px-2.5 py-1.5 rounded-md border transition-colors
-              ${filter === c.key ? 'text-ink bg-white/5 border-line' : 'text-mut border-transparent hover:text-ink'}`}
-          >
-            {c.label} <span className="text-dim ml-1 tabular-nums">{c.n}</span>
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
-            <select
-              aria-label="Launch template"
-              value={selectedTemplate}
-              onChange={e => setSelectedTemplate(e.target.value)}
-              className="appearance-none h-[30px] pl-3 pr-8 rounded-md bg-panel border border-line2 text-xs text-ink2 font-mono hover:border-white/20 focus:outline-none focus:border-acc/60 max-w-[220px]"
+      <div className="flex flex-wrap items-center gap-2 px-6 py-3 border-b border-line shrink-0">
+        <div className="flex items-center gap-1" aria-label="Filter jobs by status">
+          {statusOptions.map(option => (
+            <button
+              key={option.key}
+              onClick={() => setStatusFilter(option.key)}
+              aria-pressed={statusFilter === option.key}
+              className={`font-mono text-[11px] px-2.5 py-1.5 rounded-md border transition-colors ${statusFilter === option.key ? 'text-ink bg-white/5 border-line2' : 'text-mut border-transparent hover:text-ink'}`}
             >
-              <option value="">Select template…</option>
-              {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none" />
-          </div>
-          <button
-            onClick={handleLaunch}
-            disabled={!selectedTemplate}
-            className="h-[30px] px-3.5 rounded-md text-xs font-semibold flex items-center gap-1.5 bg-acc text-[#04211d] hover:bg-acc2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Play size={13} strokeWidth={2.4} /> Launch job
-          </button>
+              {option.label} <span className="ml-1 text-dim tabular-nums">{counts[option.key]}</span>
+            </button>
+          ))}
         </div>
+        <select
+          aria-label="Filter jobs by type"
+          value={typeFilter}
+          onChange={event => setTypeFilter(event.target.value as TypeFilter)}
+          className="h-[30px] px-2.5 rounded-md bg-panel border border-line2 text-[11px] text-ink2 font-mono hover:border-white/20 focus:border-acc/60"
+        >
+          <option value="all">All job types</option>
+          <option value="playbook">Playbook jobs</option>
+          <option value="workflow">Workflow jobs</option>
+        </select>
+        <label className="relative ml-auto max-[700px]:w-full max-[700px]:mt-1">
+          <span className="sr-only">Search jobs</span>
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none" />
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Search jobs by name or ID"
+            className="h-[30px] w-[250px] max-[700px]:w-full pl-8 pr-3 rounded-md bg-panel border border-line2 text-xs text-ink placeholder:text-mut hover:border-white/20 focus:border-acc/60"
+          />
+        </label>
       </div>
 
-      {/* Table */}
-      <div className="grid grid-cols-[130px_60px_1fr_150px_120px_100px] items-center px-6 h-[34px] border-y border-line shrink-0 font-mono text-[9.5px] tracking-[0.1em] uppercase text-dim max-[720px]:grid-cols-[110px_1fr_90px]">
-        <span>Status</span>
-        <span className="max-[720px]:hidden">ID</span>
+      <div className="grid grid-cols-[30px_minmax(220px,1fr)_120px_130px_150px_110px] items-center px-6 h-[34px] border-b border-line shrink-0 font-mono text-[9.5px] tracking-[0.1em] uppercase text-dim max-[820px]:grid-cols-[30px_minmax(0,1fr)_110px_90px]">
+        <span aria-hidden="true" />
         <span>Name</span>
-        <span className="max-[720px]:hidden">Started</span>
-        <span className="max-[720px]:hidden">Duration</span>
-        <span className="text-right">Run</span>
+        <span>Status</span>
+        <span>Type</span>
+        <span className="max-[820px]:hidden">Started</span>
+        <span className="text-right">Duration</span>
       </div>
+
       <div className="flex-1 overflow-auto scroll-tint">
-        {shown.map(job => {
-          const t = tone(job.status);
+        {filtered.map(run => {
+          const tone = statusTone(run.status);
+          const isExpanded = expanded === run.key;
+          const TypeIcon = run.kind === 'workflow' ? GitFork : FileText;
           return (
-            <div
-              key={job.id}
-              onClick={() => openJob(job)}
-              className="grid grid-cols-[130px_60px_1fr_150px_120px_100px] items-center px-6 h-[46px] border-b border-line cursor-pointer hover:bg-white/[0.025] transition-colors max-[720px]:grid-cols-[110px_1fr_90px]"
-            >
-              <span className={`inline-flex items-center gap-2 text-[12px] ${t.text}`}>
-                <span className={`h-[7px] w-[7px] rounded-full ${t.dot} ${isActive(job.status) ? 'animate-pulse' : ''}`} />
-                {t.label}
-              </span>
-              <span className="font-mono text-xs text-mut tabular-nums max-[720px]:hidden">#{job.id}</span>
-              <span className="font-medium truncate pr-4">{job.name}</span>
-              <span className="font-mono text-[11px] text-mut tabular-nums max-[720px]:hidden">
-                {startClock(job.started_at)} <span className="text-dim">{job.started_at ? rel(job.started_at, now) : ''}</span>
-              </span>
-              <span className="font-mono text-[11px] text-mut tabular-nums max-[720px]:hidden">{dur(job, now)}</span>
-              <div className="flex justify-end" onClick={e => e.stopPropagation()}>
-                {isActive(job.status) ? (
-                  <button
-                    onClick={e => cancel(e, job)}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-err/90 hover:text-err"
-                    title="Cancel this job"
-                  >
-                    <Square size={11} /> Cancel
-                  </button>
-                ) : (
-                  <button onClick={() => openJob(job)} className="text-[11px] font-medium text-acc/80 hover:text-acc">View →</button>
-                )}
+            <div key={run.key} className="border-b border-line">
+              <div className="grid grid-cols-[30px_minmax(220px,1fr)_120px_130px_150px_110px] items-center px-6 min-h-[48px] hover:bg-white/[0.025] transition-colors max-[820px]:grid-cols-[30px_minmax(0,1fr)_110px_90px]">
+                <button
+                  onClick={() => setExpanded(isExpanded ? null : run.key)}
+                  className="w-7 h-7 grid place-items-center rounded text-dim hover:text-ink hover:bg-white/5"
+                  aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${run.name}`}
+                  aria-expanded={isExpanded}
+                >
+                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </button>
+                <button onClick={() => openRun(run)} className="min-w-0 text-left pr-4 group">
+                  <span className="block text-[13px] font-medium truncate group-hover:text-acc">{run.name}</span>
+                  <span className="block font-mono text-[10.5px] text-dim mt-0.5 tabular-nums">#{run.id}</span>
+                </button>
+                <span className={`inline-flex items-center gap-2 text-[12px] ${tone.text}`}>
+                  <span className={`h-[7px] w-[7px] rounded-full ${tone.dot} ${isActive(run.status) ? 'animate-pulse' : ''}`} />
+                  {run.status}
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-mut"><TypeIcon size={12} /> {run.kind === 'workflow' ? 'Workflow job' : 'Playbook job'}</span>
+                <span className="font-mono text-[11px] text-mut tabular-nums max-[820px]:hidden">{dateTime(run.startedAt || run.createdAt)}</span>
+                <span className="font-mono text-[11px] text-mut tabular-nums text-right">{duration(run, now)}</span>
               </div>
+
+              {isExpanded && (
+                <div className="ml-[54px] mr-6 mb-3 py-3 border-t border-line grid grid-cols-[repeat(4,minmax(0,1fr))_auto] gap-4 items-end max-[900px]:grid-cols-2 max-[600px]:grid-cols-1">
+                  <Detail label="Job ID" value={`#${run.id}`} />
+                  <Detail label="Template ID" value={run.templateId ? `#${run.templateId}` : '—'} />
+                  <Detail label="Created" value={dateTime(run.createdAt)} />
+                  <Detail label="Finished" value={dateTime(run.finishedAt)} />
+                  <div className="flex justify-end gap-2 max-[900px]:justify-start">
+                    {run.kind === 'playbook' && isActive(run.status) && <button onClick={() => cancel(run)} className="h-8 px-3 rounded-md text-[11px] font-medium text-err hover:bg-err/10 inline-flex items-center gap-1.5"><Square size={11} /> Cancel</button>}
+                    <button onClick={() => openRun(run)} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-ink hover:border-white/20">View output</button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
-        {shown.length === 0 && (
-          <div className="px-6 py-10 text-center text-sm text-dim">
-            {filter === 'all' ? 'No jobs yet.' : `No ${filter} jobs.`}
+
+        {!loading && filtered.length === 0 && (
+          <div className="px-6 py-12 text-center">
+            <p className="text-sm text-mut">No jobs match the current filters.</p>
+            <button onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setQuery(''); }} className="mt-3 text-[12px] font-medium text-acc hover:text-acc2">Clear filters</button>
           </div>
         )}
+        {loading && executions.length === 0 && <div className="px-6 py-10 text-sm text-dim">Loading jobs…</div>}
       </div>
     </div>
   );
 };
 
-const Readout: React.FC<{ n: React.ReactNode; label: string; color?: string }> = ({ n, label, color }) => (
-  <div className="flex flex-col gap-0.5">
-    <span className={`font-mono text-[19px] font-semibold tracking-tight tabular-nums ${color || 'text-ink'}`}>{n}</span>
-    <span className="text-[10px] uppercase tracking-[0.07em] text-mut">{label}</span>
+const Detail: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="min-w-0">
+    <div className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-dim">{label}</div>
+    <div className="font-mono text-[11px] text-ink2 mt-1 truncate tabular-nums">{value}</div>
   </div>
 );
 
