@@ -273,6 +273,19 @@ wait_target_marker() {
   die "pilot marker $marker did not appear"
 }
 
+wait_actionable_failure_log() {
+  local token="$1" run_id="$2" deadline=$((SECONDS + 45)) log=""
+  while (( SECONDS < deadline )); do
+    log="$(get_as "$token" "jobs/runs/$run_id/logs" 2>/dev/null || true)"
+    if grep -Eiq '(UNREACHABLE|timed out|No route|connect)' <<<"$log"; then
+      printf '%s' "$log"
+      return
+    fi
+    sleep 1
+  done
+  die "unreachable host failure did not publish actionable diagnostics within 45 seconds"
+}
+
 binding_state() {
   kubectl --context "$CONTEXT" -n "$NAMESPACE" exec "$SECRETS_DB_POD" -- psql -U postgres -d praetor_secrets -At -F '|' -c "select state,resolution_count from run_bindings where run_id='$1'"
 }
@@ -320,10 +333,9 @@ run_faults() {
   unreachable_started=$SECONDS
   unreachable="$(launch_fault "$operator_token" "$approver_token")"
   unreachable_job="$(jq -r .workflow_job_id <<<"$unreachable")"; unreachable_run="$(jq -r .run_id <<<"$unreachable")"
-  unreachable_result="$(wait_fault_terminal "$operator_token" "$unreachable_job" failed)"
+  wait_fault_terminal "$operator_token" "$unreachable_job" failed >/dev/null
   (( SECONDS - unreachable_started <= 120 )) || die "unreachable host exceeded the 120-second failure boundary"
-  unreachable_log="$(get_as "$operator_token" "jobs/runs/$unreachable_run/logs")"
-  grep -Eiq '(UNREACHABLE|timed out|No route|connect)' <<<"$unreachable_log" || die "unreachable host failure did not contain actionable diagnostics"
+  unreachable_log="$(wait_actionable_failure_log "$operator_token" "$unreachable_run")"
   docker network connect --ip "${PRAETOR_PILOT_ADDRESS:-172.29.50.10}" praetor-pilot "$PILOT_TARGET"
   TARGET_DISCONNECTED=0
   "$ROOT/scripts/pilot-host.sh" status >/dev/null
