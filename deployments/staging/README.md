@@ -216,3 +216,11 @@ The scripted run is followed by the desktop and 390 x 844 UI checklist in
 [`acceptance-report.md`](acceptance-report.md). Product defects discovered by
 that pass are tracked separately and do not get silently folded into the
 acceptance implementation.
+
+Execution-diagnostics acceptance is a separate fail-closed decision. After the
+bounded journey, fault, recovery, API-budget, and responsive-UI evidence has
+been recorded, run `make staging-execution-diagnostics-preflight` and then
+`make staging-execution-diagnostics-verify`. The fast preflight rejects a stale
+release before any long fault journey starts. The final gate hashes
+the sanitized inputs, verifies all eight immutable component digests, rejects
+secret canaries, and writes a mode-`0600` decision below the staging data root.
