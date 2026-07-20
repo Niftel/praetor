@@ -145,12 +145,7 @@ func (a *Authorizer) subject(r *http.Request) accesscontrol.Principal {
 //
 //	if !h.authorize(w, r, ct, id, actAdmin) { return }
 func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentType accesscontrol.ResourceKind, objectID int64, action permAction) bool {
-	verb, ok := actionVerb[action]
-	if !ok {
-		render.ErrForbidden(nil).Render(w, r)
-		return false
-	}
-	allowed, err := a.authz.Can(r.Context(), a.subject(r), verb, accesscontrol.Object(accesscontrol.ResourceKind(contentType), objectID))
+	allowed, err := a.canAuthorize(r, contentType, objectID, action)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return false
@@ -160,6 +155,21 @@ func (a *Authorizer) authorize(w http.ResponseWriter, r *http.Request, contentTy
 		return false
 	}
 	return true
+}
+
+// canAuthorize performs the same decision as authorize without writing an HTTP
+// response. Long-lived streams use it to recheck access after headers have
+// already been sent; a revoked grant then closes the stream immediately.
+func (a *Authorizer) canAuthorize(r *http.Request, contentType accesscontrol.ResourceKind, objectID int64, action permAction) (bool, error) {
+	verb, ok := actionVerb[action]
+	if !ok {
+		return false, nil
+	}
+	allowed, err := a.authz.Can(r.Context(), a.subject(r), verb, accesscontrol.Object(accesscontrol.ResourceKind(contentType), objectID))
+	if err != nil {
+		return false, err
+	}
+	return allowed, nil
 }
 
 // holdsGlobal reports whether the current user holds the global (system-scope)

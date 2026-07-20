@@ -84,6 +84,82 @@ export const fetchWithAuth = async (endpoint: string, options: RequestInit = {})
     return response;
 };
 
+export interface DiagnosticEvent {
+    seq: number;
+    event_type: string;
+    host_id?: number;
+    task_name?: string;
+    play_name?: string;
+    outcome?: string;
+    changed?: boolean;
+    duration_ms?: number;
+    failure_code?: string;
+    created_at: string;
+}
+
+export interface RunDiagnostics {
+    summary: { state: string; last_event_seq: number };
+    events: DiagnosticEvent[];
+    next_cursor?: number;
+}
+
+type DiagnosticStreamCallbacks = {
+    onEvent: (event: DiagnosticEvent) => void;
+    onTerminal: (state: string, cursor: number) => void;
+};
+
+// streamJobDiagnostics uses fetch rather than native EventSource because the
+// API authenticates with a Bearer header. cursor is exclusive; callers update
+// it only after onEvent returns, so a reconnect cannot skip an unprocessed item.
+export const streamJobDiagnostics = async (
+    runId: string,
+    cursor: number,
+    callbacks: DiagnosticStreamCallbacks,
+    signal: AbortSignal,
+) => {
+    const response = await fetchWithAuth(`/jobs/runs/${runId}/diagnostics/stream?cursor=${cursor}`, {
+        headers: { Accept: 'text/event-stream', 'Last-Event-ID': String(cursor) },
+        cache: 'no-store',
+        signal,
+    });
+    if (!response.body) throw new Error('Streaming response has no body');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let lastSeq = cursor;
+    while (true) {
+        const { value, done } = await reader.read();
+        buffer = (buffer + decoder.decode(value, { stream: !done })).replace(/\r\n/g, '\n');
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            let eventType = 'message';
+            let id: number | undefined;
+            const data: string[] = [];
+            for (const line of frame.split('\n')) {
+                if (line.startsWith(':')) continue;
+                if (line.startsWith('event:')) eventType = line.slice(6).trim();
+                else if (line.startsWith('id:')) id = Number(line.slice(3).trim());
+                else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+            }
+            if (data.length && eventType === 'diagnostic') {
+                const event = JSON.parse(data.join('\n')) as DiagnosticEvent;
+                if (Number.isFinite(id) && event.seq === id && event.seq > lastSeq) {
+                    callbacks.onEvent(event);
+                    lastSeq = event.seq;
+                }
+            } else if (data.length && eventType === 'terminal') {
+                const terminal = JSON.parse(data.join('\n')) as { state: string; cursor: number };
+                callbacks.onTerminal(terminal.state, terminal.cursor);
+                return;
+            }
+            boundary = buffer.indexOf('\n\n');
+        }
+        if (done) return;
+    }
+};
+
 export const api = {
     // Auth
     login: async (credentials: any) => {
@@ -194,6 +270,8 @@ export const api = {
 
     // Logs
     getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
+    getJobDiagnostics: (runId: string, cursor = 0, limit = 200) =>
+        fetchWithAuth(`/jobs/runs/${runId}/diagnostics?cursor=${cursor}&limit=${limit}`).then(r => r.json() as Promise<RunDiagnostics>),
     // Full playbook stdout, reassembled from the object store (returns plain text).
     getJobLogs: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/logs`).then(r => r.text()),
     // Incremental tail: returns only chunks newer than `since` plus the new tail

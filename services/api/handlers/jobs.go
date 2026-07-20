@@ -109,6 +109,7 @@ func (rs *JobsResource) Routes() chi.Router {
 	r.Get("/runs/{runID}", rs.GetExecutionRun)
 	r.Get("/runs/{runID}/events", rs.ListJobEvents)
 	r.Get("/runs/{runID}/diagnostics", rs.ListRunDiagnostics)
+	r.Get("/runs/{runID}/diagnostics/stream", rs.StreamRunDiagnostics)
 	r.Post("/runs/{runID}/events", rs.CreateJobEvent)
 	r.Get("/runs/{runID}/logs", rs.StreamRunLogs)
 	return r
