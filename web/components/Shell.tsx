@@ -1,100 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { api, getCurrentUser } from '../services/api';
-import {
-  Search, LayoutDashboard, Play, FileText, Workflow, Server, CalendarClock,
-  Package, GitBranch, Building2, Users, UsersRound, KeyRound, KeySquare,
-  ScrollText, Settings as SettingsIcon, LogOut,
-  ShieldCheck, ChevronRight,
-  Bot,
-} from 'lucide-react';
+import { Search, LogOut, ShieldCheck, ChevronRight } from 'lucide-react';
 import RouteErrorBoundary from './RouteErrorBoundary';
+import { breadcrumbsFor, documentTitleFor, ROUTES, ROUTE_GROUPS, type RouteMetadata } from '../lib/routeMetadata';
 
 // The command palette IS the control panel: no persistent sidebar. ⌘K opens one
 // overlay with two tabs — History (recent runs) and All functions (the capability
 // directory). This Shell is the frame every surface renders into via <Outlet/>.
-
-type Fn = { label: string; path: string; icon: React.ComponentType<{ size?: number | string }>; keywords?: string };
-
-const FUNCTIONS: { group: string; items: Fn[] }[] = [
-  {
-    group: 'Execute', items: [
-      { label: 'Dashboard', path: '/', icon: LayoutDashboard, keywords: 'home overview' },
-      { label: 'Jobs', path: '/jobs', icon: Play, keywords: 'runs history executions' },
-      { label: 'Templates', path: '/templates', icon: FileText, keywords: 'job template launch' },
-      { label: 'Workflows', path: '/workflows', icon: Workflow, keywords: 'dag pipeline' },
-      { label: 'Approvals', path: '/approvals', icon: ShieldCheck, keywords: 'workflow gates approve deny pending' },
-      { label: 'Inventories', path: '/inventories', icon: Server, keywords: 'hosts groups fleet' },
-    ]
-  },
-  {
-    group: 'Automate', items: [
-      { label: 'Schedules & Triggers', path: '/schedules', icon: CalendarClock, keywords: 'cron webhook event' },
-      { label: 'Execution Packs', path: '/execution-packs', icon: Package, keywords: 'runtime pack' },
-      { label: 'Projects', path: '/projects', icon: GitBranch, keywords: 'scm git playbooks' },
-    ]
-  },
-  {
-    group: 'Govern', items: [
-      { label: 'Organizations', path: '/organizations', icon: Building2, keywords: 'org rbac' },
-      { label: 'Users', path: '/users', icon: Users, keywords: 'people accounts' },
-      { label: 'Teams', path: '/teams', icon: UsersRound, keywords: 'groups' },
-      { label: 'Credentials', path: '/credentials', icon: KeyRound, keywords: 'secrets ssh vault' },
-      { label: 'API Tokens', path: '/tokens', icon: KeySquare, keywords: 'pat bearer' },
-      { label: 'Service Principals', path: '/service-principals', icon: Bot, keywords: 'application api delegated grants credentials' },
-      { label: 'Activity', path: '/activity', icon: ScrollText, keywords: 'audit log' },
-      { label: 'Settings', path: '/settings', icon: SettingsIcon, keywords: 'auth ldap config' },
-    ]
-  },
-];
-const ALL_FNS = FUNCTIONS.flatMap(g => g.items);
-
-type Breadcrumb = { label: string; path?: string };
-
-const detailLabel = (segment: string) => segment
-  .split('-')
-  .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-  .join(' ');
-
-// Routes carry useful task context that the old single section label discarded.
-// Keep the labels semantic rather than exposing raw URL syntax such as `org/2`.
-function breadcrumbsFor(pathname: string): Breadcrumb[] {
-  const segments = pathname.split('/').filter(Boolean);
-  const crumbs: Breadcrumb[] = [{ label: 'Dashboard', path: '/' }];
-  if (segments.length === 0) return [{ label: 'Dashboard' }];
-
-  const root = ALL_FNS.find(fn => fn.path === `/${segments[0]}`);
-  crumbs.push({ label: root?.label || detailLabel(segments[0]), path: `/${segments[0]}` });
-
-  if (segments[0] === 'jobs' && segments[1]) {
-    crumbs.push({ label: `Job #${segments[1]}` });
-    return crumbs;
-  }
-  if (segments[0] === 'workflows' && segments[1] === 'runs' && segments[2]) {
-    crumbs.push({ label: `Run #${segments[2]}` });
-    return crumbs;
-  }
-  if (segments[1] === 'org' && segments[2]) {
-    crumbs.push({ label: `Organization #${segments[2]}`, path: `/${segments[0]}/org/${segments[2]}` });
-    if (segments[3] === 'builder') {
-      crumbs.push({ label: segments[4] ? `Workflow #${segments[4]}` : 'New workflow' });
-    }
-    return crumbs;
-  }
-  if (segments[0] === 'settings' && segments[1] === 'auth-providers') {
-    crumbs.push({ label: 'Authentication providers' });
-    return crumbs;
-  }
-
-  segments.slice(1).forEach((segment, index) => {
-    const isLast = index === segments.length - 2;
-    crumbs.push({
-      label: detailLabel(segment),
-      path: isLast ? undefined : `/${segments.slice(0, index + 2).join('/')}`,
-    });
-  });
-  return crumbs;
-}
 
 // Concrete example actions the omnibar rotates through — real capabilities, not
 // fabricated data — so the closed bar advertises what the palette can do.
@@ -164,6 +77,7 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   }, []);
 
   const breadcrumbs = useMemo(() => breadcrumbsFor(location.pathname), [location.pathname]);
+  useEffect(() => { document.title = documentTitleFor(location.pathname); }, [location.pathname]);
 
   const close = useCallback(() => { setOpen(false); setQuery(''); setSel(0); }, []);
   const openPalette = useCallback(() => { setOpen(true); setTab('fns'); setQuery(''); setSel(0); }, []);
@@ -193,7 +107,7 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         .filter(j => !q || (j.name || '').toLowerCase().includes(q) || String(j.id).includes(q))
         .map(j => ({ key: `h${j.id}`, kind: 'history' as const, job: j }));
     }
-    return ALL_FNS
+    return ROUTES
       .filter(f => !q || f.label.toLowerCase().includes(q) || (f.keywords || '').includes(q))
       .map(f => ({ key: f.path, kind: 'fn' as const, fn: f }));
   }, [tab, query, history]);
@@ -316,7 +230,7 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             {/* results */}
             <div className="max-h-[52vh] overflow-auto p-1.5" style={{ overscrollBehavior: 'contain' }}>
               {tab === 'fns' && !query
-                ? FUNCTIONS.map(g => (
+                ? ROUTE_GROUPS.map(g => (
                   <div key={g.group}>
                     <div className="font-mono text-[9px] tracking-[0.14em] uppercase text-dim px-3 pt-2.5 pb-1.5">{g.group}</div>
                     {g.items.map(f => {
@@ -364,7 +278,7 @@ const Hint: React.FC<{ keys: string[]; label: string }> = ({ keys, label }) => (
   </span>
 );
 
-const FnRow: React.FC<{ fn: Fn; active: boolean; onClick: () => void; onHover: () => void }> = ({ fn, active, onClick, onHover }) => (
+const FnRow: React.FC<{ fn: RouteMetadata; active: boolean; onClick: () => void; onHover: () => void }> = ({ fn, active, onClick, onHover }) => (
   <button onClick={onClick} onMouseMove={onHover}
     className={`w-full flex items-center gap-3 h-[38px] px-3 rounded-lg text-left ${active ? 'bg-white/[.05]' : ''}`}>
     <fn.icon size={15} />
