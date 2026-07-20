@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Job, WorkflowRunSummary } from '../types';
 import { toast, confirmDialog } from '../components/ui/toast';
+import { EmptyState, LoadingState, Page, PageHeader, PageToolbar } from '../components/ui';
 import { ChevronDown, ChevronRight, FileText, GitFork, Search, Square } from 'lucide-react';
 
 const ACTIVE = ['pending', 'queued', 'running', 'waiting'];
@@ -150,17 +151,20 @@ const JobsPage = () => {
   ];
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
-      <header className="px-6 pt-5 pb-4 border-b border-line shrink-0">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-[19px] font-semibold tracking-tight">Jobs</h1>
-          <span className="font-mono text-xs text-dim tabular-nums">{executions.length} executions</span>
-          {counts.active > 0 && <span className="font-mono text-xs text-run tabular-nums">{counts.active} active</span>}
-        </div>
-        <p className="mt-1.5 text-[12.5px] text-mut max-w-[68ch]">Playbook and workflow executions, ordered by most recent activity.</p>
-      </header>
+    <Page layout="workspace" className="bg-bg text-ink">
+      <PageHeader
+        layout="workspace"
+        title="Jobs"
+        description="Playbook and workflow executions, ordered by most recent activity."
+        actions={(
+          <div className="flex items-center gap-3 font-mono text-xs tabular-nums">
+            <span className="text-dim">{executions.length} executions</span>
+            {counts.active > 0 && <span className="text-run">{counts.active} active</span>}
+          </div>
+        )}
+      />
 
-      <div className="flex flex-wrap items-center gap-2 px-6 py-3 border-b border-line shrink-0">
+      <PageToolbar className="mb-0 shrink-0 border-b border-line px-4 py-3 sm:px-6">
         <div className="flex items-center gap-1" aria-label="Filter jobs by status">
           {statusOptions.map(option => (
             <button
@@ -193,7 +197,7 @@ const JobsPage = () => {
             className="h-[30px] w-[250px] max-[700px]:w-full pl-8 pr-3 rounded-md bg-panel border border-line2 text-xs text-ink placeholder:text-mut hover:border-white/20 focus:border-acc/60"
           />
         </label>
-      </div>
+      </PageToolbar>
 
       <div className="grid grid-cols-[30px_minmax(220px,1fr)_120px_130px_150px_110px] items-center px-6 h-[34px] border-b border-line shrink-0 font-mono text-[9.5px] tracking-[0.1em] uppercase text-dim max-[820px]:grid-cols-[30px_minmax(0,1fr)_110px_90px]">
         <span aria-hidden="true" />
@@ -250,14 +254,17 @@ const JobsPage = () => {
         })}
 
         {!loading && filtered.length === 0 && (
-          <div className="px-6 py-12 text-center">
-            <p className="text-sm text-mut">No jobs match the current filters.</p>
-            <button onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setQuery(''); }} className="mt-3 text-[12px] font-medium text-acc hover:text-acc2">Clear filters</button>
+          <div className="p-6">
+            <EmptyState
+              title={executions.length === 0 ? 'No jobs yet' : 'No jobs match these filters'}
+              description={executions.length === 0 ? 'Launch an automation template to create the first execution.' : 'Change or clear the filters to see more executions.'}
+              action={executions.length > 0 ? <button onClick={() => { setStatusFilter('all'); setTypeFilter('all'); setQuery(''); }} className="text-[12px] font-medium text-acc hover:text-acc2">Clear filters</button> : undefined}
+            />
           </div>
         )}
-        {loading && executions.length === 0 && <div className="px-6 py-10 text-sm text-dim">Loading jobs…</div>}
+        {loading && executions.length === 0 && <LoadingState label="Loading jobs" />}
       </div>
-    </div>
+    </Page>
   );
 };
 
