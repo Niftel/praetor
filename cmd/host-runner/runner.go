@@ -341,6 +341,7 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 	start := time.Now()
 	err = cmd.Run()
 	duration := time.Since(start)
+	r.ingestDiagnostics(&req, filepath.Join(r.JobDir, "diagnostic-events.jsonl"))
 
 	close(stopWatch)
 	<-watchDone

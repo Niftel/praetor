@@ -28,6 +28,7 @@ func checkpointEnv(jobDir string) []string {
 		"ANSIBLE_CALLBACK_PLUGINS=" + pluginDir,
 		"ANSIBLE_CALLBACKS_ENABLED=praetor_checkpoint",
 		"PRAETOR_CHECKPOINT=" + filepath.Join(jobDir, "checkpoint.json"),
+		"PRAETOR_DIAGNOSTIC_EVENTS=" + filepath.Join(jobDir, "diagnostic-events.jsonl"),
 	}
 }
 
