@@ -7,7 +7,7 @@ import Modal from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { RefreshCw, Plus, ArrowLeft, GitBranch, ChevronDown, GitFork, Trash2 } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
-import { PageSpinner } from '../components/ui/PageSpinner';
+import { EmptyState, FormActions, FormErrorSummary, FormSection, LoadingState, Page, PageHeader, useDirtyFormGuard } from '../components/ui';
 
 const ago = (iso?: string): string => {
   if (!iso) return '—';
@@ -33,6 +33,8 @@ const ProjectsPage = () => {
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [newBranch, setNewBranch] = useState('main');
+  const [creating, setCreating] = useState(false);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
 
   const fetchProjects = async () => {
     try {
@@ -59,12 +61,23 @@ const ProjectsPage = () => {
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUrl || !newName) return;
+    if (creating) return;
+    const errors: string[] = [];
+    if (!newName.trim()) errors.push('Name is required.');
+    if (!newUrl.trim()) errors.push('SCM URL is required.');
+    setFormErrors(errors);
+    if (errors.length) return;
+    setCreating(true);
     try {
-      await api.createProject({ name: newName, scm_url: newUrl, scm_type: 'git', scm_branch: newBranch || 'main', organization_id: orgId });
-      setNewName(''); setNewUrl(''); setNewBranch('main'); setModalOpen(false); fetchProjects();
-    } catch (err: any) { toast.error(err.message || 'Failed to create project'); }
+      await api.createProject({ name: newName.trim(), scm_url: newUrl.trim(), scm_type: 'git', scm_branch: newBranch.trim() || 'main', organization_id: orgId });
+      setNewName(''); setNewUrl(''); setNewBranch('main'); setFormErrors([]); setModalOpen(false); fetchProjects();
+    } catch { setFormErrors(['Praetor could not create this project. No changes were saved.']); }
+    finally { setCreating(false); }
   };
+
+  const dirty = modalOpen && Boolean(newName || newUrl || (newBranch && newBranch !== 'main'));
+  const canDiscard = useDirtyFormGuard(dirty);
+  const closeForm = async () => { if (creating || !(await canDiscard())) return; setModalOpen(false); setFormErrors([]); setNewName(''); setNewUrl(''); setNewBranch('main'); };
 
   const remove = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
@@ -75,20 +88,18 @@ const ProjectsPage = () => {
   const usedBy = useMemo(() => (id: number) => templates.filter(t => t.project_id === id), [templates]);
   const shortUrl = (u: string) => u.replace(/^https?:\/\//, '').replace(/\.git$/, '');
 
-  if (loading) return <PageSpinner />;
+  if (loading) return <Page><LoadingState label="Loading projects" /></Page>;
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-bg text-ink overflow-auto scroll-tint">
-      <div className="max-w-[1060px] w-full mx-auto px-8 pt-7 pb-16">
-        <div className="flex items-start gap-4 mb-6">
-          <div>
-            <Link to="/projects" className="inline-flex items-center gap-1.5 text-[12px] text-mut hover:text-acc"><ArrowLeft size={14} /> Organizations</Link>
-            <h1 className="text-[22px] font-semibold tracking-tight mt-1.5">{orgName} · Projects</h1>
-            <p className="mt-2 text-[12.5px] text-mut max-w-[520px] leading-relaxed">Git repositories Praetor syncs — templates draw their playbooks from a project at a branch.</p>
-          </div>
-          <Button className="ml-auto mt-1" icon={<Plus size={15} />} onClick={() => setModalOpen(true)}>Add project</Button>
-        </div>
+    <Page>
+      <PageHeader
+        title={`${orgName} · Projects`}
+        description="Git repositories Praetor syncs — templates draw their playbooks from a project at a branch."
+        meta={<Link to="/projects" className="inline-flex items-center gap-1.5 rounded-sm text-mut hover:text-acc"><ArrowLeft size={12} /> Organizations</Link>}
+        actions={<Button icon={<Plus size={15} />} onClick={() => { setFormErrors([]); setModalOpen(true); }}>Add project</Button>}
+      />
 
+      {projects.length > 0 && (
         <div className="rounded-2xl border border-line overflow-hidden">
           {projects.map(p => {
             const open = openId === p.id;
@@ -138,19 +149,22 @@ const ProjectsPage = () => {
               </div>
             );
           })}
-          {projects.length === 0 && <p className="px-6 py-10 text-center text-sm text-dim">No projects in this organization yet. Add one.</p>}
         </div>
-      </div>
+      )}
+      {projects.length === 0 && <EmptyState title="No projects yet" description="Add a Git repository so templates can select playbooks from it." action={<Button icon={<Plus size={15} />} onClick={() => setModalOpen(true)}>Add project</Button>} />}
 
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={`New project in ${orgName}`}>
+      <Modal isOpen={modalOpen} onClose={() => { void closeForm(); }} title={`New project in ${orgName}`}>
         <form onSubmit={add} className="space-y-4">
-          <Input label="Name" placeholder="core-infra" value={newName} onChange={e => setNewName(e.target.value)} required />
-          <Input label="SCM URL" className="font-mono text-sm" placeholder="https://github.com/acme/core-infra.git" value={newUrl} onChange={e => setNewUrl(e.target.value)} required />
-          <Input label="Branch" className="font-mono text-sm" placeholder="main" value={newBranch} onChange={e => setNewBranch(e.target.value)} />
-          <div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button><Button type="submit">Add project</Button></div>
+          <FormErrorSummary errors={formErrors} />
+          <FormSection title="Source control" description="Praetor clones this repository when synchronizing project content.">
+            <Input label="Name" placeholder="core-infra" value={newName} error={formErrors.includes('Name is required.') ? 'Enter a project name.' : undefined} onChange={e => setNewName(e.target.value)} required />
+            <Input label="SCM URL" className="font-mono text-sm" placeholder="https://github.com/acme/core-infra.git" value={newUrl} error={formErrors.includes('SCM URL is required.') ? 'Enter the Git repository URL.' : undefined} onChange={e => setNewUrl(e.target.value)} required />
+            <Input label="Branch" className="font-mono text-sm" placeholder="main" value={newBranch} onChange={e => setNewBranch(e.target.value)} />
+          </FormSection>
+          <FormActions onCancel={() => { void closeForm(); }} submitting={creating} submitLabel="Add project" />
         </form>
       </Modal>
-    </div>
+    </Page>
   );
 };
 
