@@ -37,7 +37,7 @@ export function ResourcePage() {
 
 1. Framework foundation: page anatomy, state surfaces, exports, and component tests.
 2. Data framework: `DataTable` column definitions, controlled sorting, keyboard row activation, status/data/timestamp values, responsive overflow, and skeleton rows. Pagination and filtering remain page-owned so API behavior stays explicit.
-3. Form framework: field groups, validation summary, action footer, and dirty-state protection.
+3. Form framework: `FormSection`, focusable validation summaries, duplicate-submit-safe action footers, browser-exit and cancel dirty-state protection, plus write-only `SecretField` controls that cannot accept stored values.
 4. Navigation framework: route metadata drives breadcrumbs, titles, capability visibility, and command-palette entries.
 5. Migrate one representative page and visually validate desktop, narrow desktop, and mobile widths.
 6. Migrate remaining pages by resource family; remove superseded page-local patterns as each family lands.
