@@ -4,6 +4,7 @@ export { default as Card } from './Card';
 export { DataTable, type DataColumn, type SortDirection, type SortState } from './DataTable';
 export { DataValue, StatusValue, TimestampValue } from './DataValue';
 export { Input, Select, Textarea } from './Input';
+export { FormActions, FormErrorSummary, FormSection, SecretField, useDirtyFormGuard } from './Form';
 export { default as Modal } from './Modal';
 export { Page, PageHeader, PageSection, PageToolbar } from './Page';
 export { EmptyState, ErrorState, LoadingState, StatePanel } from './StatePanel';

@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Credential, CredentialType } from '../types';
 import { Input, Textarea, Select } from '../components/ui/Input';
+import { FormActions, FormErrorSummary, FormSection, SecretField, useDirtyFormGuard } from '../components/ui';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Key, Lock, Plus, ArrowLeft, Cloud, GitBranch, Shield, Server, Pencil, Trash2 } from 'lucide-react';
@@ -36,6 +37,9 @@ const CredentialsPage = () => {
   const [description, setDescription] = useState('');
   const [typeId, setTypeId] = useState<number | null>(null);
   const [formFields, setFormFields] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [initialForm, setInitialForm] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -71,22 +75,37 @@ const CredentialsPage = () => {
 
   const usedByCount = (id: number) => templates.filter(t => t.credential_id === id).length;
 
-  const openCreate = () => { setEditingId(null); setName(''); setDescription(''); setTypeId(credentialTypes[0]?.id ?? null); setFormFields({}); setModalOpen(true); };
-  const openEdit = (c: Credential) => { setEditingId(c.id); setName(c.name); setDescription(c.description || ''); setTypeId(c.credential_type_id); setFormFields({}); setModalOpen(true); };
+  const formSnapshot = (nextName = name, nextDescription = description, nextTypeId = typeId, nextFields = formFields) => JSON.stringify({ name: nextName, description: nextDescription, typeId: nextTypeId, fields: nextFields });
+  const beginForm = (nextEditingId: number | null, nextName: string, nextDescription: string, nextTypeId: number | null) => {
+    setEditingId(nextEditingId); setName(nextName); setDescription(nextDescription); setTypeId(nextTypeId); setFormFields({}); setFormErrors([]); setSaving(false);
+    setInitialForm(formSnapshot(nextName, nextDescription, nextTypeId, {})); setModalOpen(true);
+  };
+  const openCreate = () => beginForm(null, '', '', credentialTypes[0]?.id ?? null);
+  const openEdit = (c: Credential) => beginForm(c.id, c.name, c.description || '', c.credential_type_id);
+  const dirty = modalOpen && formSnapshot() !== initialForm;
+  const canDiscard = useDirtyFormGuard(dirty);
+  const closeForm = async () => { if (saving || !(await canDiscard())) return; setModalOpen(false); setFormErrors([]); };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !typeId) return;
+    if (saving) return;
+    const errors: string[] = [];
+    if (!name.trim()) errors.push('Name is required.');
+    if (!typeId) errors.push('Credential type is required.');
+    setFormErrors(errors);
+    if (errors.length) return;
     // Only send the fields the operator actually filled (secrets are write-only;
     // blank = keep existing on edit).
     const inputs: Record<string, string> = {};
     for (const [k, v] of Object.entries(formFields)) if (v.trim() !== '') inputs[k] = v;
     const body: any = { name: name.trim(), description: description || '', credential_type_id: typeId, organization_id: orgId, inputs };
+    setSaving(true);
     try {
       if (editingId) { const u = await api.updateCredential(editingId, body); setCredentials(cs => cs.map(c => c.id === editingId ? u : c)); toast.success('Credential updated'); }
       else { const c = await api.createCredential(body); setCredentials(cs => [...cs, c]); setSelectedId(c.id); toast.success('Credential created'); }
       setModalOpen(false);
-    } catch { toast.error(`Failed to ${editingId ? 'update' : 'create'} credential`); }
+    } catch { setFormErrors([`Praetor could not ${editingId ? 'update' : 'create'} this credential. No changes were saved.`]); }
+    finally { setSaving(false); }
   };
 
   const remove = async (id: number) => {
@@ -208,27 +227,31 @@ const CredentialsPage = () => {
         )}
       </div>
 
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? 'Edit credential' : `New credential in ${orgName}`}>
+      <Modal isOpen={modalOpen} onClose={() => { void closeForm(); }} title={editingId ? 'Edit credential' : `New credential in ${orgName}`}>
         <form onSubmit={save} className="space-y-4">
-          <Input label="Name" required value={name} onChange={e => setName(e.target.value)} />
-          <Input label="Description" value={description} onChange={e => setDescription(e.target.value)} />
-          <Select label="Type" value={typeId || ''} disabled={!!editingId} onChange={e => { setTypeId(Number(e.target.value)); setFormFields({}); }}>
-            {credentialTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </Select>
-          <div className="pt-2 border-t border-line space-y-4">
-            {editingId && <p className="text-[11px] text-dim -mb-1">Leave a field blank to keep its current value.</p>}
+          <FormErrorSummary errors={formErrors} />
+          <FormSection>
+            <Input label="Name" required value={name} error={formErrors.includes('Name is required.') ? 'Enter a credential name.' : undefined} onChange={e => setName(e.target.value)} />
+            <Input label="Description" value={description} onChange={e => setDescription(e.target.value)} />
+            <Select label="Type" value={typeId || ''} disabled={!!editingId} error={formErrors.includes('Credential type is required.') ? 'Choose a credential type.' : undefined} onChange={e => { setTypeId(Number(e.target.value)); setFormFields({}); }}>
+              {credentialTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </Select>
+          </FormSection>
+          <FormSection title="Credential inputs" description={editingId ? 'Stored secrets remain sealed. Enter a replacement only when you intend to rotate a value.' : 'Secret values are encrypted and cannot be retrieved after saving.'}>
             {fieldsOf(modalType).map(f => {
               const isTextarea = f.type === 'textarea' || f.multiline;
               const label = f.label || f.id;
+              const value = formFields[f.id] || '';
+              const onChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setFormFields({ ...formFields, [f.id]: e.target.value });
+              if (f.secret) return <SecretField key={f.id} label={label} multiline={isTextarea} placeholder={isTextarea ? '-----BEGIN OPENSSH PRIVATE KEY-----\n...' : undefined} value={value} onChange={onChange} />;
               return isTextarea ? (
-                <Textarea key={f.id} label={label} rows={6} placeholder={f.secret ? '-----BEGIN OPENSSH PRIVATE KEY-----\n...' : ''} className="font-mono text-xs"
-                  value={formFields[f.id] || ''} onChange={e => setFormFields({ ...formFields, [f.id]: e.target.value })} />
+                <Textarea key={f.id} label={label} rows={6} className="font-mono text-xs" value={value} onChange={onChange} />
               ) : (
-                <Input key={f.id} label={label} type={f.secret ? 'password' : 'text'} value={formFields[f.id] || ''} onChange={e => setFormFields({ ...formFields, [f.id]: e.target.value })} />
+                <Input key={f.id} label={label} value={value} onChange={onChange} />
               );
             })}
-          </div>
-          <div className="mt-5 flex justify-end gap-3 pt-4"><Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button><Button type="submit">Save</Button></div>
+          </FormSection>
+          <FormActions onCancel={() => { void closeForm(); }} submitting={saving} submitLabel="Save credential" />
         </form>
       </Modal>
     </div>
