@@ -1,32 +1,39 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Shell from './components/Shell';
 import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
-import JobsPage from './pages/JobsPage';
-import JobDetailPage from './pages/JobDetailPage';
-import TemplatesPage from './pages/TemplatesPage';
-import WorkflowsPage from './pages/WorkflowsPage';
-import WorkflowBuilderPage from './pages/WorkflowBuilderPage';
-import WorkflowRunPage from './pages/WorkflowRunPage';
-import ProjectsPage from './pages/ProjectsPage';
-import InventoriesPage from './pages/InventoriesPage';
-import CredentialsPage from './pages/CredentialsPage';
-import ExecutionPacksPage from './pages/ExecutionPacksPage';
-import TokensPage from './pages/TokensPage';
-import ServicePrincipalsPage from './pages/ServicePrincipalsPage';
-import SchedulesPage from './pages/SchedulesPage';
-import UsersPage from './pages/UsersPage';
-import TeamsPage from './pages/TeamsPage';
-import ActivityPage from './pages/ActivityPage';
-import OrganizationsPage from './pages/OrganizationsPage';
-import AuthProvidersPage from './pages/AuthProvidersPage';
-import SettingsPage from './pages/SettingsPage';
-import ApprovalsPage from './pages/ApprovalsPage';
-import { ProjectsLanding, InventoriesLanding, TemplatesLanding, WorkflowsLanding, CredentialsLanding, SchedulesLanding } from './pages/landings';
-import WorkflowDagPreview from './pages/WorkflowDagPreview';
 import { ToastHost } from './components/ui/toast';
+import { LoadingState } from './components/ui';
 import { getAuthToken, removeAuthToken } from './services/api';
+
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const JobsPage = lazy(() => import('./pages/JobsPage'));
+const JobDetailPage = lazy(() => import('./pages/JobDetailPage'));
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
+const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'));
+const WorkflowBuilderPage = lazy(() => import('./pages/WorkflowBuilderPage'));
+const WorkflowRunPage = lazy(() => import('./pages/WorkflowRunPage'));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
+const InventoriesPage = lazy(() => import('./pages/InventoriesPage'));
+const CredentialsPage = lazy(() => import('./pages/CredentialsPage'));
+const ExecutionPacksPage = lazy(() => import('./pages/ExecutionPacksPage'));
+const TokensPage = lazy(() => import('./pages/TokensPage'));
+const ServicePrincipalsPage = lazy(() => import('./pages/ServicePrincipalsPage'));
+const SchedulesPage = lazy(() => import('./pages/SchedulesPage'));
+const UsersPage = lazy(() => import('./pages/UsersPage'));
+const TeamsPage = lazy(() => import('./pages/TeamsPage'));
+const ActivityPage = lazy(() => import('./pages/ActivityPage'));
+const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage'));
+const AuthProvidersPage = lazy(() => import('./pages/AuthProvidersPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
+const WorkflowDagPreview = lazy(() => import('./pages/WorkflowDagPreview'));
+const ProjectsLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.ProjectsLanding })));
+const InventoriesLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.InventoriesLanding })));
+const TemplatesLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.TemplatesLanding })));
+const WorkflowsLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.WorkflowsLanding })));
+const CredentialsLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.CredentialsLanding })));
+const SchedulesLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.SchedulesLanding })));
 
 const App = () => {
   // Check if we have an existing token on initialization
@@ -50,7 +57,14 @@ const App = () => {
         {/* Dev-only visual check for WorkflowDag — no auth, no backend. Stripped
             from production builds via import.meta.env.DEV. */}
         {import.meta.env.DEV && (
-          <Route path="/_preview/workflow-dag" element={<WorkflowDagPreview />} />
+          <Route
+            path="/_preview/workflow-dag"
+            element={(
+              <Suspense fallback={<LoadingState label="Loading preview" />}>
+                <WorkflowDagPreview />
+              </Suspense>
+            )}
+          />
         )}
 
         <Route

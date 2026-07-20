@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { api, getCurrentUser } from '../services/api';
 import { Search, LogOut, ShieldCheck, ChevronRight } from 'lucide-react';
 import RouteErrorBoundary from './RouteErrorBoundary';
 import { breadcrumbsFor, documentTitleFor, ROUTES, ROUTE_GROUPS, type RouteMetadata } from '../lib/routeMetadata';
+import { LoadingState } from './ui';
 
 // The command palette IS the control panel: no persistent sidebar. ⌘K opens one
 // overlay with two tabs — History (recent runs) and All functions (the capability
@@ -189,7 +190,9 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       {/* content */}
       <div className="flex-1 min-h-0 overflow-auto scroll-tint" style={{ overscrollBehavior: 'contain' }}>
         <RouteErrorBoundary pathname={location.pathname} onDashboard={() => navigate('/')}>
-          <Outlet />
+          <Suspense fallback={<LoadingState label="Loading page" />}>
+            <Outlet />
+          </Suspense>
         </RouteErrorBoundary>
       </div>
 

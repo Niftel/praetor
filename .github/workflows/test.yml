@@ -55,7 +55,7 @@ jobs:
 
       - name: UI production build
         working-directory: web
-        run: npm run build
+        run: npm run build:check
 
   database-compatibility:
     runs-on: ubuntu-latest
