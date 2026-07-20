@@ -58,6 +58,7 @@ const TemplatesPage = () => {
   const [executionPacks, setExecutionPacks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  const [catalogType, setCatalogType] = useState<'all' | 'job' | 'workflow'>('all');
 
   const [editing, setEditing] = useState<Editing>(null);
   const [formData, setFormData] = useState<Partial<Template>>({});
@@ -215,9 +216,9 @@ const TemplatesPage = () => {
     return [
       ...templates.map(template => ({ key: `job-${template.id}`, kind: 'job' as const, id: template.id, name: template.name, description: template.playbook || 'No playbook selected', item: template, latest: latestJob(template) })),
       ...workflows.map(workflow => ({ key: `workflow-${workflow.id}`, kind: 'workflow' as const, id: workflow.id, name: workflow.name, description: workflow.nodes?.length ? `${workflow.nodes.length} workflow nodes` : 'Workflow template', item: workflow, latest: latestWorkflow(workflow) })),
-    ].filter(item => !q || item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q))
+    ].filter(item => (catalogType === 'all' || item.kind === catalogType) && (!q || item.name.toLowerCase().includes(q) || item.description.toLowerCase().includes(q)))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [templates, workflows, jobs, workflowRuns, filter]);
+  }, [templates, workflows, jobs, workflowRuns, filter, catalogType]);
 
   const set = (patch: Partial<Template>) => setFormData(f => ({ ...f, ...patch }));
 
@@ -225,10 +226,12 @@ const TemplatesPage = () => {
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
-      <div className="flex items-center gap-4 h-[54px] px-6 border-b border-line shrink-0">
+      <div className="flex items-center gap-4 min-h-[68px] px-6 py-3 border-b border-line shrink-0">
         <Link to="/templates" className="w-7 h-7 grid place-items-center rounded-md border border-line2 text-mut hover:text-ink hover:border-white/20 transition-colors" title="All organizations"><ArrowLeft size={15} /></Link>
-        <span className="text-[15px] font-semibold tracking-tight">Automation templates</span>
-        <span className="font-mono text-[11px] text-dim">{orgName} · {templates.length + workflows.length} templates</span>
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-3"><h1 className="text-[19px] font-semibold tracking-tight">Automation templates</h1><span className="font-mono text-[11px] text-dim">{templates.length + workflows.length} total</span></div>
+          <p className="text-[11.5px] text-mut mt-0.5">{orgName} · reusable definitions for playbook and workflow execution</p>
+        </div>
       </div>
 
       {editing === null ? (
@@ -239,9 +242,18 @@ const TemplatesPage = () => {
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none" />
               <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search templates by name or content" className="h-[30px] w-full pl-8 pr-3 rounded-md bg-panel border border-line2 text-xs text-ink placeholder:text-mut hover:border-white/20 focus:border-acc/60" />
             </label>
+            <div className="flex items-center gap-1 ml-1" aria-label="Filter automation templates by type">
+              {([
+                ['all', 'All', templates.length + workflows.length],
+                ['job', 'Job templates', templates.length],
+                ['workflow', 'Workflows', workflows.length],
+              ] as const).map(([key, label, count]) => (
+                <button key={key} onClick={() => setCatalogType(key)} aria-pressed={catalogType === key} className={`h-[30px] px-2.5 rounded-md border font-mono text-[10.5px] transition-colors ${catalogType === key ? 'border-line2 bg-white/5 text-ink' : 'border-transparent text-mut hover:text-ink'}`}>{label} <span className="ml-1 text-dim tabular-nums">{count}</span></button>
+              ))}
+            </div>
             <div className="ml-auto flex items-center gap-2 max-[700px]:ml-0">
-              <button onClick={() => navigate(`/workflows/org/${orgId}/builder`)} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-ink hover:border-white/20 inline-flex items-center gap-1.5"><GitFork size={12} /> New workflow template</button>
-              <button onClick={startNew} className="h-8 px-3 rounded-md bg-acc text-[#04211d] text-[11px] font-semibold hover:bg-acc2 inline-flex items-center gap-1.5"><Plus size={13} /> New job template</button>
+              <button onClick={() => navigate(`/workflows/org/${orgId}/builder`)} className="h-8 px-3 rounded-md text-[11px] font-medium text-mut hover:text-ink hover:bg-white/5 inline-flex items-center gap-1.5"><GitFork size={12} /> New workflow</button>
+              <button onClick={startNew} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-ink hover:border-white/20 inline-flex items-center gap-1.5"><Plus size={13} /> New job template</button>
             </div>
           </div>
 
@@ -256,17 +268,17 @@ const TemplatesPage = () => {
               const isWorkflow = entry.kind === 'workflow';
               const TypeIcon = isWorkflow ? GitFork : FileText;
               return (
-                <div key={entry.key} className="grid grid-cols-[minmax(260px,1fr)_130px_160px_190px_170px] items-center min-h-[54px] px-6 border-b border-line hover:bg-white/[0.025] max-[900px]:grid-cols-[minmax(220px,1fr)_130px_150px]">
+                <div key={entry.key} className="group grid grid-cols-[minmax(260px,1fr)_130px_160px_190px_170px] items-center min-h-[58px] px-6 border-b border-line hover:bg-white/[0.025] max-[900px]:grid-cols-[minmax(220px,1fr)_130px_150px]">
                   <button onClick={() => isWorkflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="min-w-0 text-left pr-4 group">
                     <span className="block text-[13px] font-medium text-ink2 truncate group-hover:text-acc">{entry.name}</span>
                     <span className="block font-mono text-[10.5px] text-dim mt-0.5 truncate">{entry.description}</span>
                   </button>
                   <span className="inline-flex items-center gap-1.5 text-[11px] text-mut"><TypeIcon size={12} /> {isWorkflow ? 'Workflow' : 'Job template'}</span>
-                  <span className={`text-[11px] ${status === 'successful' ? 'text-ok' : status === 'failed' || status === 'error' ? 'text-err' : status === 'running' ? 'text-run' : 'text-mut'}`}>{status}</span>
+                  <span className={`inline-flex items-center gap-2 text-[11px] ${status === 'successful' ? 'text-ok' : status === 'failed' || status === 'error' ? 'text-err' : status === 'running' ? 'text-run' : 'text-mut'}`}><span className={`w-1.5 h-1.5 rounded-full ${status === 'successful' ? 'bg-ok' : status === 'failed' || status === 'error' ? 'bg-err' : status === 'running' ? 'bg-run' : 'bg-dim'}`} />{status}</span>
                   <span className="font-mono text-[11px] text-mut tabular-nums max-[900px]:hidden">{latestDate}</span>
                   <div className="flex justify-end gap-1.5">
-                    <button onClick={() => isWorkflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="h-8 px-2.5 rounded-md text-[11px] text-mut hover:text-ink hover:bg-white/5 inline-flex items-center gap-1.5"><Pencil size={12} /> Edit</button>
-                    <button onClick={() => isWorkflow ? setLaunchWorkflow(entry.item as Workflow) : openLaunch(entry.item as Template)} className="h-8 px-3 rounded-md bg-acc/90 text-[#04211d] text-[11px] font-semibold hover:bg-acc inline-flex items-center gap-1.5"><Play size={12} /> Launch</button>
+                    <button onClick={() => isWorkflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="h-8 px-2.5 rounded-md text-[11px] text-dim hover:text-ink hover:bg-white/5 inline-flex items-center gap-1.5"><Pencil size={12} /> Edit</button>
+                    <button onClick={() => isWorkflow ? setLaunchWorkflow(entry.item as Workflow) : openLaunch(entry.item as Template)} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-acc hover:border-acc/40 hover:bg-acc/[0.05] inline-flex items-center gap-1.5"><Play size={12} /> Launch</button>
                   </div>
                 </div>
               );

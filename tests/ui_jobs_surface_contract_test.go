@@ -53,7 +53,7 @@ func TestTemplatesSurfaceUsesUnifiedAutomationCatalog(t *testing.T) {
 		"Workflow",
 		"Last status",
 		"Last run",
-		"New workflow template",
+		"New workflow",
 		"New job template",
 		"setLaunchWorkflow",
 		"openLaunch",
