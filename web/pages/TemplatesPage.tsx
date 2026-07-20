@@ -7,8 +7,8 @@ import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Plus, Search, Check, Trash2, Play, ArrowLeft, GitFork, FileText, Pencil } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
-import { PageSpinner } from '../components/ui/PageSpinner';
 import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
+import { DataTable, type DataColumn, FormErrorSummary, FormSection, LoadingState, Page, PageHeader, PageToolbar, StatusValue, TimestampValue } from '../components/ui';
 
 type Editing = number | 'new' | null;
 
@@ -38,10 +38,6 @@ const Row: React.FC<{ label: string; hint?: string; top?: boolean; children: Rea
 
 const uinp = 'w-full max-w-[320px] bg-transparent border-b border-line2 focus:border-acc hover:border-mut text-ink font-mono text-[13px] py-1.5 outline-none placeholder:text-faint';
 const usel = 'min-w-[240px] max-w-[320px] bg-transparent border-b border-line2 focus:border-acc hover:border-mut text-ink font-mono text-[13px] py-1.5 outline-none';
-
-const SLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">{children}</div>
-);
 
 const TemplatesPage = () => {
   const navigate = useNavigate();
@@ -222,21 +218,50 @@ const TemplatesPage = () => {
 
   const set = (patch: Partial<Template>) => setFormData(f => ({ ...f, ...patch }));
 
-  if (loading) return <PageSpinner />;
+  const catalogColumns: DataColumn<(typeof catalog)[number]>[] = [
+    {
+      id: 'name', header: 'Name', cell: entry => {
+        const workflow = entry.kind === 'workflow';
+        return <button onClick={() => workflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="group min-w-0 max-w-[520px] text-left"><span className="block truncate text-[13px] font-medium text-ink2 group-hover:text-acc">{entry.name}</span><span className="mt-0.5 block truncate font-mono text-[10.5px] text-dim">{entry.description}</span></button>;
+      },
+    },
+    {
+      id: 'type', header: 'Type', headerClassName: 'w-[140px]', cell: entry => {
+        const Icon = entry.kind === 'workflow' ? GitFork : FileText;
+        return <span className="inline-flex items-center gap-1.5 text-[11px] text-mut"><Icon size={12} />{entry.kind === 'workflow' ? 'Workflow' : 'Job template'}</span>;
+      },
+    },
+    {
+      id: 'status', header: 'Last status', headerClassName: 'w-[150px]', cell: entry => {
+        const status = entry.latest?.status || 'never run';
+        const tone = status === 'successful' ? 'success' : status === 'failed' || status === 'error' ? 'error' : status === 'running' ? 'info' : 'neutral';
+        return <StatusValue tone={tone} live={status === 'running'}>{status}</StatusValue>;
+      },
+    },
+    { id: 'last-run', header: 'Last run', headerClassName: 'w-[190px]', cell: entry => <TimestampValue value={entry.latest?.created_at} fallback="Never run" className="text-[11px]" /> },
+    {
+      id: 'actions', header: 'Actions', headerClassName: 'w-[170px] text-right', cellClassName: 'text-right', cell: entry => {
+        const workflow = entry.kind === 'workflow';
+        return <div className="flex justify-end gap-1.5"><Button size="sm" variant="ghost" icon={<Pencil size={12} />} onClick={() => workflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)}>Edit</Button><Button size="sm" variant="secondary" icon={<Play size={12} />} onClick={() => workflow ? setLaunchWorkflow(entry.item as Workflow) : openLaunch(entry.item as Template)}>Launch</Button></div>;
+      },
+    },
+  ];
+
+  if (loading) return <Page layout="workspace"><LoadingState label="Loading automation templates" /></Page>;
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
-      <div className="flex items-center gap-4 min-h-[68px] px-6 py-3 border-b border-line shrink-0">
-        <Link to="/templates" className="w-7 h-7 grid place-items-center rounded-md border border-line2 text-mut hover:text-ink hover:border-white/20 transition-colors" title="All organizations"><ArrowLeft size={15} /></Link>
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-3"><h1 className="text-[19px] font-semibold tracking-tight">Automation templates</h1><span className="font-mono text-[11px] text-dim">{templates.length + workflows.length} total</span></div>
-          <p className="text-[11.5px] text-mut mt-0.5">{orgName} · reusable definitions for playbook and workflow execution</p>
-        </div>
-      </div>
+    <Page layout="workspace" className="bg-bg text-ink">
+      <PageHeader
+        layout="workspace"
+        title="Automation templates"
+        description={`${orgName} · reusable definitions for playbook and workflow execution`}
+        meta={<Link to="/templates" className="inline-flex items-center gap-1.5 rounded-sm text-mut transition-colors hover:text-acc"><ArrowLeft size={12} /> All organizations</Link>}
+        actions={<span className="font-mono text-[11px] tabular-nums text-dim">{templates.length + workflows.length} total</span>}
+      />
 
       {editing === null ? (
         <div className="flex-1 min-h-0 flex flex-col">
-          <div className="flex flex-wrap items-center gap-2 px-6 py-3 border-b border-line shrink-0">
+          <PageToolbar className="mb-0 shrink-0 border-b border-line px-4 py-3 sm:px-6">
             <label className="relative min-w-[260px] max-[700px]:w-full">
               <span className="sr-only">Search automation templates</span>
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none" />
@@ -255,35 +280,9 @@ const TemplatesPage = () => {
               <button onClick={() => navigate(`/workflows/org/${orgId}/builder`)} className="h-8 px-3 rounded-md text-[11px] font-medium text-mut hover:text-ink hover:bg-white/5 inline-flex items-center gap-1.5"><GitFork size={12} /> New workflow</button>
               <button onClick={startNew} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-ink hover:border-white/20 inline-flex items-center gap-1.5"><Plus size={13} /> New job template</button>
             </div>
-          </div>
-
-          <div className="grid grid-cols-[minmax(260px,1fr)_130px_160px_190px_170px] items-center h-[34px] px-6 border-b border-line font-mono text-[9.5px] tracking-[0.1em] uppercase text-dim max-[900px]:grid-cols-[minmax(220px,1fr)_130px_150px]">
-            <span>Name</span><span>Type</span><span>Last status</span><span className="max-[900px]:hidden">Last run</span><span className="text-right">Actions</span>
-          </div>
+          </PageToolbar>
           <div className="flex-1 overflow-auto scroll-tint">
-            {catalog.map(entry => {
-              const latest = entry.latest as Job | WorkflowRunSummary | undefined;
-              const latestDate = latest?.created_at ? new Date(latest.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Never run';
-              const status = latest?.status || 'never run';
-              const isWorkflow = entry.kind === 'workflow';
-              const TypeIcon = isWorkflow ? GitFork : FileText;
-              return (
-                <div key={entry.key} className="group grid grid-cols-[minmax(260px,1fr)_130px_160px_190px_170px] items-center min-h-[58px] px-6 border-b border-line hover:bg-white/[0.025] max-[900px]:grid-cols-[minmax(220px,1fr)_130px_150px]">
-                  <button onClick={() => isWorkflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="min-w-0 text-left pr-4 group">
-                    <span className="block text-[13px] font-medium text-ink2 truncate group-hover:text-acc">{entry.name}</span>
-                    <span className="block font-mono text-[10.5px] text-dim mt-0.5 truncate">{entry.description}</span>
-                  </button>
-                  <span className="inline-flex items-center gap-1.5 text-[11px] text-mut"><TypeIcon size={12} /> {isWorkflow ? 'Workflow' : 'Job template'}</span>
-                  <span className={`inline-flex items-center gap-2 text-[11px] ${status === 'successful' ? 'text-ok' : status === 'failed' || status === 'error' ? 'text-err' : status === 'running' ? 'text-run' : 'text-mut'}`}><span className={`w-1.5 h-1.5 rounded-full ${status === 'successful' ? 'bg-ok' : status === 'failed' || status === 'error' ? 'bg-err' : status === 'running' ? 'bg-run' : 'bg-dim'}`} />{status}</span>
-                  <span className="font-mono text-[11px] text-mut tabular-nums max-[900px]:hidden">{latestDate}</span>
-                  <div className="flex justify-end gap-1.5">
-                    <button onClick={() => isWorkflow ? navigate(`/workflows/org/${orgId}/builder/${entry.id}`) : startEdit(entry.item as Template)} className="h-8 px-2.5 rounded-md text-[11px] text-dim hover:text-ink hover:bg-white/5 inline-flex items-center gap-1.5"><Pencil size={12} /> Edit</button>
-                    <button onClick={() => isWorkflow ? setLaunchWorkflow(entry.item as Workflow) : openLaunch(entry.item as Template)} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-acc hover:border-acc/40 hover:bg-acc/[0.05] inline-flex items-center gap-1.5"><Play size={12} /> Launch</button>
-                  </div>
-                </div>
-              );
-            })}
-            {catalog.length === 0 && <div className="px-6 py-12 text-center text-sm text-mut">No automation templates match this search.</div>}
+            <DataTable columns={catalogColumns} rows={catalog} rowKey={entry => entry.key} emptyTitle={filter ? 'No matching automation templates' : 'No automation templates yet'} emptyDescription={filter ? 'Change or clear the search and type filter.' : 'Create a job template or workflow to make automation reusable.'} className="border-t-0" />
           </div>
         </div>
       ) : (
@@ -337,8 +336,7 @@ const TemplatesPage = () => {
             <div className="flex-1 overflow-auto scroll-tint px-10 py-6 max-[820px]:px-5">
               <div className="max-w-[640px]">
                 {/* What it runs */}
-                <div>
-                  <SLabel>What it runs</SLabel>
+                <FormSection title="What it runs">
                   <Row label="Project">
                     <select className={usel} value={formData.project_id || ''} onChange={e => set({ project_id: Number(e.target.value) })}>
                       <option value="" className="bg-panel">Select project</option>
@@ -366,11 +364,10 @@ const TemplatesPage = () => {
                       {executionPacks.map(p => <option key={p.id} value={p.id} className="bg-panel">{p.name}</option>)}
                     </select>
                   </Row>
-                </div>
+                </FormSection>
 
                 {/* Defaults */}
-                <div className="mt-8 pt-6 border-t border-line">
-                  <SLabel>Defaults</SLabel>
+                <FormSection title="Defaults" className="mt-8">
                   <Row label="Variables" hint="applied unless overridden at launch" top>
                     <textarea className="w-full max-w-[420px] rounded-lg border border-line bg-[#070809] p-3 font-mono text-[12.5px] leading-relaxed text-ink2 outline-none focus:border-acc/50" rows={4}
                       placeholder={'{\n  "app_env": "production"\n}'} value={varsText} onChange={e => setVarsText(e.target.value)} />
@@ -380,11 +377,10 @@ const TemplatesPage = () => {
                   </Row>
                   <TogRow title="Use fact cache" sub="persist & reuse gathered facts across runs" on={!!formData.use_fact_cache} onChange={v => set({ use_fact_cache: v })} />
                   <TogRow title="Allow simultaneous runs" sub="off = a launch is refused while a run is active" on={!!formData.allow_simultaneous} onChange={v => set({ allow_simultaneous: v })} />
-                </div>
+                </FormSection>
 
                 {/* Prompt on launch */}
-                <div className="mt-8 pt-6 border-t border-line">
-                  <SLabel>Prompt on launch</SLabel>
+                <FormSection title="Prompt on launch" className="mt-8">
                   <TogRow title="Ask for variables" sub="let the operator pass extra_vars at launch" on={!!formData.ask_variables_on_launch} onChange={v => set({ ask_variables_on_launch: v })} />
                   <TogRow title="Ask for limit" sub="let the operator narrow the host pattern" on={!!formData.ask_limit_on_launch} onChange={v => set({ ask_limit_on_launch: v })} />
                   <TogRow title="Enable survey" sub="collect structured answers before the run" on={!!formData.survey_enabled} onChange={v => set({ survey_enabled: v })} />
@@ -415,12 +411,11 @@ const TemplatesPage = () => {
                       <button type="button" className="flex items-center gap-2 font-mono text-[12px] text-dim hover:text-acc" onClick={() => setSurvey([...survey, blankQuestion()])}><Plus size={13} /> add question</button>
                     </div>
                   )}
-                </div>
+                </FormSection>
 
                 {/* Notifications (edit only) */}
                 {typeof editing === 'number' && (
-                  <div className="mt-8 pt-6 border-t border-line">
-                    <SLabel>Notifications</SLabel>
+                  <FormSection title="Notifications" className="mt-8">
                     {notifTargets.length === 0 && <p className="font-mono text-[11px] text-dim mb-2">No notification targets in this org yet — add one below.</p>}
                     {notifTargets.map(nt => (
                       <div key={nt.id} className="flex items-center gap-3 py-1.5 text-[13px]">
@@ -443,11 +438,11 @@ const TemplatesPage = () => {
                       ))}
                       <Button size="sm" variant="secondary" type="button" onClick={addNotifTarget}>Add</Button>
                     </div>
-                  </div>
+                  </FormSection>
                 )}
 
                 {/* Webhook trigger */}
-                <div className="mt-8 pt-6 border-t border-line">
+                <FormSection title="Webhook trigger" className="mt-8">
                   <TogRow title="Enable webhook trigger" sub="launch this template from an inbound Git webhook" on={!!formData.webhook_enabled} onChange={v => set({ webhook_enabled: v })} />
                   {formData.webhook_enabled && (
                     <div className="mt-2 space-y-2">
@@ -464,9 +459,9 @@ const TemplatesPage = () => {
                       ) : <p className="font-mono text-[11px] text-dim">Save the template to generate the webhook URL and secret.</p>}
                     </div>
                   )}
-                </div>
+                </FormSection>
 
-                {formMsg && <p className="mt-5 text-sm text-err">{formMsg}</p>}
+                <div className="mt-5"><FormErrorSummary errors={formMsg ? [formMsg] : []} /></div>
                 {typeof editing === 'number' && (
                   <div className="mt-8 pt-6 border-t border-line">
                     <button onClick={() => remove(editing)} className="flex items-center gap-2 text-[12.5px] text-err/90 hover:text-err"><Trash2 size={14} /> Delete template</button>
@@ -508,7 +503,7 @@ const TemplatesPage = () => {
         onClose={() => setLaunchWorkflow(null)}
         onLaunch={doLaunchWorkflow}
       />
-    </div>
+    </Page>
   );
 };
 
