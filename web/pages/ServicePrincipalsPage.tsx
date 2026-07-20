@@ -5,7 +5,7 @@ import Modal from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { PageSpinner } from '../components/ui/PageSpinner';
 import { confirmDialog, toast } from '../components/ui/toast';
-import { api } from '../services/api';
+import { api, unwrap } from '../services/api';
 import type { DelegatedLaunchGrant, Group, Host, Inventory, ServiceCredential, ServicePrincipal, Team } from '../types';
 
 type Named = { id: number; name: string; organization_id?: number };
@@ -59,8 +59,9 @@ const ServicePrincipalsPage: React.FC = () => {
 
   useEffect(() => {
     api.getOrganizations().then((rows: Named[]) => {
-      setOrganizations(rows || []);
-      if (rows?.length) setOrgId(rows[0].id);
+      const organizations = unwrap<Named>(rows);
+      setOrganizations(organizations);
+      if (organizations.length) setOrgId(organizations[0].id);
     }).catch(e => toast.error(e.message || 'Failed to load organizations')).finally(() => setLoading(false));
   }, []);
 
@@ -69,11 +70,11 @@ const ServicePrincipalsPage: React.FC = () => {
     setLoading(true);
     Promise.all([api.getServicePrincipals(orgId), api.getWorkflows(), api.getInventories(), api.getOrganizationTeams(orgId)])
       .then(([ps, ws, invs, ts]) => {
-        const orgPrincipals = ps || [];
+        const orgPrincipals = unwrap<ServicePrincipal>(ps);
         setPrincipals(orgPrincipals);
-        setWorkflows((ws || []).filter((w: Named) => w.organization_id === orgId));
-        setInventories((invs || []).filter((i: Inventory) => i.organization_id === orgId));
-        setTeams(ts || []);
+        setWorkflows(unwrap<Named>(ws).filter(w => w.organization_id === orgId));
+        setInventories(unwrap<Inventory>(invs).filter(i => i.organization_id === orgId));
+        setTeams(unwrap<Team>(ts));
         setSelectedId(current => orgPrincipals.some((p: ServicePrincipal) => p.id === current) ? current : orgPrincipals[0]?.id || null);
       })
       .catch(e => { setPrincipals([]); toast.error(e.message || 'You cannot administer service principals in this organization'); })
@@ -84,7 +85,13 @@ const ServicePrincipalsPage: React.FC = () => {
     setDetailLoading(true);
     try {
       const [cs, gs] = await Promise.all([api.getServiceCredentials(id), api.getDelegatedLaunchGrants(id)]);
-      setCredentials(cs || []); setGrants(gs || []);
+      setCredentials(unwrap<ServiceCredential>(cs));
+      setGrants(unwrap<DelegatedLaunchGrant>(gs).map(grant => ({
+        ...grant,
+        allowed_host_ids: Array.isArray(grant.allowed_host_ids) ? grant.allowed_host_ids : [],
+        allowed_group_ids: Array.isArray(grant.allowed_group_ids) ? grant.allowed_group_ids : [],
+        allowed_extra_var_keys: Array.isArray(grant.allowed_extra_var_keys) ? grant.allowed_extra_var_keys : [],
+      })));
     } catch (e: any) { toast.error(e.message || 'Failed to load service principal'); }
     finally { setDetailLoading(false); }
   };
@@ -237,7 +244,7 @@ const ServicePrincipalsPage: React.FC = () => {
                 <DataHeader columns="grid-cols-[1fr_1fr_170px_125px]"><span>Workflow</span><span>Inventory scope</span><span>Validity</span><span className="text-right">Actions</span></DataHeader>
                 {grants.map(g => <div key={g.id} className="grid grid-cols-[1fr_1fr_170px_125px] gap-3 items-center min-h-[62px] px-4 border-b border-line last:border-0 max-[900px]:grid-cols-[1fr_1fr_115px]">
                   <div><span className="block text-[12.5px] font-medium">{names.workflows.get(g.workflow_template_id) || `Workflow ${g.workflow_template_id}`}</span><span className="font-mono text-[9.5px] text-dim">grant {g.id}</span></div>
-                  <div><span className="block text-[11.5px] text-ink2">{names.inventories.get(g.inventory_id) || `Inventory ${g.inventory_id}`}</span><span className="font-mono text-[9.5px] text-dim">{g.allowed_host_ids.length} hosts · {g.allowed_group_ids.length} groups · max {g.max_hosts || 'unbounded'}</span></div>
+                  <div><span className="block text-[11.5px] text-ink2">{names.inventories.get(g.inventory_id) || `Inventory ${g.inventory_id}`}</span><span className="font-mono text-[9.5px] text-dim">{(g.allowed_host_ids || []).length} hosts · {(g.allowed_group_ids || []).length} groups · max {g.max_hosts || 'unbounded'}</span></div>
                   <div><span className={`font-mono text-[9.5px] ${activeGrant(g) ? 'text-ok' : 'text-dim'}`}>{activeGrant(g) ? 'active' : g.revoked_at ? 'revoked' : 'inactive'}</span><span className="block font-mono text-[9.5px] text-mut">to {fmt(g.expires_at)}</span></div>
                   <span className="flex justify-end gap-1">{!g.revoked_at && <><button title="Edit" className="px-2 py-1 text-[10.5px] text-mut hover:text-acc2" onClick={() => openGrant(g)}>Edit</button><button title="Revoke" className="p-1.5 text-mut hover:text-err" onClick={() => revokeGrant(g)}><Trash2 size={14} /></button></>}</span>
                 </div>)}
