@@ -7,9 +7,9 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import ResourceAccess from '../components/ResourceAccess';
-import { Building2, Users, ShieldCheck, UserPlus, Trash2, Loader, Eye, Key, Package, Plus } from 'lucide-react';
+import { Building2, Users, ShieldCheck, UserPlus, Trash2, Key, Package, Plus } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
-import { PageSpinner } from '../components/ui/PageSpinner';
+import { EmptyState, FormActions, FormErrorSummary, FormSection, LoadingState, Page, PageHeader } from '../components/ui';
 
 const OrganizationsPage = () => {
     const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -25,6 +25,8 @@ const OrganizationsPage = () => {
     const [showAddMemberModal, setShowAddMemberModal] = useState(false);
     const [showAddAdminModal, setShowAddAdminModal] = useState(false);
     const [selectedUserId, setSelectedUserId] = useState<number>(0);
+    const [creating, setCreating] = useState(false);
+    const [formErrors, setFormErrors] = useState<string[]>([]);
 
     // Galaxy / Automation Hub credentials
     const [orgGalaxyCreds, setOrgGalaxyCreds] = useState<any[]>([]);
@@ -57,16 +59,17 @@ const OrganizationsPage = () => {
     }, []);
 
     const handleCreate = async () => {
-        if (!formData.name) return;
+        if (creating) return;
+        if (!formData.name.trim()) { setFormErrors(['Name is required.']); return; }
+        setCreating(true);
+        setFormErrors([]);
         try {
-            await api.createOrganization(formData);
+            await api.createOrganization({ ...formData, name: formData.name.trim() });
             setShowModal(false);
             setFormData({ name: '', description: '' });
             fetchOrganizations();
-        } catch (err) {
-            console.error('Failed to create organization', err);
-            toast.error('Failed to create organization');
-        }
+        } catch { setFormErrors(['Praetor could not create this organization. No changes were saved.']); }
+        finally { setCreating(false); }
     };
 
     const handleDelete = async (id: number) => {
@@ -163,18 +166,11 @@ const OrganizationsPage = () => {
         }
     };
 
-    if (loading) {
-        return (
-            <PageSpinner />
-        );
-    }
+    if (loading) return <Page width="wide"><LoadingState label="Loading organizations" /></Page>;
 
     return (
-        <div className="space-y-6 p-8 max-w-[1160px] mx-auto">
-            <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-semibold tracking-tight text-ink">Organizations</h1>
-                <Button icon={<Building2 size={16} />} onClick={() => setShowModal(true)}>Add Organization</Button>
-            </div>
+        <Page width="wide">
+            <PageHeader title="Organizations" description="Top-level boundaries for automation resources, membership, teams, and delegated access." actions={<Button icon={<Building2 size={16} />} onClick={() => { setFormErrors([]); setShowModal(true); }}>Add organization</Button>} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Organization List */}
@@ -206,7 +202,7 @@ const OrganizationsPage = () => {
                                 </div>
                             ))}
                             {organizations.length === 0 && (
-                                <div className="text-center py-8 text-mut">No organizations found</div>
+                                <EmptyState className="min-h-40" title="No organizations found" description="Create an organization to define the first automation boundary." />
                             )}
                         </div>
                     </Card>
@@ -361,24 +357,22 @@ const OrganizationsPage = () => {
                             </Card>
                         </div>
                     ) : (
-                        <Card className="h-full flex items-center justify-center py-16">
-                            <div className="text-center text-mut">
-                                <Eye size={48} className="mx-auto mb-4 text-faint" />
-                                <p>Select an organization to view details</p>
-                            </div>
-                        </Card>
+                        <EmptyState title="Select an organization" description="Choose an organization to inspect its members, administrators, teams, access, and Galaxy credentials." />
                     )}
                 </div>
             </div>
 
             {/* Create Organization Modal */}
-            <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Create Organization">
-                <div className="space-y-4">
+            <Modal isOpen={showModal} onClose={() => { if (!creating) setShowModal(false); }} title="Create organization">
+                <form onSubmit={event => { event.preventDefault(); void handleCreate(); }} className="space-y-4">
+                    <FormErrorSummary errors={formErrors} />
+                    <FormSection title="Organization details">
                     <Input
                         label="Name"
                         type="text"
                         value={formData.name}
                         onChange={e => setFormData({ ...formData, name: e.target.value })}
+                        error={formErrors.includes('Name is required.') ? 'Enter an organization name.' : undefined}
                     />
                     <Textarea
                         label="Description"
@@ -386,11 +380,9 @@ const OrganizationsPage = () => {
                         value={formData.description}
                         onChange={e => setFormData({ ...formData, description: e.target.value })}
                     />
-                    <div className="flex justify-end gap-2">
-                        <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-                        <Button onClick={handleCreate}>Create</Button>
-                    </div>
-                </div>
+                    </FormSection>
+                    <FormActions onCancel={() => setShowModal(false)} submitting={creating} submitLabel="Create organization" />
+                </form>
             </Modal>
 
             {/* Add Member Modal */}
@@ -460,7 +452,7 @@ const OrganizationsPage = () => {
                     </div>
                 </div>
             </Modal>
-        </div>
+        </Page>
     );
 };
 
