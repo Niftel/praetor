@@ -24,7 +24,7 @@ require (
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
-	github.com/praetordev/scheduler v0.1.3
+	github.com/praetordev/scheduler v0.1.1
 	github.com/praetordev/store v0.1.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
@@ -74,7 +74,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/praetordev/crypto v0.1.0
 	github.com/praetordev/env v0.1.0
-	github.com/praetordev/events v0.1.1-0.20260715180212-73a43baa18fc
+	github.com/praetordev/events v0.1.0
 	github.com/praetordev/metrics v0.1.1
 	github.com/praetordev/objectstore v0.1.2
 	github.com/praetordev/packspec v0.1.0
