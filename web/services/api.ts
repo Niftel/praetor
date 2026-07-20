@@ -98,7 +98,18 @@ export interface DiagnosticEvent {
 }
 
 export interface RunDiagnostics {
-    summary: { state: string; last_event_seq: number };
+    summary: {
+        unified_job_id: number;
+        state: string;
+        current_phase: string;
+        attempt: number;
+        failure_code?: string;
+        last_event_seq: number;
+        started_at?: string;
+        finished_at?: string;
+        source_job_id?: number;
+        subsequent_job_ids: number[];
+    };
     events: DiagnosticEvent[];
     next_cursor?: number;
 }
@@ -270,8 +281,11 @@ export const api = {
 
     // Logs
     getJobEvents: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/events?limit=1000`).then(r => r.json()),
-    getJobDiagnostics: (runId: string, cursor = 0, limit = 200) =>
-        fetchWithAuth(`/jobs/runs/${runId}/diagnostics?cursor=${cursor}&limit=${limit}`).then(r => r.json() as Promise<RunDiagnostics>),
+    getJobDiagnostics: (runId: string, cursor = 0, limit = 200, kind = 'all', outcome = '') => {
+        const query = new URLSearchParams({ cursor: String(cursor), limit: String(limit), kind });
+        if (outcome) query.set('outcome', outcome);
+        return fetchWithAuth(`/jobs/runs/${runId}/diagnostics?${query}`).then(r => r.json() as Promise<RunDiagnostics>);
+    },
     // Full playbook stdout, reassembled from the object store (returns plain text).
     getJobLogs: (runId: string) => fetchWithAuth(`/jobs/runs/${runId}/logs`).then(r => r.text()),
     // Incremental tail: returns only chunks newer than `since` plus the new tail
