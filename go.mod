@@ -74,7 +74,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/praetordev/crypto v0.1.0
 	github.com/praetordev/env v0.1.0
-	github.com/praetordev/events v0.1.0
+	github.com/praetordev/events v0.1.1-0.20260720200102-f46fa9ea6404
 	github.com/praetordev/metrics v0.1.1
 	github.com/praetordev/objectstore v0.1.2
 	github.com/praetordev/packspec v0.1.0
