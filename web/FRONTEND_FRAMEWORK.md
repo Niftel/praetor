@@ -49,5 +49,6 @@ export function ResourcePage() {
 - Keyboard focus order and accessible names are tested.
 - No raw API error, secret, query string, or sensitive identifier is rendered.
 - `npm test` and `npm run build` pass locally.
+- Authenticated route pages remain lazy imports. Run `npm run build:check` to enforce the 250 KiB uncompressed initial-entry budget.
 
 Migrated resource families should include a lightweight architecture test that prevents their superseded page-local loading, header, table, or form structure from being reintroduced during later feature work.
