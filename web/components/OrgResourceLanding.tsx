@@ -14,6 +14,7 @@ interface OrgResourceLandingProps {
     title: string;                    // e.g. "Projects"
     basePath: string;                 // e.g. "/projects" -> cards link to /projects/org/:id
     unit: string;                     // singular noun for the count, e.g. "project"
+    pluralUnit?: string;              // irregular plural, e.g. "inventories"
     // Returns the resource list (each item carrying organization_id) so we can
     // show a per-org count. Optional — omit for resources without a flat list.
     fetchItems?: () => Promise<any>;
@@ -22,7 +23,7 @@ interface OrgResourceLandingProps {
 // Org-first landing for a resource section: shows the organizations the user
 // belongs to as cards (with a per-org count), each drilling into that org's
 // resources. Replaces the flat list + org-dropdown create pattern.
-const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath, unit, fetchItems }) => {
+const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath, unit, pluralUnit, fetchItems }) => {
     const [orgs, setOrgs] = useState<Org[]>([]);
     const [counts, setCounts] = useState<Record<number, number>>({});
     const [loading, setLoading] = useState(true);
@@ -55,7 +56,7 @@ const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath
 
     if (loading) return <PageSpinner />;
 
-    const plural = (n: number) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+    const countLabel = (n: number) => `${n} ${n === 1 ? unit : (pluralUnit ?? `${unit}s`)}`;
 
     return (
         <div className="p-8 max-w-[1160px] mx-auto bg-bg text-ink">
@@ -99,7 +100,7 @@ const OrgResourceLanding: React.FC<OrgResourceLandingProps> = ({ title, basePath
                                     <ChevronRight size={18} className="text-faint group-hover:text-acc2 group-hover:translate-x-0.5 transition-all shrink-0" />
                                 </div>
                                 {o.description && <p className="text-[13px] text-mut mt-0.5 truncate">{o.description}</p>}
-                                <p className="font-mono text-[11px] text-acc2 mt-2 tabular-nums">{plural(counts[o.id] || 0)}</p>
+                                <p className="font-mono text-[11px] text-acc2 mt-2 tabular-nums">{countLabel(counts[o.id] || 0)}</p>
                             </div>
                         </Link>
                     ))}
