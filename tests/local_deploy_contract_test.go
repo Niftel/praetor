@@ -175,7 +175,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
