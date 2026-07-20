@@ -26,6 +26,12 @@ permissions:
   issues: write
   pull-requests: read
 
+# Repository and project state form one serialized state machine. Each handler
+# re-derives the authoritative issue state, so delayed events are safe to replay.
+concurrency:
+  group: development-flow-state-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   issue:
     if: github.event_name == 'issues'

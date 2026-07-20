@@ -150,6 +150,77 @@ func TestDevelopmentFlowSkipsDependabotPullRequestsByAuthor(t *testing.T) {
 	}
 }
 
+func TestDevelopmentFlowSerializesAndReconcilesOutOfOrderEvents(t *testing.T) {
+	root := repositoryRoot(t)
+	workflowRaw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "development-flow.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(workflowRaw)
+	for _, required := range []string{
+		"group: development-flow-state-${{ github.repository }}",
+		"cancel-in-progress: false",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("development events must be serialized with %q", required)
+		}
+	}
+
+	scriptRaw, err := os.ReadFile(filepath.Join(root, "scripts", "development-flow.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptRaw)
+	for _, required := range []string{
+		"authoritative_issue_status",
+		"has_open_linked_pr",
+		`reconcile_issue "$number" "$url" "Backlog"`,
+		`reconcile_issue "$issue" "$issue_url" "In Review"`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("out-of-order reconciliation must contain %q", required)
+		}
+	}
+}
+
+func TestDevelopmentFlowOpenPullRequestWinsOverDelayedBacklogEvent(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	fakeGH := filepath.Join(temp, "gh")
+	fake := `#!/usr/bin/env bash
+if [[ "$1 $2" == "issue view" ]]; then
+  printf '%s\n' '{"state":"OPEN","labels":[{"name":"flow:backlog"}]}'
+elif [[ "$1 $2" == "pr list" ]]; then
+  printf '%s\n' "${FAKE_PULLS:-[] }"
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`
+	if err := os.WriteFile(fakeGH, []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(pulls string) string {
+		t.Helper()
+		cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; authoritative_issue_status 201 Backlog`)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "PATH="+temp+":"+os.Getenv("PATH"), "FAKE_PULLS="+pulls)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("status resolution failed: %v\n%s", err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+
+	if got := run(`[]`); got != "Backlog" {
+		t.Fatalf("unlinked issue status = %q, want Backlog", got)
+	}
+	if got := run(`[{"body":"Closes #201"}]`); got != "In Review" {
+		t.Fatalf("delayed issue-open status = %q, want In Review", got)
+	}
+}
+
 func workflowContains(t *testing.T, root, value string) bool {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "development-flow.yml"))
