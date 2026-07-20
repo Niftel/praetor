@@ -8,6 +8,7 @@ import {
   ShieldCheck, ChevronRight,
   Bot,
 } from 'lucide-react';
+import RouteErrorBoundary from './RouteErrorBoundary';
 
 // The command palette IS the control panel: no persistent sidebar. ⌘K opens one
 // overlay with two tabs — History (recent runs) and All functions (the capability
@@ -273,7 +274,9 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
 
       {/* content */}
       <div className="flex-1 min-h-0 overflow-auto scroll-tint" style={{ overscrollBehavior: 'contain' }}>
-        <Outlet />
+        <RouteErrorBoundary pathname={location.pathname} onDashboard={() => navigate('/')}>
+          <Outlet />
+        </RouteErrorBoundary>
       </div>
 
       {/* command palette */}
