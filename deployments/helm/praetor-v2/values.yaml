@@ -29,14 +29,14 @@ images:
 # platform-compatibility.yaml and take precedence over image.tag. The shared tag
 # remains a convenient override for local/k3d development.
 imageTags:
-  api: 0.1.2
+  api: 0.1.3
   ingestion: 0.1.1
   scheduler: 0.1.3
   consumer: 0.1.1
   reconciler: 0.1.0
   executor: 0.1.2
-  ui: 0.1.2
-  migrator: 0.1.2
+  ui: 0.1.3
+  migrator: 0.1.3
 
 # Optional immutable manifest digests. When set, a digest takes precedence over
 # both imageTags and image.tag and renders as registry/repository@sha256:....
