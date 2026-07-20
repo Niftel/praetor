@@ -330,7 +330,7 @@ func TestStagingReleaseIsDigestPinnedAndSecretReferenced(t *testing.T) {
 		"docker buildx imagetools inspect",
 		"does not publish linux/$target_arch required by staging",
 		"every rendered staging workload image must be digest-pinned",
-		"--rollback-on-failure --wait",
+		"--force-conflicts --rollback-on-failure --wait",
 		"praetor-staging-runtime",
 		"praetor-staging-registry",
 		"praetor-staging-ingress-tls",
