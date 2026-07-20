@@ -49,3 +49,5 @@ export function ResourcePage() {
 - Keyboard focus order and accessible names are tested.
 - No raw API error, secret, query string, or sensitive identifier is rendered.
 - `npm test` and `npm run build` pass locally.
+
+Migrated resource families should include a lightweight architecture test that prevents their superseded page-local loading, header, table, or form structure from being reintroduced during later feature work.
