@@ -105,12 +105,43 @@ state_project_number() {
 }
 
 set_flow_label() {
-  local issue="$1" wanted="$2" current
-  current="$(jq -r --arg status "$wanted" '.labels | to_entries[] | select(.value == $status) | .key' "$CONFIG")"
+  local issue="$1" wanted="$2" current_label existing
+  current_label="$(jq -r --arg status "$wanted" '.labels | to_entries[] | select(.value == $status) | .key' "$CONFIG")"
+  existing="$(gh issue view "$issue" --repo "$REPOSITORY" --json labels --jq '.labels[].name')"
   while IFS= read -r label; do
-    [[ "$label" == "$current" ]] || gh issue edit "$issue" --repo "$REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+    [[ "$label" == "$current_label" ]] || ! grep -Fxq "$label" <<<"$existing" ||
+      gh issue edit "$issue" --repo "$REPOSITORY" --remove-label "$label" >/dev/null
   done < <(jq -r '.labels | keys[]' "$CONFIG")
-  gh issue edit "$issue" --repo "$REPOSITORY" --add-label "$current" >/dev/null
+  grep -Fxq "$current_label" <<<"$existing" ||
+    gh issue edit "$issue" --repo "$REPOSITORY" --add-label "$current_label" >/dev/null
+}
+
+has_open_linked_pr() {
+  local issue="$1" pattern pulls
+  pulls="$(gh pr list --repo "$REPOSITORY" --state open --limit 100 --json body)"
+  pattern="(?i)(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#${issue}([^0-9]|$)"
+  jq -e --arg pattern "$pattern" 'any(.[]; (.body // "") | test($pattern))' <<<"$pulls" >/dev/null
+}
+
+authoritative_issue_status() {
+  local issue="$1" fallback="$2" details
+  details="$(gh issue view "$issue" --repo "$REPOSITORY" --json state,labels)"
+  if jq -e '.labels | any(.name == "flow:done")' <<<"$details" >/dev/null; then
+    echo "Done"
+  elif [[ "$(jq -r .state <<<"$details")" == CLOSED ]]; then
+    echo "Verification"
+  elif has_open_linked_pr "$issue"; then
+    echo "In Review"
+  else
+    echo "$fallback"
+  fi
+}
+
+reconcile_issue() {
+  local issue="$1" url="$2" fallback="$3" status
+  status="$(authoritative_issue_status "$issue" "$fallback")"
+  set_flow_label "$issue" "$status"
+  set_project_status "$url" "$status"
 }
 
 add_to_project() {
@@ -149,15 +180,22 @@ canonical_project_status() {
 }
 
 repair_project() {
-  local number items url label status
+  local number items url status issue details
   number="$(state_project_number)"
   items="$(project_gh project item-list "$number" --owner "$OWNER" --format json --limit 500)"
-  while IFS=$'\t' read -r url label; do
-    [[ -n "$url" && -n "$label" ]] || continue
-    status="$(jq -r --arg label "$label" '.labels[$label] // empty' "$CONFIG")"
-    [[ -n "$status" ]] || continue
-    set_project_status "$url" "$status"
-  done < <(jq -r '.items[] | select(.content.type == "Issue") | .content.url as $url | (.labels // [])[] | select(startswith("flow:")) | [$url, .] | @tsv' <<<"$items")
+  while IFS= read -r url; do
+    [[ -n "$url" ]] || continue
+    issue="${url##*/}"
+    details="$(gh issue view "$issue" --repo "$REPOSITORY" --json labels)"
+    if jq -e '.labels | any(.name == "flow:in-progress" or .name == "flow:in-review" or .name == "flow:verification")' <<<"$details" >/dev/null; then
+      status="In Progress"
+    elif jq -e '.labels | any(.name == "flow:ready")' <<<"$details" >/dev/null; then
+      status="Ready"
+    else
+      status="Backlog"
+    fi
+    reconcile_issue "$issue" "$url" "$status"
+  done < <(jq -r '.items[] | select(.content.type == "Issue") | .content.url' <<<"$items" | sort -u)
   echo "canonical project Status repaired from flow labels"
 }
 
@@ -165,14 +203,14 @@ sync_issue() {
   local event="${EVENT_PATH:-${GITHUB_EVENT_PATH:-}}" number url action
   number="$(jq -r .issue.number "$event")"; url="$(jq -r .issue.html_url "$event")"; action="$(jq -r .action "$event")"
   add_to_project "$url"
-  if [[ "$action" == opened ]]; then set_flow_label "$number" "Backlog"; set_project_status "$url" "Backlog"; fi
-  if [[ "$action" == closed ]]; then set_flow_label "$number" "Verification"; set_project_status "$url" "Verification"; fi
-  if [[ "$action" == reopened ]]; then set_flow_label "$number" "In Progress"; set_project_status "$url" "In Progress"; fi
+  if [[ "$action" == opened ]]; then reconcile_issue "$number" "$url" "Backlog"; fi
+  if [[ "$action" == closed ]]; then reconcile_issue "$number" "$url" "Verification"; fi
+  if [[ "$action" == reopened ]]; then reconcile_issue "$number" "$url" "In Progress"; fi
   if [[ "$action" == labeled ]]; then
     local label status
     label="$(jq -r '.label.name // ""' "$event")"
     status="$(jq -r --arg label "$label" '.labels[$label] // empty' "$CONFIG")"
-    [[ -z "$status" ]] || set_project_status "$url" "$status"
+    [[ -z "$status" ]] || reconcile_issue "$number" "$url" "$status"
   fi
 }
 
@@ -191,12 +229,14 @@ sync_pr() {
   issue="$(linked_issue "$body")"
   [[ -n "$issue" ]] || { echo "error: PR must use Closes/Fixes/Resolves #issue" >&2; exit 1; }
   add_to_project "$(jq -r .pull_request.html_url "$event")"
+  local issue_url
+  issue_url="$(gh issue view "$issue" --repo "$REPOSITORY" --json url --jq .url)"
   if [[ "$action" == closed && "$merged" == true ]]; then
-    set_flow_label "$issue" "Verification"
-    set_project_status "$(gh issue view "$issue" --repo "$REPOSITORY" --json url --jq .url)" "Verification"
+    reconcile_issue "$issue" "$issue_url" "Verification"
+  elif [[ "$action" == closed ]]; then
+    reconcile_issue "$issue" "$issue_url" "In Progress"
   elif [[ "$action" != closed ]]; then
-    set_flow_label "$issue" "In Review"
-    set_project_status "$(gh issue view "$issue" --repo "$REPOSITORY" --json url --jq .url)" "In Review"
+    reconcile_issue "$issue" "$issue_url" "In Review"
   fi
 }
 
@@ -226,12 +266,14 @@ verify_main() {
   done <<<"$prs"
 }
 
-case "${1:-}" in
-  bootstrap) bootstrap ;;
-  validate-issue) validate_issue ;;
-  sync-issue) sync_issue ;;
-  sync-pr) sync_pr ;;
-  verify-main) verify_main ;;
-  repair-project) repair_project ;;
-  *) usage >&2; exit 2 ;;
-esac
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    bootstrap) bootstrap ;;
+    validate-issue) validate_issue ;;
+    sync-issue) sync_issue ;;
+    sync-pr) sync_pr ;;
+    verify-main) verify_main ;;
+    repair-project) repair_project ;;
+    *) usage >&2; exit 2 ;;
+  esac
+fi
