@@ -13,6 +13,8 @@ func TestNarrowViewportUILayoutContracts(t *testing.T) {
 		filepath.Join(root, "web", "components", "Shell.tsx"): {
 			"max-[700px]:w-auto",
 			"max-[520px]:hidden",
+			"aria-label=\"Breadcrumb\"",
+			"breadcrumbsFor(location.pathname)",
 		},
 		filepath.Join(root, "web", "pages", "WorkflowsPage.tsx"): {
 			"max-[640px]:px-4",

@@ -5,7 +5,7 @@ import {
   Search, LayoutDashboard, Play, FileText, Workflow, Server, CalendarClock,
   Package, GitBranch, Building2, Users, UsersRound, KeyRound, KeySquare,
   ScrollText, Settings as SettingsIcon, LogOut,
-  ShieldCheck,
+  ShieldCheck, ChevronRight,
   Bot,
 } from 'lucide-react';
 
@@ -47,6 +47,53 @@ const FUNCTIONS: { group: string; items: Fn[] }[] = [
   },
 ];
 const ALL_FNS = FUNCTIONS.flatMap(g => g.items);
+
+type Breadcrumb = { label: string; path?: string };
+
+const detailLabel = (segment: string) => segment
+  .split('-')
+  .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+  .join(' ');
+
+// Routes carry useful task context that the old single section label discarded.
+// Keep the labels semantic rather than exposing raw URL syntax such as `org/2`.
+function breadcrumbsFor(pathname: string): Breadcrumb[] {
+  const segments = pathname.split('/').filter(Boolean);
+  const crumbs: Breadcrumb[] = [{ label: 'Dashboard', path: '/' }];
+  if (segments.length === 0) return [{ label: 'Dashboard' }];
+
+  const root = ALL_FNS.find(fn => fn.path === `/${segments[0]}`);
+  crumbs.push({ label: root?.label || detailLabel(segments[0]), path: `/${segments[0]}` });
+
+  if (segments[0] === 'jobs' && segments[1]) {
+    crumbs.push({ label: `Job #${segments[1]}` });
+    return crumbs;
+  }
+  if (segments[0] === 'workflows' && segments[1] === 'runs' && segments[2]) {
+    crumbs.push({ label: `Run #${segments[2]}` });
+    return crumbs;
+  }
+  if (segments[1] === 'org' && segments[2]) {
+    crumbs.push({ label: `Organization #${segments[2]}`, path: `/${segments[0]}/org/${segments[2]}` });
+    if (segments[3] === 'builder') {
+      crumbs.push({ label: segments[4] ? `Workflow #${segments[4]}` : 'New workflow' });
+    }
+    return crumbs;
+  }
+  if (segments[0] === 'settings' && segments[1] === 'auth-providers') {
+    crumbs.push({ label: 'Authentication providers' });
+    return crumbs;
+  }
+
+  segments.slice(1).forEach((segment, index) => {
+    const isLast = index === segments.length - 2;
+    crumbs.push({
+      label: detailLabel(segment),
+      path: isLast ? undefined : `/${segments.slice(0, index + 2).join('/')}`,
+    });
+  });
+  return crumbs;
+}
 
 // Concrete example actions the omnibar rotates through — real capabilities, not
 // fabricated data — so the closed bar advertises what the palette can do.
@@ -115,12 +162,7 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     return () => clearInterval(h);
   }, []);
 
-  // Section context for the breadcrumb, derived from the route.
-  const section = useMemo(() => {
-    const seg = location.pathname.split('/').filter(Boolean)[0] || 'dashboard';
-    const f = ALL_FNS.find(x => x.path === '/' + seg);
-    return (f?.label || seg).toLowerCase();
-  }, [location.pathname]);
+  const breadcrumbs = useMemo(() => breadcrumbsFor(location.pathname), [location.pathname]);
 
   const close = useCallback(() => { setOpen(false); setQuery(''); setSel(0); }, []);
   const openPalette = useCallback(() => { setOpen(true); setTab('fns'); setQuery(''); setSel(0); }, []);
@@ -189,7 +231,21 @@ const Shell: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
           <div className="w-6 h-6 rounded-md border border-acc grid place-items-center text-acc font-mono font-bold text-[13px]">P</div>
           <span className="font-semibold tracking-tight text-sm max-[520px]:hidden">Praetor</span>
         </div>
-        <div className="font-mono text-[11px] text-mut max-[700px]:hidden"><span className="text-ink">{section}</span></div>
+        <nav aria-label="Breadcrumb" className="flex min-w-0 max-w-[min(34vw,460px)] items-center overflow-hidden font-mono text-[10.5px] max-[900px]:max-w-[220px] max-[700px]:hidden">
+          {breadcrumbs.map((crumb, index) => {
+            const current = index === breadcrumbs.length - 1;
+            return (
+              <React.Fragment key={`${crumb.label}-${index}`}>
+                {index > 0 && <ChevronRight size={11} className="mx-1.5 shrink-0 text-faint" aria-hidden="true" />}
+                {crumb.path && !current ? (
+                  <button onClick={() => navigate(crumb.path!)} className="shrink-0 text-dim transition-colors hover:text-acc focus-visible:text-acc">{crumb.label}</button>
+                ) : (
+                  <span aria-current={current ? 'page' : undefined} className={`${current ? 'text-ink' : 'text-mut'} min-w-0 truncate`}>{crumb.label}</span>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </nav>
 
         <button
           onClick={openPalette}
