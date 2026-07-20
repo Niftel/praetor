@@ -148,7 +148,7 @@ if [[ "$COMMAND" == deploy ]]; then
   helm upgrade --install "$RELEASE" "$CHART" \
     --kube-context "$CONTEXT" --namespace "$NAMESPACE" \
     -f "$STAGING_VALUES" -f "$generated" \
-    --rollback-on-failure --wait --timeout 15m
+    --force-conflicts --rollback-on-failure --wait --timeout 15m
 fi
 
 echo "==> Verifying deployed revisions"
