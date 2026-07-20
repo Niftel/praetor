@@ -5,9 +5,9 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Input, Textarea, Select } from '../components/ui/Input';
-import { Users, Plus, Trash2, Loader } from 'lucide-react';
+import { Users, Plus, Trash2 } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
-import { PageSpinner } from '../components/ui/PageSpinner';
+import { EmptyState, FormActions, FormErrorSummary, FormSection, LoadingState, Page, PageHeader, useDirtyFormGuard } from '../components/ui';
 
 interface TeamWithMembers extends Team {
   members?: User[];
@@ -19,6 +19,8 @@ const TeamsPage = () => {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState<{ name: string; description: string; organization_id: number | '' }>({ name: '', description: '', organization_id: '' });
+  const [creating, setCreating] = useState(false);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
 
   const fetchTeams = async () => {
     try {
@@ -50,20 +52,27 @@ const TeamsPage = () => {
     fetchTeams();
   }, []);
 
-  const openModal = () => { setFormData({ name: '', description: '', organization_id: orgs[0]?.id ?? '' }); setShowModal(true); };
+  const openModal = () => { setFormData({ name: '', description: '', organization_id: orgs[0]?.id ?? '' }); setFormErrors([]); setShowModal(true); };
 
   const handleCreate = async () => {
-    if (!formData.name || formData.organization_id === '') return;
+    if (creating) return;
+    const errors: string[] = [];
+    if (!formData.name.trim()) errors.push('Name is required.');
+    if (formData.organization_id === '') errors.push('Organization is required.');
+    setFormErrors(errors);
+    if (errors.length) return;
+    setCreating(true);
     try {
       await api.createTeam(formData);
       setShowModal(false);
       setFormData({ name: '', description: '', organization_id: '' });
       fetchTeams();
-    } catch (err) {
-      console.error('Failed to create team', err);
-      toast.error('Failed to create team');
-    }
+    } catch { setFormErrors(['Praetor could not create this team. No changes were saved.']); }
+    finally { setCreating(false); }
   };
+  const dirty = showModal && Boolean(formData.name || formData.description);
+  const canDiscard = useDirtyFormGuard(dirty);
+  const closeForm = async () => { if (creating || !(await canDiscard())) return; setShowModal(false); setFormErrors([]); };
 
   const handleDelete = async (id: number) => {
     if (!(await confirmDialog('Delete this team?'))) return;
@@ -75,18 +84,11 @@ const TeamsPage = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <PageSpinner />
-    );
-  }
+  if (loading) return <Page><LoadingState label="Loading teams" /></Page>;
 
   return (
-    <div className="space-y-6 p-8 max-w-[1160px] mx-auto">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Teams</h1>
-        <Button icon={<Plus size={16} />} onClick={openModal}>Create Team</Button>
-      </div>
+    <Page width="wide">
+      <PageHeader title="Teams" description="Groups of users that receive delegated access to Praetor resources." actions={<Button icon={<Plus size={16} />} onClick={openModal}>Create team</Button>} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {teams.map(team => (
@@ -127,18 +129,17 @@ const TeamsPage = () => {
             </div>
           </Card>
         ))}
-        {teams.length === 0 && (
-          <Card className="col-span-full text-center py-12 text-mut">
-            No teams found. Click "Create Team" to add one.
-          </Card>
-        )}
+        {teams.length === 0 && <div className="col-span-full"><EmptyState title="No teams yet" description="Create a team to delegate resource access to a group of users." action={<Button icon={<Plus size={15} />} onClick={openModal}>Create team</Button>} /></div>}
       </div>
 
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Create Team">
-        <div className="space-y-4">
+      <Modal isOpen={showModal} onClose={() => { void closeForm(); }} title="Create team">
+        <form onSubmit={event => { event.preventDefault(); void handleCreate(); }} className="space-y-4">
+          <FormErrorSummary errors={formErrors} />
+          <FormSection title="Team details">
           <Select
             label="Organization"
             value={formData.organization_id}
+            error={formErrors.includes('Organization is required.') ? 'Choose an organization.' : undefined}
             onChange={e => setFormData({ ...formData, organization_id: Number(e.target.value) })}
           >
             <option value="">Select organization…</option>
@@ -150,6 +151,7 @@ const TeamsPage = () => {
             value={formData.name}
             onChange={e => setFormData({ ...formData, name: e.target.value })}
             placeholder="DevOps Team"
+            error={formErrors.includes('Name is required.') ? 'Enter a team name.' : undefined}
           />
           <Textarea
             label="Description"
@@ -158,13 +160,11 @@ const TeamsPage = () => {
             placeholder="Optional description"
             rows={3}
           />
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleCreate}>Create</Button>
-          </div>
-        </div>
+          </FormSection>
+          <FormActions onCancel={() => { void closeForm(); }} submitting={creating} submitLabel="Create team" />
+        </form>
       </Modal>
-    </div>
+    </Page>
   );
 };
 

@@ -5,7 +5,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { Shield, Trash2, KeyRound, Building2, UserRound } from 'lucide-react';
 import { confirmDialog } from '../components/ui/toast';
-import { PageSpinner } from '../components/ui/PageSpinner';
+import { EmptyState, LoadingState, Page, PageHeader } from '../components/ui';
 
 interface Org { id: number; name: string; }
 interface OrgRoster { members: User[]; admins: User[]; }
@@ -70,7 +70,7 @@ const UsersPage = () => {
     try { await api.deleteUser(id); fetchAll(); } catch (err) { console.error('Failed to delete user', err); }
   };
 
-  if (loading) return <PageSpinner />;
+  if (loading) return <Page><LoadingState label="Loading users" /></Page>;
 
   const UserRow = (user: User, isOrgAdmin: boolean) => (
     <div key={user.id} onClick={() => openAccess(user)}
@@ -94,13 +94,10 @@ const UsersPage = () => {
   );
 
   return (
-    <div className="p-8 max-w-[1100px] mx-auto bg-bg text-ink">
-      <div className="mb-6">
-        <h1 className="text-[21px] font-semibold tracking-tight">Users</h1>
-        <p className="text-[13px] text-mut mt-1">{users.length} total, grouped by organization membership.</p>
-      </div>
+    <Page>
+      <PageHeader title="Users" description={`${users.length} total, grouped by organization membership.`} />
 
-      <div className="rounded-xl border border-line overflow-hidden divide-y divide-line">
+      {users.length > 0 && <div className="rounded-xl border border-line overflow-hidden divide-y divide-line">
         {groups.orgGroups.map(({ org, users: list, adminIds }) => (
           <React.Fragment key={org.id}>
             <div className="flex items-center gap-2.5 px-4 h-10 bg-panel2 sticky top-0 z-[1]">
@@ -124,8 +121,8 @@ const UsersPage = () => {
           </React.Fragment>
         )}
 
-        {users.length === 0 && <p className="text-center text-mut py-10">No users found.</p>}
-      </div>
+      </div>}
+      {users.length === 0 && <EmptyState title="No users found" description="Users appear here after they authenticate or an administrator creates them." />}
 
       <Modal isOpen={!!accessUser} onClose={() => setAccessUser(null)} title={accessUser ? `Access — ${accessUser.username}` : ''} size="lg">
         {accessUser && (
@@ -161,7 +158,7 @@ const UsersPage = () => {
           </div>
         )}
       </Modal>
-    </div>
+    </Page>
   );
 };
 
