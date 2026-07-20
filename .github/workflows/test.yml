@@ -45,6 +45,18 @@ jobs:
       - name: test
         run: go test ./...
 
+      - name: install UI dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: UI regression tests
+        working-directory: web
+        run: npm test
+
+      - name: UI production build
+        working-directory: web
+        run: npm run build
+
   database-compatibility:
     runs-on: ubuntu-latest
     services:
