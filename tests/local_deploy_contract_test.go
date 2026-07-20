@@ -12,7 +12,8 @@ import (
 )
 
 type localDeployManifest struct {
-	Image struct {
+	PlatformVersion string `yaml:"platformVersion"`
+	Image           struct {
 		Registry string `yaml:"registry"`
 	} `yaml:"image"`
 	Components map[string]struct {
@@ -359,8 +360,33 @@ func TestStagingReleaseIsDigestPinnedAndSecretReferenced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(lockRaw), "platformVersion: 0.1.2") || !strings.Contains(string(lockRaw), "digest: sha256:") {
-		t.Fatal("staging release lock must declare platform version and digests")
+	var lock struct {
+		PlatformVersion string `yaml:"platformVersion"`
+		Components      map[string]struct {
+			Digest string `yaml:"digest"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(lockRaw, &lock); err != nil {
+		t.Fatalf("parse staging release lock: %v", err)
+	}
+	manifestRaw, err := os.ReadFile(filepath.Join(root, "platform-compatibility.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest localDeployManifest
+	if err := yaml.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatalf("parse compatibility manifest: %v", err)
+	}
+	if lock.PlatformVersion != manifest.PlatformVersion {
+		t.Fatalf("staging platform version = %q, want compatibility version %q", lock.PlatformVersion, manifest.PlatformVersion)
+	}
+	if len(lock.Components) != len(manifest.Components) {
+		t.Fatalf("staging lock has %d components, want %d", len(lock.Components), len(manifest.Components))
+	}
+	for name, component := range lock.Components {
+		if len(component.Digest) != len("sha256:")+64 || !strings.HasPrefix(component.Digest, "sha256:") {
+			t.Fatalf("staging component %s has invalid digest %q", name, component.Digest)
+		}
 	}
 }
 
