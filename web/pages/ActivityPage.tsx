@@ -1,15 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
 import { RefreshCw, Search } from 'lucide-react';
-import { PageSpinner } from '../components/ui/PageSpinner';
+import { DataTable, type DataColumn, type SortState, Page, PageHeader, PageToolbar, StatusValue, TimestampValue } from '../components/ui';
 
-const statusTone = (code: number) => {
-  if (!code) return 'text-dim';
-  if (code < 300) return 'text-ok';
-  if (code < 400) return 'text-changed';
-  if (code < 500) return 'text-changed';
-  return 'text-err';
-};
 const actionTone = (a: string): string => {
   const s = (a || '').toLowerCase();
   if (s.includes('delete') || s.includes('remove')) return 'text-err border-err/30';
@@ -22,6 +15,7 @@ const ActivityPage = () => {
   const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  const [sort, setSort] = useState<SortState>({ column: 'when', direction: 'desc' });
 
   const load = () => {
     setLoading(true);
@@ -31,51 +25,57 @@ const ActivityPage = () => {
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter(e =>
+    const filtered = !q ? entries : entries.filter(e =>
       [e.username, e.action, e.resource_type, String(e.resource_id), String(e.status_code)]
         .filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
-  }, [entries, filter]);
+    return [...filtered].sort((a, b) => {
+      const values: Record<string, [unknown, unknown]> = {
+        when: [new Date(a.created_at).getTime(), new Date(b.created_at).getTime()],
+        user: [a.username || '', b.username || ''],
+        action: [a.action || '', b.action || ''],
+        resource: [`${a.resource_type || ''}/${a.resource_id || ''}`, `${b.resource_type || ''}/${b.resource_id || ''}`],
+        code: [a.status_code || 0, b.status_code || 0],
+      };
+      const [left, right] = values[sort.column] || values.when;
+      const result = typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right));
+      return sort.direction === 'asc' ? result : -result;
+    });
+  }, [entries, filter, sort]);
 
-  if (loading && entries.length === 0) return <PageSpinner />;
+  const columns: DataColumn<any>[] = [
+    { id: 'when', header: 'When', sortable: true, cell: entry => <TimestampValue value={entry.created_at} className="text-[11px]" />, headerClassName: 'w-[190px]' },
+    { id: 'user', header: 'User', sortable: true, cell: entry => <span className="block max-w-[180px] truncate text-ink2">{entry.username || '—'}</span> },
+    { id: 'action', header: 'Action', sortable: true, cell: entry => <span className={`inline-block rounded border px-2 py-0.5 text-[10.5px] ${actionTone(entry.action)}`}>{entry.action}</span> },
+    { id: 'resource', header: 'Resource', sortable: true, cell: entry => <span className="block max-w-[360px] truncate text-mut">{entry.resource_type}{entry.resource_id ? `/${entry.resource_id}` : ''}</span> },
+    { id: 'code', header: 'Code', sortable: true, cell: entry => <StatusValue tone={entry.status_code >= 500 ? 'error' : entry.status_code >= 300 ? 'warning' : entry.status_code ? 'success' : 'neutral'} className="justify-end tabular-nums">{entry.status_code || '—'}</StatusValue>, headerClassName: 'w-[80px] text-right', cellClassName: 'text-right' },
+  ];
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-bg text-ink">
-      <div className="flex items-center gap-4 px-8 pt-6 pb-4 shrink-0">
-        <div>
-          <h1 className="text-[19px] font-semibold tracking-tight">Activity</h1>
-          <p className="text-[12.5px] text-mut mt-0.5">Audit log of who changed or launched what — superuser / auditor only.</p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
+    <Page layout="workspace" className="bg-bg text-ink">
+      <PageHeader layout="workspace" title="Activity" description="Audit log of who changed or launched what — superuser / auditor only." />
+      <PageToolbar className="mb-0 shrink-0 border-b border-line px-4 py-3 sm:px-6" summary={`${shown.length} ${shown.length === 1 ? 'entry' : 'entries'}`}>
+        <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
           <div className="flex items-center gap-2 h-8 px-3 rounded-md border border-line2 w-[220px]">
             <Search size={13} className="text-dim shrink-0" />
-            <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter" className="flex-1 bg-transparent outline-none text-[12px] text-ink placeholder:text-dim font-mono" />
+            <input aria-label="Filter activity" value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter" className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-dim font-mono" />
           </div>
-          <button onClick={load} disabled={loading} className="w-8 h-8 grid place-items-center rounded-md text-mut hover:text-ink hover:bg-white/5" title="Refresh"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button>
+          <button aria-label="Refresh activity" onClick={load} disabled={loading} className="w-8 h-8 grid place-items-center rounded-md text-mut hover:text-ink hover:bg-white/5" title="Refresh"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button>
         </div>
+      </PageToolbar>
+      <div className="flex-1 min-h-0 overflow-auto scroll-tint">
+        <DataTable
+          columns={columns}
+          rows={shown}
+          rowKey={entry => entry.id}
+          sort={sort}
+          onSortChange={setSort}
+          loading={loading}
+          emptyTitle={filter ? 'No matching activity' : 'No activity recorded'}
+          emptyDescription={filter ? 'Change or clear the filter to see more audit entries.' : 'Audited actions will appear here as they occur.'}
+          className="border-t-0"
+        />
       </div>
-
-      <div className="grid grid-cols-[180px_140px_150px_1fr_70px] items-center px-8 h-[32px] border-y border-line shrink-0 font-mono text-[9.5px] tracking-[0.1em] uppercase text-dim max-[820px]:grid-cols-[150px_1fr_60px]">
-        <span>When</span>
-        <span className="max-[820px]:hidden">User</span>
-        <span>Action</span>
-        <span className="max-[820px]:hidden">Resource</span>
-        <span className="text-right">Code</span>
-      </div>
-
-      <div className="flex-1 overflow-auto scroll-tint">
-        {shown.map(e => (
-          <div key={e.id} className="grid grid-cols-[180px_140px_150px_1fr_70px] items-center px-8 h-[42px] border-b border-line hover:bg-white/[0.02] font-mono text-[12px] max-[820px]:grid-cols-[150px_1fr_60px]">
-            <span className="text-dim tabular-nums text-[11px]">{new Date(e.created_at).toLocaleString()}</span>
-            <span className="text-ink2 truncate pr-3 max-[820px]:hidden">{e.username || '—'}</span>
-            <span><span className={`inline-block px-2 py-0.5 rounded border text-[10.5px] ${actionTone(e.action)}`}>{e.action}</span></span>
-            <span className="text-mut truncate pr-3 max-[820px]:hidden">{e.resource_type}{e.resource_id ? `/${e.resource_id}` : ''}</span>
-            <span className={`text-right tabular-nums ${statusTone(e.status_code)}`}>{e.status_code || '—'}</span>
-          </div>
-        ))}
-        {shown.length === 0 && <p className="px-8 py-10 text-center text-sm text-dim">{filter ? 'No matching activity.' : 'No activity recorded.'}</p>}
-      </div>
-    </div>
+    </Page>
   );
 };
 

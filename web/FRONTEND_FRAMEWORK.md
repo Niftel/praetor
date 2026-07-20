@@ -36,7 +36,7 @@ export function ResourcePage() {
 ## Migration sequence
 
 1. Framework foundation: page anatomy, state surfaces, exports, and component tests.
-2. Data framework: table/list primitives, pagination, bulk selection, status cells, and skeleton rows.
+2. Data framework: `DataTable` column definitions, controlled sorting, keyboard row activation, status/data/timestamp values, responsive overflow, and skeleton rows. Pagination and filtering remain page-owned so API behavior stays explicit.
 3. Form framework: field groups, validation summary, action footer, and dirty-state protection.
 4. Navigation framework: route metadata drives breadcrumbs, titles, capability visibility, and command-palette entries.
 5. Migrate one representative page and visually validate desktop, narrow desktop, and mobile widths.
