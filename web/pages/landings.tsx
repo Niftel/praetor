@@ -10,7 +10,7 @@ export const ProjectsLanding: React.FC = () => (
 );
 
 export const InventoriesLanding: React.FC = () => (
-    <OrgResourceLanding title="Inventories" basePath="/inventories" unit="inventory" fetchItems={api.getInventories} />
+    <OrgResourceLanding title="Inventories" basePath="/inventories" unit="inventory" pluralUnit="inventories" fetchItems={api.getInventories} />
 );
 
 export const TemplatesLanding: React.FC = () => (
