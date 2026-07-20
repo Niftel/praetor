@@ -25,7 +25,7 @@ require (
 	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
 	github.com/praetordev/scheduler v0.1.1
-	github.com/praetordev/store v0.1.3-0.20260720204150-ca15366faa9c
+	github.com/praetordev/store v0.1.3
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/crypto v0.54.0

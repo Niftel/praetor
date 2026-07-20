@@ -62,7 +62,7 @@ contracts:
   github.com/praetordev/models: v0.2.0
   github.com/praetordev/packspec: v0.1.0
   github.com/praetordev/rbac/v4: v4.0.0
-  github.com/praetordev/store: v0.1.3-0.20260720204150-ca15366faa9c
+  github.com/praetordev/store: v0.1.3
 
 # Independently released reusable modules. This is the authoritative health and
 # release inventory; local go.work entries are development conveniences only.
@@ -178,7 +178,7 @@ sharedModules:
   store:
     module: github.com/praetordev/store
     repository: Niftel/store
-    version: v0.1.3-0.20260720204150-ca15366faa9c
+    version: v0.1.3
     owner: control-plane
     securitySensitive: true
 
