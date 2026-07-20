@@ -54,6 +54,7 @@ GET     /api/v1/job-templates/{id}/notifications
 GET     /api/v1/jobs/
 GET     /api/v1/jobs/runs/{runID}
 GET     /api/v1/jobs/runs/{runID}/diagnostics
+GET     /api/v1/jobs/runs/{runID}/diagnostics/stream
 GET     /api/v1/jobs/runs/{runID}/events
 GET     /api/v1/jobs/runs/{runID}/logs
 GET     /api/v1/ldap/config

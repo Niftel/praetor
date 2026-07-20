@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,57 @@ func TestRunDiagnosticsPaginationAndRBAC(t *testing.T) {
 	resource.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("unauthorized diagnostics status=%d body=%s", rec.Code, rec.Body)
+	}
+
+	// A live request must release promptly when its client disconnects.
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	streamReq := httptest.NewRequest(http.MethodGet, "/runs/"+runID.String()+"/diagnostics/stream", nil)
+	streamReq = streamReq.WithContext(context.WithValue(streamCtx, middleware.UserContextKey, middleware.UserContext{UserID: readerID}))
+	streamDone := make(chan struct{})
+	go func() {
+		resource.Routes().ServeHTTP(httptest.NewRecorder(), streamReq)
+		close(streamDone)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancelStream()
+	select {
+	case <-streamDone:
+	case <-time.After(time.Second):
+		t.Fatal("diagnostic stream did not release after disconnect")
+	}
+
+	if _, err := db.Exec(`UPDATE execution_runs SET state='successful' WHERE id=$1`, runID); err != nil {
+		t.Fatal(err)
+	}
+	streamReq = httptest.NewRequest(http.MethodGet, "/runs/"+runID.String()+"/diagnostics/stream?cursor=1", nil)
+	streamReq.Header.Set("Last-Event-ID", "2") // header wins over the query cursor
+	streamReq = streamReq.WithContext(context.WithValue(streamReq.Context(), middleware.UserContextKey, middleware.UserContext{UserID: readerID}))
+	streamRec := httptest.NewRecorder()
+	resource.Routes().ServeHTTP(streamRec, streamReq)
+	if streamRec.Code != http.StatusOK {
+		t.Fatalf("stream status=%d body=%s", streamRec.Code, streamRec.Body)
+	}
+	body := streamRec.Body.String()
+	if strings.Contains(body, "id: 1\n") || strings.Contains(body, "id: 2\n") {
+		t.Fatalf("stream replayed acknowledged events: %s", body)
+	}
+	for _, expected := range []string{"id: 3\n", "id: 4\n", "id: 5\n", "event: terminal", `"state":"successful"`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("stream missing %q: %s", expected, body)
+		}
+	}
+	for _, forbidden := range []string{"stdout", "event_data", "credential", "secret"} {
+		if strings.Contains(strings.ToLower(body), forbidden) {
+			t.Fatalf("stream exposed forbidden field %q: %s", forbidden, body)
+		}
+	}
+
+	streamReq = httptest.NewRequest(http.MethodGet, "/runs/"+runID.String()+"/diagnostics/stream", nil)
+	streamReq = streamReq.WithContext(context.WithValue(streamReq.Context(), middleware.UserContextKey, middleware.UserContext{UserID: deniedID}))
+	streamRec = httptest.NewRecorder()
+	resource.Routes().ServeHTTP(streamRec, streamReq)
+	if streamRec.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized stream status=%d body=%s", streamRec.Code, streamRec.Body)
 	}
 }
 

@@ -41,6 +41,15 @@ type RunDiagnostics struct {
 	NextCursor *int64            `json:"next_cursor,omitempty"`
 }
 
+func FromDiagnosticEvent(event store.DiagnosticEvent) DiagnosticEvent {
+	return DiagnosticEvent{
+		Seq: event.Seq, EventType: event.EventType, HostID: event.HostID,
+		TaskName: event.TaskName, PlayName: event.PlayName, Outcome: event.Outcome,
+		Changed: event.Changed, DurationMS: event.DurationMS,
+		FailureCode: event.FailureCode, CreatedAt: event.CreatedAt,
+	}
+}
+
 func FromRunDiagnostics(summary store.DiagnosticSummary, events []store.DiagnosticEvent, nextCursor *int64) RunDiagnostics {
 	result := RunDiagnostics{Summary: DiagnosticSummary{
 		UnifiedJobID: summary.UnifiedJobID, State: summary.RunState,
@@ -50,12 +59,7 @@ func FromRunDiagnostics(summary store.DiagnosticSummary, events []store.Diagnost
 		SourceJobID: summary.SourceJobID, SubsequentJobIDs: summary.SubsequentJobIDs,
 	}, Events: make([]DiagnosticEvent, 0, len(events)), NextCursor: nextCursor}
 	for _, event := range events {
-		result.Events = append(result.Events, DiagnosticEvent{
-			Seq: event.Seq, EventType: event.EventType, HostID: event.HostID,
-			TaskName: event.TaskName, PlayName: event.PlayName, Outcome: event.Outcome,
-			Changed: event.Changed, DurationMS: event.DurationMS,
-			FailureCode: event.FailureCode, CreatedAt: event.CreatedAt,
-		})
+		result.Events = append(result.Events, FromDiagnosticEvent(event))
 	}
 	return result
 }
