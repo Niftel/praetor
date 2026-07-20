@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         // Proxy API requests to the backend server
         '/api': {
-          target: 'http://localhost:8080',
+          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8080',
           changeOrigin: true,
           secure: false,
         },
