@@ -34,11 +34,15 @@ type JobStore interface {
 	ListReadable(ctx context.Context, tmplIDs []int64, limit int) ([]models.UnifiedJob, error)
 	GetRun(ctx context.Context, runID uuid.UUID) (models.ExecutionRun, error)
 	ListEvents(ctx context.Context, runID uuid.UUID) ([]models.JobEvent, error)
+	ListDiagnostics(ctx context.Context, runID uuid.UUID, query store.DiagnosticQuery) ([]store.DiagnosticEvent, error)
+	DiagnosticSummary(ctx context.Context, runID uuid.UUID) (store.DiagnosticSummary, error)
 	TemplateIDForRun(ctx context.Context, runID uuid.UUID) (int64, bool, error)
+	InventoryIDForRun(ctx context.Context, runID uuid.UUID) (*int64, error)
 	// writes
 	LaunchTemplateInfo(ctx context.Context, unifiedTemplateID int64) (store.LaunchTemplateInfo, error)
 	ActiveJobCount(ctx context.Context, unifiedTemplateID int64) (int, error)
 	InsertPendingJob(ctx context.Context, name string, unifiedTemplateID int64, opts launch.Options) (int64, error)
+	SetRelaunchSource(ctx context.Context, jobID, sourceJobID, unifiedTemplateID int64) error
 	UnifiedJobIDForRun(ctx context.Context, runID uuid.UUID) (int64, error)
 	InsertJobEvent(ctx context.Context, evt *models.JobEvent) (int64, error)
 	JobCancelInfo(ctx context.Context, jobID int64) (store.JobCancelInfo, error)
@@ -104,6 +108,7 @@ func (rs *JobsResource) Routes() chi.Router {
 	r.Post("/{id}/cancel", rs.CancelJob)
 	r.Get("/runs/{runID}", rs.GetExecutionRun)
 	r.Get("/runs/{runID}/events", rs.ListJobEvents)
+	r.Get("/runs/{runID}/diagnostics", rs.ListRunDiagnostics)
 	r.Post("/runs/{runID}/events", rs.CreateJobEvent)
 	r.Get("/runs/{runID}/logs", rs.StreamRunLogs)
 	return r
@@ -150,6 +155,7 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 		Name                 string                 `json:"name"`
 		ExtraVars            map[string]interface{} `json:"extra_vars,omitempty"`
 		Limit                *string                `json:"limit,omitempty"`
+		RelaunchSourceJobID  *int64                 `json:"relaunch_source_job_id,omitempty"`
 	}
 	var req LaunchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -167,6 +173,13 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if !rs.authorize(w, r, rbac.JobTemplate, jt.ID, actExecute) {
 		return
+	}
+	if req.RelaunchSourceJobID != nil {
+		source, err := rs.store.JobCancelInfo(r.Context(), *req.RelaunchSourceJobID)
+		if err != nil || source.UnifiedJobTemplateID == nil || *source.UnifiedJobTemplateID != req.UnifiedJobTemplateID {
+			render.Render(w, r, ErrInvalidRequest(fmt.Errorf("relaunch source must belong to the same job template")))
+			return
+		}
 	}
 
 	// Execute access on a template is deliberately not enough to use the
@@ -232,6 +245,12 @@ func (rs *JobsResource) LaunchJob(w http.ResponseWriter, r *http.Request) {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
+	if req.RelaunchSourceJobID != nil {
+		if err := rs.store.SetRelaunchSource(r.Context(), jobID, *req.RelaunchSourceJobID, req.UnifiedJobTemplateID); err != nil {
+			render.Render(w, r, ErrInternal(err))
+			return
+		}
+	}
 
 	// Return created job - scheduler will assign current_run_id shortly
 	render.Status(r, http.StatusCreated)
@@ -285,6 +304,83 @@ func (rs *JobsResource) ListJobEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render.JSON(w, r, dto.FromJobEvents(events))
+}
+
+// ListRunDiagnostics returns a bounded, safe projection of execution evidence.
+// It never exposes raw event_data, stdout, launch arguments, or host names.
+func (rs *JobsResource) ListRunDiagnostics(w http.ResponseWriter, r *http.Request) {
+	runID, err := uuid.Parse(chi.URLParam(r, "runID"))
+	if err != nil {
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+	if !rs.authorizeRunRead(w, r, runID) {
+		return
+	}
+	inventoryID, err := rs.store.InventoryIDForRun(r.Context(), runID)
+	if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	if inventoryID != nil && !rs.authorize(w, r, rbac.Inventory, *inventoryID, actRead) {
+		return
+	}
+
+	query, err := parseDiagnosticQuery(r)
+	if err != nil {
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+	summary, err := rs.store.DiagnosticSummary(r.Context(), runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		render.Render(w, r, ErrNotFound)
+		return
+	} else if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	page, err := rs.store.ListDiagnostics(r.Context(), runID, query)
+	if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	hasMore := len(page) > query.Limit
+	if hasMore {
+		page = page[:query.Limit]
+	}
+	var nextCursor *int64
+	if hasMore && len(page) > 0 {
+		next := page[len(page)-1].Seq
+		nextCursor = &next
+	}
+	render.JSON(w, r, dto.FromRunDiagnostics(summary, page, nextCursor))
+}
+
+func parseDiagnosticQuery(r *http.Request) (store.DiagnosticQuery, error) {
+	query := store.DiagnosticQuery{Limit: 100, Kind: r.URL.Query().Get("kind"), Outcome: r.URL.Query().Get("outcome")}
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 0 {
+			return query, fmt.Errorf("cursor must be a non-negative event sequence")
+		}
+		query.AfterSeq = value
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			return query, fmt.Errorf("limit must be between 1 and 200")
+		}
+		query.Limit = value
+	}
+	validKind := map[string]bool{"": true, "all": true, "lifecycle": true, "task": true, "host": true, "failure": true}
+	if !validKind[query.Kind] {
+		return query, fmt.Errorf("kind must be all, lifecycle, task, host, or failure")
+	}
+	validOutcome := map[string]bool{"": true, "ok": true, "changed": true, "failed": true, "unreachable": true, "skipped": true}
+	if !validOutcome[query.Outcome] {
+		return query, fmt.Errorf("unsupported outcome filter")
+	}
+	return query, nil
 }
 
 // StreamRunLogs returns a run's full stdout. Bulk playbook output is streamed to

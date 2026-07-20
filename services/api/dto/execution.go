@@ -6,7 +6,59 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/praetordev/models"
+	"github.com/praetordev/store"
 )
+
+type DiagnosticSummary struct {
+	UnifiedJobID     int64      `json:"unified_job_id"`
+	State            string     `json:"state"`
+	CurrentPhase     string     `json:"current_phase"`
+	Attempt          int        `json:"attempt"`
+	SafeFailureCode  string     `json:"failure_code,omitempty"`
+	LastEventSeq     int64      `json:"last_event_seq"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	SourceJobID      *int64     `json:"source_job_id,omitempty"`
+	SubsequentJobIDs []int64    `json:"subsequent_job_ids"`
+}
+
+type DiagnosticEvent struct {
+	Seq         int64     `json:"seq"`
+	EventType   string    `json:"event_type"`
+	HostID      *int64    `json:"host_id,omitempty"`
+	TaskName    *string   `json:"task_name,omitempty"`
+	PlayName    *string   `json:"play_name,omitempty"`
+	Outcome     *string   `json:"outcome,omitempty"`
+	Changed     bool      `json:"changed,omitempty"`
+	DurationMS  *int64    `json:"duration_ms,omitempty"`
+	FailureCode *string   `json:"failure_code,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type RunDiagnostics struct {
+	Summary    DiagnosticSummary `json:"summary"`
+	Events     []DiagnosticEvent `json:"events"`
+	NextCursor *int64            `json:"next_cursor,omitempty"`
+}
+
+func FromRunDiagnostics(summary store.DiagnosticSummary, events []store.DiagnosticEvent, nextCursor *int64) RunDiagnostics {
+	result := RunDiagnostics{Summary: DiagnosticSummary{
+		UnifiedJobID: summary.UnifiedJobID, State: summary.RunState,
+		CurrentPhase: summary.CurrentPhase, Attempt: summary.Attempt,
+		SafeFailureCode: summary.SafeFailureCode, LastEventSeq: summary.LastEventSeq,
+		StartedAt: summary.StartedAt, FinishedAt: summary.FinishedAt,
+		SourceJobID: summary.SourceJobID, SubsequentJobIDs: summary.SubsequentJobIDs,
+	}, Events: make([]DiagnosticEvent, 0, len(events)), NextCursor: nextCursor}
+	for _, event := range events {
+		result.Events = append(result.Events, DiagnosticEvent{
+			Seq: event.Seq, EventType: event.EventType, HostID: event.HostID,
+			TaskName: event.TaskName, PlayName: event.PlayName, Outcome: event.Outcome,
+			Changed: event.Changed, DurationMS: event.DurationMS,
+			FailureCode: event.FailureCode, CreatedAt: event.CreatedAt,
+		})
+	}
+	return result
+}
 
 // UnifiedJob is the wire shape of a job.
 type UnifiedJob struct {

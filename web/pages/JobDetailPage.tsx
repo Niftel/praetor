@@ -286,7 +286,7 @@ const JobDetailPage = () => {
     if (!tmpl) { toast.error('This job has no template to relaunch'); return; }
     setBusy(true);
     try {
-      const res = await api.launchJob({ unified_job_template_id: tmpl, name: job.name });
+      const res = await api.launchJob({ unified_job_template_id: tmpl, name: job.name, relaunch_source_job_id: job.id });
       toast.success('Relaunched');
       const newId = res?.id ?? res?.job?.id;
       if (newId) navigate(`/jobs/${newId}`, { state: { job: res.job ?? res } });
