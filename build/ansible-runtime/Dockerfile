@@ -67,6 +67,13 @@ RUN set -eux; \
     chmod 0755 "$PREFIX/bin/praetor-host-runner"; \
     test -s "$PREFIX/bin/praetor-host-runner"
 
+# The host-runner enables this callback to produce the allowlisted task/host
+# diagnostics journal and durable checkpoint. Keep it inside the pack so every
+# managed host receives the runner and its matching execution instrumentation.
+COPY praetor_checkpoint.py ${PREFIX}/plugins/callback/praetor_checkpoint.py
+RUN chmod 0644 "${PREFIX}/plugins/callback/praetor_checkpoint.py" \
+ && test -s "${PREFIX}/plugins/callback/praetor_checkpoint.py"
+
 # Install the engine + module deps from the Gitea PyPI mirror only (mirrored by
 # scripts/mirror-pip.sh) — no public PyPI at build time. The requirements are read
 # from the validated requirements.txt in the build context; `pip install -r` means
