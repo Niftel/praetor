@@ -173,6 +173,8 @@ github.com/praetordev/metrics v0.1.1 h1:ewzE8bkGN23tqBN6yBRhxdPTEyGfZBRzShjpf1NL
 github.com/praetordev/metrics v0.1.1/go.mod h1:P7KurBxnPVuDwzk9uD9vaoKvnpZoZE/DMagRQ2GRsxQ=
 github.com/praetordev/models v0.2.0 h1:B2JiEc+gHnMtTkl838hNH1Wee9esnGwS8KZsg/aAPbQ=
 github.com/praetordev/models v0.2.0/go.mod h1:Q0VzThsStaMr64YW3kAe8pCFT846k75RU0dJj2nETMc=
+github.com/praetordev/models v0.2.1 h1:+Zn+2ayyOOohXDjfL9m8e9ogoKs+hIb/tVjcgO1zKqM=
+github.com/praetordev/models v0.2.1/go.mod h1:Q0VzThsStaMr64YW3kAe8pCFT846k75RU0dJj2nETMc=
 github.com/praetordev/notify v0.1.0 h1:YpTErKoNHrO3+XNrQic9lUVwTRjfnOf4iCHpAI5MlQs=
 github.com/praetordev/notify v0.1.0/go.mod h1:v87tYub+HhWUXgUUiKDUZyE5Nc98YwMSDcBJoeT2bCs=
 github.com/praetordev/objectstore v0.1.2 h1:WeI0MvVZEBOAm/yyIAuse1Y608H2b92G6lqNUkZux1g=
@@ -191,6 +193,8 @@ github.com/praetordev/scheduler v0.1.1 h1:llSDAU/Rx1LsRqak0FAR8DrJ3MLbQnFSA2xPRw
 github.com/praetordev/scheduler v0.1.1/go.mod h1:WG4EHSicZ68BnrOQpCe/Y308qTPbSlbyiFIjtXfSlaE=
 github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93 h1:M6PdskEqt8auljW7/MWOU29fX56ADi8Tl4w4qIW7avc=
 github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93/go.mod h1:8zaEKfKoUADXdNovZORlE1WznHh/Mhery/KzEhYE2Xo=
+github.com/praetordev/scheduler v0.1.4 h1:hl54Ma3Ewoyawl3IBeu8JSEqGH9EfBLpQjW6JYDAZDI=
+github.com/praetordev/scheduler v0.1.4/go.mod h1:3sSlTYw1u70BTCNG/u1KUgTYCxM8NJVMxcHi2AgYr8Q=
 github.com/praetordev/store v0.1.2 h1:uH5ICkUFML1ymItKJk0MdpQfp0BgA3zKF4jbbGtiirk=
 github.com/praetordev/store v0.1.2/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
 github.com/praetordev/store v0.1.3-0.20260720203755-1785f165f30a h1:W5BfMaNwUGrpSMUNRGhKEUTTmwZwlLCplvgNVJxwmr4=
@@ -199,6 +203,10 @@ github.com/praetordev/store v0.1.3-0.20260720204150-ca15366faa9c h1:peRNk+eHm3CJ
 github.com/praetordev/store v0.1.3-0.20260720204150-ca15366faa9c/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
 github.com/praetordev/store v0.1.3 h1:QTxLQovHSDX7mv49XHI2rDGDQdZcdCOE2nS1yyZAiLo=
 github.com/praetordev/store v0.1.3/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
+github.com/praetordev/store v0.1.4 h1:amKcIt9zXbQTAoiPidbrLsBxLrE4bsVqRQ1HK9F85/E=
+github.com/praetordev/store v0.1.4/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
+github.com/praetordev/store v0.1.5 h1:16NJw7ETHrLQJrlPihHL2Vha54JRYKAw9iwyllFEqSU=
+github.com/praetordev/store v0.1.5/go.mod h1:ZAz9pBM3P3zF42HEfA4mDpPA8CO/USde7wR0ZgfQ4P8=
 github.com/prometheus/client_golang v1.23.2 h1:Je96obch5RDVy3FDMndoUsjAhG5Edi49h0RJWRi/o0o=
 github.com/prometheus/client_golang v1.23.2/go.mod h1:Tb1a6LWHB3/SPIzCoaDXI4I8UHKeFTEQ1YCr+0Gyqmg=
 github.com/prometheus/client_model v0.6.2 h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=

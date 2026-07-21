@@ -27,8 +27,9 @@ type ScheduleStore interface {
 	Create(ctx context.Context, sched models.Schedule) (int64, error)
 	Update(ctx context.Context, sched models.Schedule) error
 	Delete(ctx context.Context, id int64) error
-	TargetOrg(ctx context.Context, wfID, ujtID *int64) (int64, bool)
+	TargetOrg(ctx context.Context, wfID, ujtID, sourceID *int64) (int64, bool)
 	ScheduleOrg(ctx context.Context, id int64) (int64, bool)
+	InventoryIDBySource(ctx context.Context, sourceID int64) (int64, bool)
 }
 
 type SchedulesResource struct {
@@ -79,24 +80,52 @@ func (rs *SchedulesResource) ListSchedules(w http.ResponseWriter, r *http.Reques
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	render.JSON(w, r, dto.FromSchedules(schedules))
+	visible := schedules[:0]
+	for _, sched := range schedules {
+		if sched.InventorySourceID == nil {
+			visible = append(visible, sched)
+			continue
+		}
+		inventoryID, ok := rs.store.InventoryIDBySource(r.Context(), *sched.InventorySourceID)
+		if !ok {
+			continue
+		}
+		allowed, aerr := rs.canAuthorize(r, rbac.Inventory, inventoryID, actRead)
+		if aerr != nil {
+			render.Render(w, r, ErrInternal(aerr))
+			return
+		}
+		if allowed {
+			visible = append(visible, sched)
+		}
+	}
+	render.JSON(w, r, dto.FromSchedules(visible))
 }
 
 func (rs *SchedulesResource) GetSchedule(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
-	if org, ok := rs.store.ScheduleOrg(r.Context(), id); !ok {
-		render.Render(w, r, ErrNotFound)
-		return
-	} else if !rs.authorize(w, r, rbac.Organization, org, actRead) {
-		return
-	}
 	sched, err := rs.store.Get(r.Context(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		render.Render(w, r, ErrNotFound)
 		return
 	} else if err != nil {
 		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	if sched.InventorySourceID != nil {
+		inventoryID, ok := rs.store.InventoryIDBySource(r.Context(), *sched.InventorySourceID)
+		if !ok {
+			render.Render(w, r, ErrNotFound)
+			return
+		}
+		if !rs.authorize(w, r, rbac.Inventory, inventoryID, actRead) {
+			return
+		}
+	} else if org, ok := rs.store.ScheduleOrg(r.Context(), id); !ok {
+		render.Render(w, r, ErrNotFound)
+		return
+	} else if !rs.authorize(w, r, rbac.Organization, org, actRead) {
 		return
 	}
 	render.JSON(w, r, dto.FromSchedule(sched))
@@ -110,22 +139,33 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 	}
 	sched := body.ToModel()
 
-	// Validation: name + rrule, and exactly one target (job template XOR workflow).
+	// Validation: name + rrule, and exactly one target.
 	if sched.Name == "" || sched.RRule == "" {
 		render.Render(w, r, ErrInvalidRequest(nil))
 		return
 	}
-	if (sched.UnifiedJobTemplateID == nil) == (sched.WorkflowTemplateID == nil) {
+	targets := 0
+	for _, target := range []*int64{sched.UnifiedJobTemplateID, sched.WorkflowTemplateID, sched.InventorySourceID} {
+		if target != nil {
+			targets++
+		}
+	}
+	if targets != 1 {
 		render.Render(w, r, ErrInvalidRequest(nil))
 		return
 	}
 	// Only an admin of the target's organization may schedule it.
-	org, ok := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID)
+	org, ok := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID, sched.InventorySourceID)
 	if !ok {
 		render.Render(w, r, ErrInvalidRequest(nil))
 		return
 	}
-	if !rs.authorize(w, r, rbac.Organization, org, actAdmin) {
+	if sched.InventorySourceID != nil {
+		inventoryID, found := rs.store.InventoryIDBySource(r.Context(), *sched.InventorySourceID)
+		if !found || !rs.authorize(w, r, rbac.Inventory, inventoryID, actUpdate) {
+			return
+		}
+	} else if !rs.authorize(w, r, rbac.Organization, org, actAdmin) {
 		return
 	}
 
@@ -141,6 +181,8 @@ func (rs *SchedulesResource) CreateSchedule(w http.ResponseWriter, r *http.Reque
 	sched.CreatedAt = time.Now()
 	sched.ModifiedAt = time.Now()
 	sched.Enabled = true // Default enabled
+	actorID := currentUser(r).UserID
+	sched.ActorUserID = &actorID
 	if len(sched.ExtraVars) == 0 {
 		sched.ExtraVars = json.RawMessage("{}") // jsonb column rejects an empty value
 	}
@@ -165,12 +207,22 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Must admin the schedule's current org.
+	existing, getErr := rs.store.Get(r.Context(), id)
+	if getErr != nil {
+		render.Render(w, r, ErrNotFound)
+		return
+	}
 	curOrg, ok := rs.store.ScheduleOrg(r.Context(), id)
 	if !ok {
 		render.Render(w, r, ErrNotFound)
 		return
 	}
-	if !rs.authorize(w, r, rbac.Organization, curOrg, actAdmin) {
+	if existing.InventorySourceID != nil {
+		inventoryID, found := rs.store.InventoryIDBySource(r.Context(), *existing.InventorySourceID)
+		if !found || !rs.authorize(w, r, rbac.Inventory, inventoryID, actUpdate) {
+			return
+		}
+	} else if !rs.authorize(w, r, rbac.Organization, curOrg, actAdmin) {
 		return
 	}
 
@@ -181,8 +233,29 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 	}
 	sched := body.ToModel()
 	sched.ID = id
-	// If the target changed, the caller must also admin the new target's org.
-	if newOrg, ok := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID); ok && newOrg != curOrg {
+	targets := 0
+	for _, target := range []*int64{sched.UnifiedJobTemplateID, sched.WorkflowTemplateID, sched.InventorySourceID} {
+		if target != nil {
+			targets++
+		}
+	}
+	if targets != 1 {
+		render.Render(w, r, ErrInvalidRequest(nil))
+		return
+	}
+	// The caller must hold the target-specific scheduling permission even when
+	// switching between targets in the same organization.
+	newOrg, targetExists := rs.store.TargetOrg(r.Context(), sched.WorkflowTemplateID, sched.UnifiedJobTemplateID, sched.InventorySourceID)
+	if !targetExists {
+		render.Render(w, r, ErrInvalidRequest(nil))
+		return
+	}
+	if sched.InventorySourceID != nil {
+		inventoryID, found := rs.store.InventoryIDBySource(r.Context(), *sched.InventorySourceID)
+		if !found || !rs.authorize(w, r, rbac.Inventory, inventoryID, actUpdate) {
+			return
+		}
+	} else if newOrg != curOrg {
 		if !rs.authorize(w, r, rbac.Organization, newOrg, actAdmin) {
 			return
 		}
@@ -198,6 +271,8 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 	// Recalculate NextRun
 	sched.NextRun = rule.After(time.Now(), false)
 	sched.ModifiedAt = time.Now()
+	actorID := currentUser(r).UserID
+	sched.ActorUserID = &actorID
 	if len(sched.ExtraVars) == 0 {
 		sched.ExtraVars = json.RawMessage("{}")
 	}
@@ -212,6 +287,23 @@ func (rs *SchedulesResource) UpdateSchedule(w http.ResponseWriter, r *http.Reque
 
 func (rs *SchedulesResource) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	sched, err := rs.store.Get(r.Context(), id)
+	if err != nil {
+		render.Render(w, r, ErrNotFound)
+		return
+	}
+	if sched.InventorySourceID != nil {
+		inventoryID, ok := rs.store.InventoryIDBySource(r.Context(), *sched.InventorySourceID)
+		if !ok || !rs.authorize(w, r, rbac.Inventory, inventoryID, actUpdate) {
+			return
+		}
+		if err := rs.store.Delete(r.Context(), id); err != nil {
+			render.Render(w, r, ErrInternal(err))
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	org, ok := rs.store.ScheduleOrg(r.Context(), id)
 	if !ok {
 		render.Render(w, r, ErrNotFound)

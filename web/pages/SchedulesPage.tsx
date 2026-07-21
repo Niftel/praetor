@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
-import { Schedule, Template, Workflow, EventTrigger, WebhookTrigger } from '../types';
+import { Inventory, Schedule, Template, Workflow, EventTrigger, WebhookTrigger } from '../types';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { Input, Select } from '../components/ui/Input';
@@ -12,8 +12,9 @@ import {
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 
-type TargetType = 'job' | 'workflow';
+type TargetType = 'job' | 'workflow' | 'inventory_source';
 type FilterKind = 'all' | 'sched' | 'event' | 'hook';
+interface SourceTarget { id: number; inventory_id: number; inventory_name: string; organization_id: number; name: string; }
 
 const EVENT_LABEL: Record<string, string> = { job_succeeded: 'succeeds', job_failed: 'fails', job_finished: 'finishes' };
 const ROOT = '__root';
@@ -100,6 +101,7 @@ const SchedulesPage = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [sourceTargets, setSourceTargets] = useState<SourceTarget[]>([]);
   const [eventTriggers, setEventTriggers] = useState<EventTrigger[]>([]);
   const [webhookTriggers, setWebhookTriggers] = useState<WebhookTrigger[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,13 +140,19 @@ const SchedulesPage = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [s, t, wf, et, wh, orgs] = await Promise.all([
+      const [s, t, wf, et, wh, orgs, inventoriesResponse] = await Promise.all([
         api.getSchedules().catch(() => []), api.getTemplates().catch(() => ({})), api.getWorkflows().catch(() => []),
-        api.getEventTriggers().catch(() => []), api.getWebhookTriggers().catch(() => []), api.getOrganizations().catch(() => []),
+        api.getEventTriggers().catch(() => []), api.getWebhookTriggers().catch(() => []), api.getOrganizations().catch(() => []), api.getInventories().catch(() => []),
       ]);
       setSchedules(unwrap(s)); setTemplates(unwrap(t)); setWorkflows(unwrap(wf));
       setEventTriggers(unwrap(et)); setWebhookTriggers(unwrap(wh));
       setOrgName(unwrap<{ id: number; name: string }>(orgs).find(o => o.id === orgId)?.name ?? `Org ${orgId}`);
+      const inventories = unwrap<Inventory>(inventoriesResponse).filter(inventory => inventory.organization_id === orgId);
+      const sourceLists = await Promise.all(inventories.map(async inventory => {
+        const sources = await api.getInventorySources(inventory.id).catch(() => []);
+        return (sources || []).map((source: { id: number; name: string }) => ({ id: source.id, name: source.name, inventory_id: inventory.id, inventory_name: inventory.name, organization_id: inventory.organization_id }));
+      }));
+      setSourceTargets(sourceLists.flat());
     } catch (err) { console.error('Failed to load triggers', err); }
     finally { setLoading(false); }
   };
@@ -153,7 +161,7 @@ const SchedulesPage = () => {
   const templateUjt = (t: Template) => (t as any).unified_job_template_id || t.id;
   const templateNameByUjt = (ujt?: number | null) => templates.find(t => templateUjt(t) === ujt)?.name || (ujt ? `template ${ujt}` : '—');
   const workflowName = (id?: number | null) => workflows.find(w => w.id === id)?.name || (id ? `workflow ${id}` : '—');
-  const scheduleOrgId = (s: Schedule): number | undefined => s.workflow_template_id ? workflows.find(w => w.id === s.workflow_template_id)?.organization_id : (templates.find(t => templateUjt(t) === s.unified_job_template_id) as any)?.organization_id;
+  const scheduleOrgId = (s: Schedule): number | undefined => s.inventory_source_id ? sourceTargets.find(source => source.id === s.inventory_source_id)?.organization_id : s.workflow_template_id ? workflows.find(w => w.id === s.workflow_template_id)?.organization_id : (templates.find(t => templateUjt(t) === s.unified_job_template_id) as any)?.organization_id;
   const webhookOrgId = (t: WebhookTrigger): number | undefined => t.kind === 'workflow' ? workflows.find(w => w.id === t.id)?.organization_id : t.kind === 'job_template' ? (templates.find(x => x.id === t.id) as any)?.organization_id : undefined;
 
   const orgTemplates = templates.filter(t => (t as any).organization_id === orgId);
@@ -163,8 +171,8 @@ const SchedulesPage = () => {
   const shownWebhooks = webhookTriggers.filter(t => webhookOrgId(t) === orgId);
   const counts = { all: shownSchedules.length + shownEventTriggers.length + shownWebhooks.length, sched: shownSchedules.length, event: shownEventTriggers.length, hook: shownWebhooks.length };
 
-  const scheduleTargetName = (s: Schedule) => s.workflow_template_id ? workflowName(s.workflow_template_id) : templateNameByUjt(s.unified_job_template_id);
-  const scheduleTargetKind = (s: Schedule) => s.workflow_template_id ? 'workflow' : 'template';
+  const scheduleTargetName = (s: Schedule) => s.inventory_source_id ? (() => { const source = sourceTargets.find(item => item.id === s.inventory_source_id); return source ? `${source.inventory_name} / ${source.name}` : `inventory source ${s.inventory_source_id}`; })() : s.workflow_template_id ? workflowName(s.workflow_template_id) : templateNameByUjt(s.unified_job_template_id);
+  const scheduleTargetKind = (s: Schedule) => s.inventory_source_id ? 'inventory source' : s.workflow_template_id ? 'workflow' : 'template';
 
   // Group by leaf folder container ('__root' when ungrouped/removed).
   const byContainer = useMemo(() => {
@@ -238,7 +246,9 @@ const SchedulesPage = () => {
   const createSchedule = async () => {
     if (!sched.name || !sched.target) return;
     const body: any = { name: sched.name, rrule: sched.rrule };
-    if (sched.targetType === 'workflow') body.workflow_template_id = sched.target; else body.unified_job_template_id = sched.target;
+    if (sched.targetType === 'workflow') body.workflow_template_id = sched.target;
+    else if (sched.targetType === 'inventory_source') body.inventory_source_id = sched.target;
+    else body.unified_job_template_id = sched.target;
     try { await api.createSchedule(body); setShowSchedule(false); setSched({ name: '', targetType: 'job', target: 0, rrule: 'FREQ=DAILY;INTERVAL=1' }); fetchData(); }
     catch (err) { console.error(err); toast.error('Failed to create schedule'); }
   };
@@ -302,7 +312,7 @@ const SchedulesPage = () => {
           <div className="mt-1.5 flex items-center gap-2.5 flex-wrap font-mono text-[12px] text-mut">
             <span className={h.fallback ? 'text-dim' : ''}>{h.text}</span>
             <ArrowRight size={13} className="text-faint" />
-            <span className="inline-flex items-center gap-1.5 text-ink font-medium">{scheduleTargetName(s)}<Tag>{scheduleTargetKind(s)}</Tag></span>
+            {s.inventory_source_id ? <Link to={`/inventories/org/${orgId}?inventory=${sourceTargets.find(source => source.id === s.inventory_source_id)?.inventory_id || ''}&source=${s.inventory_source_id}`} className="inline-flex items-center gap-1.5 text-ink font-medium hover:text-acc">{scheduleTargetName(s)}<Tag>{scheduleTargetKind(s)}</Tag></Link> : <span className="inline-flex items-center gap-1.5 text-ink font-medium">{scheduleTargetName(s)}<Tag>{scheduleTargetKind(s)}</Tag></span>}
           </div>
         </div>
         <div className="flex items-center gap-3.5 shrink-0">
@@ -505,11 +515,11 @@ const SchedulesPage = () => {
           <Input label="Name" value={sched.name} onChange={e => setSched({ ...sched, name: e.target.value })} placeholder="Nightly deploy" />
           <div className="grid grid-cols-2 gap-3">
             <Select label="Launch" value={sched.targetType} onChange={e => setSched({ ...sched, targetType: e.target.value as TargetType, target: 0 })}>
-              <option value="job">Job template</option><option value="workflow">Workflow</option>
+              <option value="job">Job template</option><option value="workflow">Workflow</option><option value="inventory_source">Inventory source</option>
             </Select>
-            <Select label={sched.targetType === 'workflow' ? 'Workflow' : 'Template'} value={sched.target} onChange={e => setSched({ ...sched, target: Number(e.target.value) })}>
+            <Select label={sched.targetType === 'workflow' ? 'Workflow' : sched.targetType === 'inventory_source' ? 'Inventory source' : 'Template'} value={sched.target} onChange={e => setSched({ ...sched, target: Number(e.target.value) })}>
               <option value={0}>Select…</option>
-              {sched.targetType === 'workflow' ? orgWorkflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>) : orgTemplates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
+              {sched.targetType === 'workflow' ? orgWorkflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>) : sched.targetType === 'inventory_source' ? sourceTargets.map(source => <option key={source.id} value={source.id}>{source.inventory_name} / {source.name}</option>) : orgTemplates.map(t => <option key={t.id} value={templateUjt(t)}>{t.name}</option>)}
             </Select>
           </div>
           <Input label="RRule" className="font-mono text-sm" value={sched.rrule} onChange={e => setSched({ ...sched, rrule: e.target.value })} placeholder="FREQ=DAILY;INTERVAL=1" />

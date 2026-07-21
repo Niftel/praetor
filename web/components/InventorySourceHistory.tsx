@@ -1,36 +1,60 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, Clock3, Loader } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, Clock3, Loader, Square } from 'lucide-react';
 import { api } from '../services/api';
 import { InventorySyncHistory } from '../types';
 
 interface Props {
   inventoryId: number;
   sourceId: number;
+  onTerminal?: () => void;
+  canCancel?: boolean;
 }
 
 const statusIcon = (entry: InventorySyncHistory) => {
   if (entry.status === 'successful') return <CheckCircle2 size={14} className="text-ok" />;
   if (entry.status === 'failed') return <AlertTriangle size={14} className="text-err" />;
+  if (entry.status === 'canceled') return <Ban size={14} className="text-dim" />;
   if (entry.status === 'running') return <Loader size={14} className="text-acc animate-spin" />;
   return <Clock3 size={14} className="text-dim" />;
 };
 
-export default function InventorySourceHistoryList({ inventoryId, sourceId }: Props) {
+export default function InventorySourceHistoryList({ inventoryId, sourceId, onTerminal, canCancel = false }: Props) {
   const [entries, setEntries] = useState<InventorySyncHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setFailed(false);
-    api.getInventorySourceHistory(inventoryId, sourceId, { limit: 10 })
-      .then(response => { if (active) setEntries(response.results || []); })
-      .catch(() => { if (active) setFailed(true); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    let timer: number | undefined;
+    let hadActive = false;
+    const load = async () => {
+      try {
+        const response = await api.getInventorySourceHistory(inventoryId, sourceId, { limit: 10 });
+        if (!active) return;
+        const next = response.results || [];
+        const hasActive = next.some((entry: InventorySyncHistory) => entry.status === 'pending' || entry.status === 'running');
+        setEntries(next); setFailed(false); setLoading(false);
+        if (hadActive && !hasActive) onTerminal?.();
+        hadActive = hasActive;
+        if (hasActive) timer = window.setTimeout(load, 2000);
+      } catch {
+        if (active) { setFailed(true); setLoading(false); }
+      }
+    };
+    setLoading(true); setFailed(false); load();
+    return () => { active = false; if (timer) window.clearTimeout(timer); };
+    // onTerminal is an event hook, not part of the identity of this source feed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inventoryId, sourceId]);
+
+  const cancel = async (jobId: number) => {
+    try {
+      await api.cancelJob(jobId);
+      setEntries(current => current.map(entry => entry.unified_job_id === jobId ? { ...entry, status: 'canceled', phase: 'completed' } : entry));
+      onTerminal?.();
+    } catch { setFailed(true); }
+  };
 
   if (loading) return <div className="flex items-center gap-2 py-3 text-xs text-dim"><Loader size={13} className="animate-spin" /> Loading sync history…</div>;
   if (failed) return <p className="py-3 text-xs text-err">Sync history could not be loaded.</p>;
@@ -55,6 +79,7 @@ export default function InventorySourceHistoryList({ inventoryId, sourceId }: Pr
           <div className="text-right whitespace-nowrap text-dim">
             <div>{new Date(entry.created_at).toLocaleString()}</div>
             {entry.unified_job_id && <Link to={`/jobs/${entry.unified_job_id}`} className="font-mono text-acc hover:underline">job {entry.unified_job_id}</Link>}
+            {canCancel && entry.unified_job_id && (entry.status === 'pending' || entry.status === 'running') && <button onClick={() => cancel(entry.unified_job_id!)} className="ml-2 inline-flex items-center gap-1 font-mono text-err hover:underline"><Square size={10} /> cancel</button>}
           </div>
         </div>
       ))}

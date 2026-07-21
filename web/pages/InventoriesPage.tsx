@@ -34,6 +34,8 @@ const showVal = (v: any): string => (typeof v === 'object' && v !== null ? JSON.
 const InventoriesPage = () => {
   const { orgId: orgIdStr } = useParams();
   const orgId = Number(orgIdStr);
+	const requestedInventoryId = Number(new URLSearchParams(window.location.search).get('inventory')) || null;
+	const requestedSourceId = Number(new URLSearchParams(window.location.search).get('source')) || null;
 	const navigate = useNavigate();
   const [orgName, setOrgName] = useState('');
   const [inventories, setInventories] = useState<Inventory[]>([]);
@@ -86,10 +88,11 @@ const InventoriesPage = () => {
       setLoading(true);
       const items = unwrap<Inventory>(await api.getInventories()).filter(i => (i as any).organization_id === orgId);
       setInventories(items);
-      setSelectedInventoryId(prev => prev ?? (items[0]?.id ?? null));
+      setSelectedInventoryId(prev => prev ?? (items.some(item => item.id === requestedInventoryId) ? requestedInventoryId : (items[0]?.id ?? null)));
+	  if (requestedSourceId) setExpandedSourceHistory(requestedSourceId);
     } catch (err) { setError('Failed to load inventories'); console.error(err); }
     finally { setLoading(false); }
-  }, [orgId]);
+  }, [orgId, requestedInventoryId, requestedSourceId]);
 
   useEffect(() => {
     fetchInventories();
@@ -230,7 +233,7 @@ const InventoriesPage = () => {
     if (!selectedInventoryId) return;
     await api.syncInventorySource(selectedInventoryId, sid);
     toast.info('Sync started');
-    setTimeout(refreshHosts, 4000); setTimeout(refreshHosts, 9000);
+    setExpandedSourceHistory(sid);
   };
 	const previewSource = async (sid: number) => {
 		if (!selectedInventoryId) return;
@@ -251,6 +254,7 @@ const InventoriesPage = () => {
   const { capabilities: inventoryCapabilities, loading: inventoryCapabilitiesLoading } = useCapabilities('inventory', selectedInventoryId);
   const canCreateInventory = !orgCapabilitiesLoading && !!orgCapabilities.add_inventory;
   const canManageInventory = !inventoryCapabilitiesLoading && inventoryCapabilities.manage;
+  const canSyncInventory = !inventoryCapabilitiesLoading && (inventoryCapabilities.update || inventoryCapabilities.manage);
 	const selectedSourceType = sourceTypes.find(t => t.id === newSource.source_type);
 	const credentialTypeNames = new Map(credentialTypes.map(t => [t.id, t.name]));
 	const compatibleCredentials = selectedSourceType?.compatible_credential_types.length
@@ -494,7 +498,7 @@ const InventoriesPage = () => {
                   <h1 className="text-[21px] font-semibold tracking-tight">{selectedInv.name}</h1>
                   <p className="text-sm text-mut mt-1">Select a host in the structure to {canManageInventory ? 'edit' : 'inspect'} its connection and variables.</p>
 
-                  <Section title="Sources" hint={`${sources.length}`} action={canManageInventory ? <button onClick={() => setShowSourceModal(true)} className="font-mono text-[11px] text-dim hover:text-acc">add source</button> : undefined}>
+                  <Section title="Sources" hint={`${sources.length}`} action={<div className="flex items-center gap-3"><Link to={`/schedules/org/${orgId}`} className="font-mono text-[11px] text-dim hover:text-acc">schedules</Link>{canManageInventory && <button onClick={() => setShowSourceModal(true)} className="font-mono text-[11px] text-dim hover:text-acc">add source</button>}</div>}>
                     {sources.length === 0 ? <p className="font-mono text-[12px] text-faint py-1">No dynamic sources. Add one to populate hosts (e.g. AWS).</p> : (
                       <div className="space-y-0">
                         {sources.map(s => (
@@ -504,11 +508,11 @@ const InventoriesPage = () => {
                             <span className="font-mono text-[11px] text-dim">{s.source_kind}</span>
                             <span className="ml-auto font-mono text-[11px] text-dim max-[520px]:order-4 max-[520px]:basis-full max-[520px]:ml-0">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
 							<button onClick={() => setExpandedSourceHistory(current => current === s.id ? null : s.id)} className="font-mono text-[10px] text-dim hover:text-ink" aria-expanded={expandedSourceHistory === s.id}>history</button>
-							{canManageInventory && <button onClick={() => previewSource(s.id)} className="text-mut hover:text-ink" title="Test and preview without changing inventory"><Search size={14} /></button>}
-							{canManageInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
+							{canSyncInventory && <button onClick={() => previewSource(s.id)} className="text-mut hover:text-ink" title="Test and preview without changing inventory"><Search size={14} /></button>}
+							{canSyncInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
                             {canManageInventory && <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>}
                           </div>
-                          {expandedSourceHistory === s.id && selectedInventoryId && <InventorySourceHistoryList inventoryId={selectedInventoryId} sourceId={s.id} />}
+						  {expandedSourceHistory === s.id && selectedInventoryId && <InventorySourceHistoryList inventoryId={selectedInventoryId} sourceId={s.id} onTerminal={refreshHosts} canCancel={canSyncInventory} />}
                           </div>
                         ))}
                       </div>

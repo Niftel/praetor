@@ -520,6 +520,21 @@ func (rs *JobsResource) CancelJob(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	} else if job.InventorySourceID != nil {
+		var inventoryID int64
+		if err := rs.DB.GetContext(r.Context(), &inventoryID,
+			`SELECT inventory_id FROM inventory_sources WHERE id=$1`, *job.InventorySourceID); err != nil {
+			render.Render(w, r, ErrInvalidRequest(fmt.Errorf("unknown inventory source")))
+			return
+		}
+		if !rs.authorize(w, r, rbac.Inventory, inventoryID, actUpdate) {
+			return
+		}
+	} else {
+		// Template-less jobs without a recognized governing resource are internal
+		// and cannot be canceled through the user API.
+		render.Render(w, r, ErrForbidden)
+		return
 	}
 	switch job.Status {
 	case "successful", "failed", "canceled", "error":

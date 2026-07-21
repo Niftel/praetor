@@ -164,7 +164,7 @@ export interface InventorySyncHistory {
   credential_id?: number;
   reconciliation_policy: InventoryReconciliationPolicy;
   phase: 'queued' | 'acquisition' | 'parsing' | 'validation' | 'reconciliation' | 'completed';
-  status: 'pending' | 'running' | 'successful' | 'failed';
+  status: 'pending' | 'running' | 'successful' | 'failed' | 'canceled';
   hosts_added: number;
   hosts_updated: number;
   hosts_disabled: number;
@@ -233,6 +233,7 @@ export interface Schedule {
   description?: string;
   unified_job_template_id?: number | null;
   workflow_template_id?: number | null;
+  inventory_source_id?: number | null;
   rrule: string;
   next_run: string;
   enabled: boolean;
