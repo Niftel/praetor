@@ -68,3 +68,17 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestSupportsCredentialType(t *testing.T) {
+	aws, _ := Get("aws_ec2")
+	if !SupportsCredentialType(aws, "Amazon Web Services") {
+		t.Fatal("AWS credential should be compatible")
+	}
+	if SupportsCredentialType(aws, "Machine") {
+		t.Fatal("Machine credential must not be compatible with AWS")
+	}
+	custom, _ := Get("custom")
+	if !SupportsCredentialType(custom, "User-defined credential") {
+		t.Fatal("custom source should accept user-selected credential types")
+	}
+}

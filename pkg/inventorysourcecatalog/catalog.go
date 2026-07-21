@@ -130,6 +130,18 @@ func Get(id string) (SourceType, bool) {
 	return SourceType{}, false
 }
 
+func SupportsCredentialType(sourceType SourceType, credentialType string) bool {
+	if len(sourceType.CompatibleCredentialTypes) == 0 {
+		return true
+	}
+	for _, allowed := range sourceType.CompatibleCredentialTypes {
+		if credentialType == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 // Validate checks catalog identity, YAML shape, the curated plugin identifier,
 // and required catalog fields. It deliberately does not execute plugin code.
 func Validate(id, source string) []FieldError {

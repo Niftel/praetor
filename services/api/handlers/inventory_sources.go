@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/praetordev/launch"
 	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
+	"github.com/praetordev/praetor/pkg/inventorysourcecatalog"
 	"github.com/praetordev/render"
 )
 
@@ -45,6 +47,7 @@ func (rs *InventoriesResource) CreateInventorySource(w http.ResponseWriter, r *h
 	}
 	var body struct {
 		Name           string `json:"name"`
+		SourceType     string `json:"source_type"`
 		SourceKind     string `json:"source_kind"`
 		Source         string `json:"source"`
 		CredentialID   *int64 `json:"credential_id"`
@@ -56,6 +59,37 @@ func (rs *InventoriesResource) CreateInventorySource(w http.ResponseWriter, r *h
 	}
 	if body.SourceKind == "" {
 		body.SourceKind = "inventory"
+	}
+	if body.SourceType != "" {
+		sourceType, ok := inventorysourcecatalog.Get(body.SourceType)
+		if !ok {
+			render.ErrInvalidRequest(fmt.Errorf("source_type: unsupported inventory source type %q", body.SourceType)).Render(w, r)
+			return
+		}
+		if body.SourceKind == "script" {
+			if !sourceType.Advanced {
+				render.ErrInvalidRequest(fmt.Errorf("source_kind: scripts require the custom advanced source type")).Render(w, r)
+				return
+			}
+		} else if fieldErrors := inventorysourcecatalog.Validate(body.SourceType, body.Source); len(fieldErrors) > 0 {
+			render.ErrInvalidRequest(fieldErrors[0]).Render(w, r)
+			return
+		}
+		if body.CredentialID != nil && len(sourceType.CompatibleCredentialTypes) > 0 {
+			var credentialType string
+			err := rs.DB.GetContext(r.Context(), &credentialType, `
+				SELECT ct.name FROM credentials c
+				JOIN credential_types ct ON ct.id = c.credential_type_id
+				WHERE c.id = $1`, *body.CredentialID)
+			if err != nil {
+				render.ErrInvalidRequest(fmt.Errorf("credential_id: unknown credential")).Render(w, r)
+				return
+			}
+			if !inventorysourcecatalog.SupportsCredentialType(sourceType, credentialType) {
+				render.ErrInvalidRequest(fmt.Errorf("credential_id: credential type %q is not compatible with %q", credentialType, body.SourceType)).Render(w, r)
+				return
+			}
+		}
 	}
 	// Attaching a credential requires use access to it (AWX attach semantics).
 	if body.CredentialID != nil && !rs.authorize(w, r, rbac.Credential, *body.CredentialID, actUse) {
