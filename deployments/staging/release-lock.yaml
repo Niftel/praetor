@@ -1,11 +1,11 @@
 schemaVersion: 1
-platformVersion: 0.1.3
+platformVersion: 0.1.4
 registry: ghcr.io/niftel
 components:
   api:
     image: praetor-api
-    version: 0.1.3
-    digest: sha256:3ed2746c7e588575fdd26fba443f8628fdd3d64c6f1d86c2a37dd695b8f0f2a5
+    version: 0.1.4
+    digest: sha256:90d7f9d53b87ee22cfb83e1f7faa16fb70d5b3520a23c05569c99b4ccbaf544f
   consumer:
     image: praetor-consumer
     version: 0.1.1
@@ -20,8 +20,8 @@ components:
     digest: sha256:966a45f5fabcbe653f835130a898dbfa7a4b1130a32004c309f94d5dd66bddbd
   migrator:
     image: praetor-migrator
-    version: 0.1.3
-    digest: sha256:ec61217ebcae269eec1da70691b2a63a2190cd33468e5c0e19f1c64760472a38
+    version: 0.1.4
+    digest: sha256:0f95acd406beec480d0b46388822acdcb9c0bb6be9a9c8e58b10044fb23570ee
   reconciler:
     image: praetor-reconciler
     version: 0.1.0
@@ -32,5 +32,5 @@ components:
     digest: sha256:788105fe35deb3b1ec4ec0e935d85a81c4efa745a75da5a1653c6df776db1b94
   ui:
     image: praetor-ui
-    version: 0.1.3
-    digest: sha256:51be72f9a2abac5bc49e730f5f120153e6e8c19244e07c0a695b29e63d14a4d2
+    version: 0.1.4
+    digest: sha256:98c570d25d5b98866fec5df87505a0f53fcb2a190fa61d5345452a897868afa8
