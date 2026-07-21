@@ -22,6 +22,12 @@ The workflow uses two tiers:
 2. `lifecycle` retains every clean-cluster LDAP, RBAC, approval, execution,
    recovery, secrets, delegated API, and readiness-evidence journey.
 
+The full lifecycle always runs on `main` and manual dispatches. On pull
+requests it runs when the validation harness, fixture, recovery journey, or
+readiness decision code changes. Other pull requests stop after the isolated
+and preflight gates; their eventual `main` build still receives the complete
+clean-cluster validation before it can become release evidence.
+
 Superseded runs for the same pull request are cancelled. Main-branch runs are
 never cancelled, because their evidence may be used for release decisions.
 

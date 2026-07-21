@@ -177,7 +177,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "packages: read", "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0", "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
+	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "packages: read", "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0", "fetch-depth: 0", "Classify full lifecycle scope", `if: needs.preflight.outputs.full_lifecycle == 'true'`, `EVENT_NAME: ${{ github.event_name }}`, "classify-product-validation.sh", "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
 		}
@@ -244,6 +244,36 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		if !strings.Contains(fixture, required) {
 			t.Fatalf("notification recorder must contain %q", required)
 		}
+	}
+}
+
+func TestProductValidationScopeClassifier(t *testing.T) {
+	root := repositoryRoot(t)
+	script := filepath.Join(root, "scripts", "classify-product-validation.sh")
+	tests := []struct {
+		name, event, paths, want string
+	}{
+		{"main always runs", "push", "docs/readme.md\n", "true"},
+		{"manual always runs", "workflow_dispatch", "", "true"},
+		{"isolated chart contract", "pull_request", "deployments/helm/praetor-v2/values.yaml\n", "false"},
+		{"isolated UI", "pull_request", "web/pages/JobsPage.tsx\n", "false"},
+		{"validation workflow", "pull_request", ".github/workflows/product-validation-fixture.yml\n", "true"},
+		{"LDAP journey", "pull_request", "scripts/validate-ldap-operator-journey.sh\n", "true"},
+		{"recovery implementation", "pull_request", "internal/readiness/report.go\n", "true"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", script)
+			cmd.Env = append(os.Environ(), "EVENT_NAME="+tc.event)
+			cmd.Stdin = strings.NewReader(tc.paths)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("classifier failed: %v: %s", err, out)
+			}
+			if got := strings.TrimSpace(string(out)); got != tc.want {
+				t.Fatalf("classifier returned %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
