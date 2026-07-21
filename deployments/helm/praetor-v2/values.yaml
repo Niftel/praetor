@@ -30,11 +30,11 @@ images:
 # remains a convenient override for local/k3d development.
 imageTags:
   api: 0.1.4
-  ingestion: 0.1.1
+  ingestion: 0.1.2
   scheduler: 0.1.3
   consumer: 0.1.1
   reconciler: 0.1.0
-  executor: 0.1.2
+  executor: 0.1.3
   ui: 0.1.4
   migrator: 0.1.4
 
