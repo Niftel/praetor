@@ -23,6 +23,8 @@ func TestPilotJourneyCoversRealManagedHostBoundary(t *testing.T) {
 		"stage_execution_pack", "verify_execution_pack", "kubectl --context \"$CONTEXT\" -n \"$NAMESPACE\" cp",
 		`SECRETS_DB_POD="${PRAETOR_STAGING_SECRETS_DB_POD:-${RELEASE}-secrets-postgres-0}"`, `get pod "$SECRETS_DB_POD"`,
 		`docker exec "$PILOT_TARGET" rm -f /home/praetor/.praetor-pilot-marker`,
+		"cleanup_terminal_pilot_runs", `cleanup_terminal_pilot_runs "$first_run" "$second_run"`,
+		`/var/lib/praetor/jobs/$1`, `"(successful|failed|canceled)"`, "refusing to remove non-terminal pilot run state",
 	} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("pilot journey contract is missing %q", required)
@@ -52,6 +54,7 @@ func TestPilotFaultMatrixCoversManagedHostFailureBoundaries(t *testing.T) {
 		"duplicate active workflow launch", "rollout restart", "deployment/$RELEASE-scheduler",
 		"docker network disconnect praetor-pilot", "120-second failure boundary", "actionable diagnostics",
 		"binding_state", "notification_count", "activity-stream?limit=500", "managed-host-faults.json",
+		`cleanup_terminal_pilot_runs "$canceled_run" "$recovered_run" "$unreachable_run"`,
 	} {
 		if !strings.Contains(script+readMakefile(t, root), required) {
 			t.Fatalf("pilot fault matrix is missing %q", required)
