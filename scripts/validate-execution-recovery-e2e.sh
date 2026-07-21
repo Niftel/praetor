@@ -235,7 +235,7 @@ done
 # Freeze the executor before deleting its durable state. Removing the directory
 # while PID 1 is still writing checkpoints races with rm and can leave newly
 # created files behind, producing a false validation failure.
-kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- kill -STOP 1
+kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- sh -c 'kill -STOP 1'
 kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- rm -rf "/var/lib/praetor/jobs/$LOST_RUN_ID"
 kubectl delete pod -n "$NAMESPACE" "$EXECUTOR_POD" --wait=false >/dev/null
 wait_rollout "statefulset/$RELEASE-executor"
