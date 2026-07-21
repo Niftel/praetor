@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS trg_start_inventory_sync_history ON execution_runs;
+DROP FUNCTION IF EXISTS start_inventory_sync_history();
+DROP TRIGGER IF EXISTS trg_create_inventory_sync_history ON unified_jobs;
+DROP FUNCTION IF EXISTS create_inventory_sync_history();
+DROP TABLE IF EXISTS inventory_sync_history;
+DROP INDEX IF EXISTS idx_groups_inventory_source;
+DROP INDEX IF EXISTS idx_hosts_inventory_source;
+ALTER TABLE groups DROP COLUMN IF EXISTS inventory_source_id;
+ALTER TABLE hosts DROP COLUMN IF EXISTS inventory_source_id;
+ALTER TABLE inventory_sources DROP COLUMN IF EXISTS reconciliation_policy;

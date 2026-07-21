@@ -245,6 +245,14 @@ export const api = {
     deleteInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}`, { method: 'DELETE' }),
     syncInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}/sync`, { method: 'POST' }).then(r => r.json()),
 	previewInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}/preview`, { method: 'POST' }).then(r => r.json()),
+	getInventorySourceHistory: (invId: number, sid: number, filters: { status?: string; phase?: string; limit?: number } = {}) => {
+		const params = new URLSearchParams();
+		if (filters.status) params.set('status', filters.status);
+		if (filters.phase) params.set('phase', filters.phase);
+		if (filters.limit) params.set('limit', String(filters.limit));
+		const query = params.toString();
+		return fetchWithAuth(`/inventories/${invId}/sources/${sid}/history${query ? `?${query}` : ''}`).then(r => r.json());
+	},
 
     // Notifications
     getNotificationTypes: () => fetchWithAuth('/notification-types').then(r => r.json()),

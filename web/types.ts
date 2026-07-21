@@ -152,6 +152,39 @@ export interface InventorySourceCatalog {
   results: InventorySourceType[];
 }
 
+export type InventoryReconciliationPolicy = 'disable_missing' | 'retain_missing';
+
+export interface InventorySyncHistory {
+  id: number;
+  correlation_id: string;
+  inventory_id?: number;
+  inventory_source_id?: number;
+  unified_job_id?: number;
+  execution_run_id?: string;
+  credential_id?: number;
+  reconciliation_policy: InventoryReconciliationPolicy;
+  phase: 'queued' | 'acquisition' | 'parsing' | 'validation' | 'reconciliation' | 'completed';
+  status: 'pending' | 'running' | 'successful' | 'failed';
+  hosts_added: number;
+  hosts_updated: number;
+  hosts_disabled: number;
+  hosts_unchanged: number;
+  groups_added: number;
+  groups_updated: number;
+  groups_unchanged: number;
+  diagnostic_code?: string;
+  diagnostic_message?: string;
+  diagnostic_details: Record<string, unknown>;
+  started_at?: string;
+  finished_at?: string;
+  created_at: string;
+}
+
+export interface InventorySyncHistoryResponse {
+  results: InventorySyncHistory[];
+  total: number;
+}
+
 export interface JobTemplate {
   id: number;
   organization_id: number;

@@ -14,6 +14,7 @@ import {
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 import { useCapabilities } from '../lib/useCapabilities';
+import InventorySourceHistoryList from '../components/InventorySourceHistory';
 
 // Coerce an edited string back toward its JSON-native type (number / bool /
 // object) so round-tripping a var through the editor doesn't stringify it.
@@ -41,6 +42,7 @@ const InventoriesPage = () => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupHosts, setGroupHosts] = useState<Record<number, number[]>>({});
   const [sources, setSources] = useState<any[]>([]);
+  const [expandedSourceHistory, setExpandedSourceHistory] = useState<number | null>(null);
   const [credentials, setCredentials] = useState<any[]>([]);
 	const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([]);
 	const [sourceTypes, setSourceTypes] = useState<InventorySourceType[]>([]);
@@ -76,7 +78,7 @@ const InventoriesPage = () => {
   const [newGroupName, setNewGroupName] = useState('');
   const [importContent, setImportContent] = useState('');
   const [importFormat, setImportFormat] = useState<'ini' | 'yaml'>('ini');
-	const emptySource = { name: '', source_type: '', source_kind: 'inventory', source: '', credential_id: '' as number | '', values: {} as Record<string, string | boolean> };
+	const emptySource = { name: '', source_type: '', source_kind: 'inventory', source: '', credential_id: '' as number | '', reconciliation_policy: 'disable_missing', values: {} as Record<string, string | boolean> };
 	const [newSource, setNewSource] = useState(emptySource);
 
   const fetchInventories = useCallback(async () => {
@@ -219,7 +221,7 @@ const InventoriesPage = () => {
     try {
 	  const selectedType = sourceTypes.find(t => t.id === newSource.source_type);
 	  const source = selectedType && !selectedType.advanced ? buildInventorySourceYAML(selectedType, newSource.values) : newSource.source;
-	  await api.createInventorySource(selectedInventoryId, { name: newSource.name, source_type: newSource.source_type, source_kind: newSource.source_kind, source, credential_id: newSource.credential_id === '' ? null : newSource.credential_id });
+	  await api.createInventorySource(selectedInventoryId, { name: newSource.name, source_type: newSource.source_type, source_kind: newSource.source_kind, source, credential_id: newSource.credential_id === '' ? null : newSource.credential_id, reconciliation_policy: newSource.reconciliation_policy });
 	  setShowSourceModal(false); setNewSource(emptySource);
       api.getInventorySources(selectedInventoryId).then(d => setSources(d || [])).catch(() => { });
     } catch { toast.error('Failed to create source'); }
@@ -496,13 +498,17 @@ const InventoriesPage = () => {
                     {sources.length === 0 ? <p className="font-mono text-[12px] text-faint py-1">No dynamic sources. Add one to populate hosts (e.g. AWS).</p> : (
                       <div className="space-y-0">
                         {sources.map(s => (
-                          <div key={s.id} className="flex items-center gap-3 py-2.5 border-b border-line last:border-0 max-[520px]:flex-wrap">
+                          <div key={s.id} className="border-b border-line last:border-0">
+                          <div className="flex items-center gap-3 py-2.5 max-[520px]:flex-wrap">
                             <span className="text-[13px] text-ink font-medium">{s.name}</span>
                             <span className="font-mono text-[11px] text-dim">{s.source_kind}</span>
                             <span className="ml-auto font-mono text-[11px] text-dim max-[520px]:order-4 max-[520px]:basis-full max-[520px]:ml-0">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
+							<button onClick={() => setExpandedSourceHistory(current => current === s.id ? null : s.id)} className="font-mono text-[10px] text-dim hover:text-ink" aria-expanded={expandedSourceHistory === s.id}>history</button>
 							{canManageInventory && <button onClick={() => previewSource(s.id)} className="text-mut hover:text-ink" title="Test and preview without changing inventory"><Search size={14} /></button>}
 							{canManageInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
                             {canManageInventory && <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>}
+                          </div>
+                          {expandedSourceHistory === s.id && selectedInventoryId && <InventorySourceHistoryList inventoryId={selectedInventoryId} sourceId={s.id} />}
                           </div>
                         ))}
                       </div>
@@ -581,6 +587,10 @@ const InventoriesPage = () => {
             <option value="">None</option>
 			{compatibleCredentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
+		  <Select label="Missing hosts" hint="Missing hosts are never deleted. Disable is the safe default; retain leaves their current state unchanged." value={newSource.reconciliation_policy} onChange={e => setNewSource({ ...newSource, reconciliation_policy: e.target.value })}>
+			<option value="disable_missing">Disable hosts missing from the source</option>
+			<option value="retain_missing">Retain hosts unchanged</option>
+		  </Select>
 		  {selectedSourceType?.advanced && <Textarea label={newSource.source_kind === 'script' ? 'Inventory script' : 'Plugin YAML'} required rows={10} className="font-mono text-xs" value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} hint="Advanced configuration is validated again by the server." />}
 		  <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => { setShowSourceModal(false); setNewSource(emptySource); }}>Cancel</Button><Button onClick={createSource} disabled={!newSource.name.trim() || !selectedSourceType}>Create source</Button></div>
         </div>

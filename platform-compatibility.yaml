@@ -184,4 +184,4 @@ sharedModules:
 
 database:
   minimumMigration: 1
-  maximumMigration: 69
+  maximumMigration: 70
