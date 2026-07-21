@@ -247,6 +247,20 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 	}
 }
 
+func TestCIExecutesIsolatedGatesInParallel(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "test.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{"  go:\n", "  deployment-contracts:\n", "  ui:\n", "needs: [go, deployment-contracts, ui]", "Require every isolated service gate", `${{ needs.go.result }}`, `${{ needs.deployment-contracts.result }}`, `${{ needs.ui.result }}`} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("CI isolation contract must contain %q", required)
+		}
+	}
+}
+
 func TestPersistentStagingEnvironmentIsIsolatedAndIdempotent(t *testing.T) {
 	root := repositoryRoot(t)
 	scriptRaw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-environment.sh"))

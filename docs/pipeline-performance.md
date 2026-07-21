@@ -33,6 +33,12 @@ still probed with `imagePullPolicy=Never`. This avoids rebuilding five sibling
 repositories without introducing mutable inputs or reducing integration
 coverage.
 
+The regular CI workflow treats deployable concerns independently. Go/API,
+deployment-contract, and UI checks run as parallel jobs, while database
+compatibility remains independently parallel. A small aggregate `test` job
+preserves the established required-check name and fails unless every isolated
+gate succeeds.
+
 ## Regression target
 
 The first target is a successful full lifecycle under eight minutes on a normal
