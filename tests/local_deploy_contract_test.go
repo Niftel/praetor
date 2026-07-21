@@ -177,7 +177,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
+	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "packages: read", "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0", "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
 		}

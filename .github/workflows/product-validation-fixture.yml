@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 # A newer commit on the same pull request makes the older disposable cluster
 # irrelevant. Cancel it before it can keep consuming a runner for ten minutes.
@@ -66,6 +67,12 @@ jobs:
             --output /usr/local/bin/k3d
           chmod 0755 /usr/local/bin/k3d
           test "$(k3d version | awk '/k3d version/ {print $3}')" = v5.8.3
+      - name: Authenticate immutable release image pulls
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Check out Secrets Service
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
