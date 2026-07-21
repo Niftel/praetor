@@ -161,10 +161,14 @@ github.com/praetordev/events v0.1.1-0.20260720200102-f46fa9ea6404 h1:6lrBHa5ySPQ
 github.com/praetordev/events v0.1.1-0.20260720200102-f46fa9ea6404/go.mod h1:gF7ZeKJTxupPc1yPlo8HBhRdzZrRWkBbTEovgba498Y=
 github.com/praetordev/events v0.1.1 h1:NT8JD3gr27OmpSIIdmXnV8n4m8wjoRONdjMDrjL0vzw=
 github.com/praetordev/events v0.1.1/go.mod h1:gF7ZeKJTxupPc1yPlo8HBhRdzZrRWkBbTEovgba498Y=
+github.com/praetordev/events v0.1.2-0.20260721152035-6660ddd52b3a h1:Lk47yKK/YU8JacITGVYVS0qvNSbw8+9h2fI3VKvMJCs=
+github.com/praetordev/events v0.1.2-0.20260721152035-6660ddd52b3a/go.mod h1:gF7ZeKJTxupPc1yPlo8HBhRdzZrRWkBbTEovgba498Y=
 github.com/praetordev/ingestion v0.1.1 h1:ml1WT+RiaycVtn+gatR/P2TKGDRmzKagM1znX7QE9I4=
 github.com/praetordev/ingestion v0.1.1/go.mod h1:g7F+DRhp1zUkR0MN3u5VN90J5hh3oPADng9XUaIGy3Y=
 github.com/praetordev/launch v0.1.1 h1:l/jrLWwaas3IjC3h3WZxLTys/JzrW2qvNXeAlAq59Lg=
 github.com/praetordev/launch v0.1.1/go.mod h1:rCG3gRZUpzZkIC+avzl2skhOJAgPTovXtYLcxr7eCBA=
+github.com/praetordev/launch v0.1.2-0.20260721152036-bccc41205bc4 h1:UVfvn7Prv8hcXvBH1MBIn24ojNxwqr+P0V77c7J8Xjg=
+github.com/praetordev/launch v0.1.2-0.20260721152036-bccc41205bc4/go.mod h1:rCG3gRZUpzZkIC+avzl2skhOJAgPTovXtYLcxr7eCBA=
 github.com/praetordev/metrics v0.1.1 h1:ewzE8bkGN23tqBN6yBRhxdPTEyGfZBRzShjpf1NLMH0=
 github.com/praetordev/metrics v0.1.1/go.mod h1:P7KurBxnPVuDwzk9uD9vaoKvnpZoZE/DMagRQ2GRsxQ=
 github.com/praetordev/models v0.2.0 h1:B2JiEc+gHnMtTkl838hNH1Wee9esnGwS8KZsg/aAPbQ=
@@ -185,6 +189,8 @@ github.com/praetordev/render v0.1.0 h1:C8STNpDFvqmEEjiK6ccYeJM6825qoUd3osvgACSKq
 github.com/praetordev/render v0.1.0/go.mod h1:sfOmoxhgMF6ROP4lI8zAi7RoinVJVRRR1xTBgVm27ZY=
 github.com/praetordev/scheduler v0.1.1 h1:llSDAU/Rx1LsRqak0FAR8DrJ3MLbQnFSA2xPRwhtMCE=
 github.com/praetordev/scheduler v0.1.1/go.mod h1:WG4EHSicZ68BnrOQpCe/Y308qTPbSlbyiFIjtXfSlaE=
+github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93 h1:M6PdskEqt8auljW7/MWOU29fX56ADi8Tl4w4qIW7avc=
+github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93/go.mod h1:8zaEKfKoUADXdNovZORlE1WznHh/Mhery/KzEhYE2Xo=
 github.com/praetordev/store v0.1.2 h1:uH5ICkUFML1ymItKJk0MdpQfp0BgA3zKF4jbbGtiirk=
 github.com/praetordev/store v0.1.2/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
 github.com/praetordev/store v0.1.3-0.20260720203755-1785f165f30a h1:W5BfMaNwUGrpSMUNRGhKEUTTmwZwlLCplvgNVJxwmr4=

@@ -57,8 +57,8 @@ components:
 # go.mod when it imports the module directly.
 contracts:
   github.com/praetordev/eventbus: v0.1.0
-  github.com/praetordev/events: v0.1.1
-  github.com/praetordev/launch: v0.1.1
+  github.com/praetordev/events: v0.1.2-0.20260721152035-6660ddd52b3a
+  github.com/praetordev/launch: v0.1.2-0.20260721152036-bccc41205bc4
   github.com/praetordev/models: v0.2.0
   github.com/praetordev/packspec: v0.1.0
   github.com/praetordev/rbac/v4: v4.0.0
@@ -100,7 +100,7 @@ sharedModules:
   events:
     module: github.com/praetordev/events
     repository: Niftel/events
-    version: v0.1.1
+    version: v0.1.2-0.20260721152035-6660ddd52b3a
     owner: execution
     securitySensitive: true
   hostconn:
@@ -112,7 +112,7 @@ sharedModules:
   launch:
     module: github.com/praetordev/launch
     repository: Niftel/launch
-    version: v0.1.1
+    version: v0.1.2-0.20260721152036-bccc41205bc4
     owner: control-plane
     securitySensitive: true
   metrics:

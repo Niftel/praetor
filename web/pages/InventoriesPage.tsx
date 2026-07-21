@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
 import { Inventory, Host, Group, CredentialType, InventorySourceType } from '../types';
 import { Input, Textarea, Select } from '../components/ui/Input';
@@ -33,6 +33,7 @@ const showVal = (v: any): string => (typeof v === 'object' && v !== null ? JSON.
 const InventoriesPage = () => {
   const { orgId: orgIdStr } = useParams();
   const orgId = Number(orgIdStr);
+	const navigate = useNavigate();
   const [orgName, setOrgName] = useState('');
   const [inventories, setInventories] = useState<Inventory[]>([]);
   const [selectedInventoryId, setSelectedInventoryId] = useState<number | null>(null);
@@ -229,6 +230,14 @@ const InventoriesPage = () => {
     toast.info('Sync started');
     setTimeout(refreshHosts, 4000); setTimeout(refreshHosts, 9000);
   };
+	const previewSource = async (sid: number) => {
+		if (!selectedInventoryId) return;
+		try {
+			const result = await api.previewInventorySource(selectedInventoryId, sid);
+			toast.info('Preview started. No inventory records will be changed.');
+			navigate(`/jobs/${result.job_id}`);
+		} catch { toast.error('Failed to start inventory preview'); }
+	};
   const deleteSource = async (sid: number) => {
     if (!selectedInventoryId) return;
     await api.deleteInventorySource(selectedInventoryId, sid);
@@ -491,7 +500,8 @@ const InventoriesPage = () => {
                             <span className="text-[13px] text-ink font-medium">{s.name}</span>
                             <span className="font-mono text-[11px] text-dim">{s.source_kind}</span>
                             <span className="ml-auto font-mono text-[11px] text-dim max-[520px]:order-4 max-[520px]:basis-full max-[520px]:ml-0">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
-                            {canManageInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
+							{canManageInventory && <button onClick={() => previewSource(s.id)} className="text-mut hover:text-ink" title="Test and preview without changing inventory"><Search size={14} /></button>}
+							{canManageInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
                             {canManageInventory && <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>}
                           </div>
                         ))}

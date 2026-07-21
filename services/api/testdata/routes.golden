@@ -122,6 +122,7 @@ POST    /api/v1/inventories/{inventoryId}/groups/
 POST    /api/v1/inventories/{inventoryId}/hosts/
 POST    /api/v1/inventories/{inventoryId}/import
 POST    /api/v1/inventories/{inventoryId}/sources
+POST    /api/v1/inventories/{inventoryId}/sources/{sourceId}/preview
 POST    /api/v1/inventories/{inventoryId}/sources/{sourceId}/sync
 POST    /api/v1/job-templates/
 POST    /api/v1/job-templates/{id}/notifications

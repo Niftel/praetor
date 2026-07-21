@@ -244,6 +244,7 @@ export const api = {
     createInventorySource: (invId: number, data: any) => fetchWithAuth(`/inventories/${invId}/sources`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     deleteInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}`, { method: 'DELETE' }),
     syncInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}/sync`, { method: 'POST' }).then(r => r.json()),
+	previewInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}/preview`, { method: 'POST' }).then(r => r.json()),
 
     // Notifications
     getNotificationTypes: () => fetchWithAuth('/notification-types').then(r => r.json()),

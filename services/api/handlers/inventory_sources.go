@@ -124,6 +124,17 @@ func (rs *InventoriesResource) DeleteInventorySource(w http.ResponseWriter, r *h
 // SyncInventorySource POST /api/v1/inventories/{inventoryId}/sources/{sourceId}/sync
 // Enqueues a sync job; the scheduler turns it into an executor inventory-sync run.
 func (rs *InventoriesResource) SyncInventorySource(w http.ResponseWriter, r *http.Request) {
+	rs.enqueueInventorySourceOperation(w, r, false)
+}
+
+// PreviewInventorySource POST /api/v1/inventories/{inventoryId}/sources/{sourceId}/preview
+// Uses the same isolated execution and credential resolution as sync, but the
+// executor is contractually forbidden from posting inventory data to ingestion.
+func (rs *InventoriesResource) PreviewInventorySource(w http.ResponseWriter, r *http.Request) {
+	rs.enqueueInventorySourceOperation(w, r, true)
+}
+
+func (rs *InventoriesResource) enqueueInventorySourceOperation(w http.ResponseWriter, r *http.Request, preview bool) {
 	invID, err := inventoryIDParam(r)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -143,11 +154,15 @@ func (rs *InventoriesResource) SyncInventorySource(w http.ResponseWriter, r *htt
 		return
 	}
 
-	opts := launch.Options{InventorySourceID: sid}
-	jobID, err := rs.store.EnqueueSourceSync(r.Context(), "Inventory sync: "+name, opts)
+	opts := launch.Options{InventorySourceID: sid, InventoryPreview: preview}
+	operation := "Inventory sync: "
+	if preview {
+		operation = "Inventory preview: "
+	}
+	jobID, err := rs.store.EnqueueSourceSync(r.Context(), operation+name, opts)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
-	render.Created(w, r, map[string]interface{}{"job_id": jobID, "status": "pending"})
+	render.Created(w, r, map[string]interface{}{"job_id": jobID, "status": "pending", "preview": preview})
 }
