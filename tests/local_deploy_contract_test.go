@@ -463,6 +463,17 @@ func TestStagingIntegrationsUseTLSAndPersistentState(t *testing.T) {
 	}
 }
 
+func TestCompletedMigratorReleasesRolloutQuotaQuickly(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "deployments", "helm", "praetor-v2", "templates", "migrator-job.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "ttlSecondsAfterFinished: 30") {
+		t.Fatal("completed migration pods must release staging rollout quota within 30 seconds")
+	}
+}
+
 func TestStagingRecoveryIsEncryptedIsolatedAndNonDestructive(t *testing.T) {
 	root := repositoryRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "scripts", "staging-recovery.sh"))

@@ -11,7 +11,10 @@ metadata:
     app.kubernetes.io/component: migrator
 spec:
   backoffLimit: 10
-  ttlSecondsAfterFinished: 600
+  # Helm observes the terminal Job condition before continuing. Retaining the
+  # completed pod for ten minutes needlessly consumes LimitRange CPU quota and
+  # can block rolling-update surge pods in a quota-bound namespace.
+  ttlSecondsAfterFinished: 30
   template:
     metadata:
       labels:
