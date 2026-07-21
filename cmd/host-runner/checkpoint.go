@@ -16,12 +16,21 @@ const defaultPluginDir = "/usr/local/share/praetor/plugins/callback"
 // recorded to checkpoint.json in the job dir). It returns nil if the plugin is
 // not deployed, in which case the play still runs — only without task-level
 // resume (the job simply re-runs from the top on recovery).
-func checkpointEnv(jobDir string) []string {
+func checkpointEnv(jobDir, ansiblePlaybook string) []string {
 	pluginDir := os.Getenv("PRAETOR_CALLBACK_PLUGINS")
 	if pluginDir == "" {
-		pluginDir = defaultPluginDir
+		pluginDir = callbackPluginDir(ansiblePlaybook)
+		if pluginDir == "" {
+			executable, err := os.Executable()
+			if err == nil {
+				pluginDir = callbackPluginDir(executable)
+			}
+		}
+		if pluginDir == "" {
+			pluginDir = defaultPluginDir
+		}
 	}
-	if st, err := os.Stat(pluginDir); err != nil || !st.IsDir() {
+	if !fileExists(filepath.Join(pluginDir, "praetor_checkpoint.py")) {
 		return nil
 	}
 	return []string{
@@ -30,6 +39,18 @@ func checkpointEnv(jobDir string) []string {
 		"PRAETOR_CHECKPOINT=" + filepath.Join(jobDir, "checkpoint.json"),
 		"PRAETOR_DIAGNOSTIC_EVENTS=" + filepath.Join(jobDir, "diagnostic-events.jsonl"),
 	}
+}
+
+// callbackPluginDir returns the callback directory bundled beside a packed
+// executable: <pack>/bin/<binary> -> <pack>/plugins/callback.
+// It returns an empty string when the packed callback is absent so legacy
+// installations can fall back to defaultPluginDir.
+func callbackPluginDir(executable string) string {
+	dir := filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "plugins", "callback"))
+	if fileExists(filepath.Join(dir, "praetor_checkpoint.py")) {
+		return dir
+	}
+	return ""
 }
 
 // fileExists reports whether path exists and is a regular file.
