@@ -282,7 +282,7 @@ func (r *Runner) Execute(ctx context.Context) (err error) {
 	if ansibleInterpreter != "" {
 		cmd.Env = append(cmd.Env, "ANSIBLE_PYTHON_INTERPRETER="+ansibleInterpreter)
 	}
-	cmd.Env = append(cmd.Env, checkpointEnv(r.JobDir)...)
+	cmd.Env = append(cmd.Env, checkpointEnv(r.JobDir, ansiblePlaybook)...)
 	cmd.Env = append(cmd.Env, galaxyPathEnv...) // point the play at the cached collections/roles
 	// A fresh run is launched by the bootstrap, whose nohup shell exports the
 	// SSH env. A resume after a host reboot is launched by the systemd unit,

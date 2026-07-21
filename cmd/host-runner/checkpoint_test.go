@@ -49,8 +49,11 @@ func TestCheckpointEnv(t *testing.T) {
 
 	t.Run("plugin deployed -> callback enabled", func(t *testing.T) {
 		pluginDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(pluginDir, "praetor_checkpoint.py"), []byte("# test callback\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
 		t.Setenv("PRAETOR_CALLBACK_PLUGINS", pluginDir)
-		env := checkpointEnv(jobDir)
+		env := checkpointEnv(jobDir, "")
 		joined := strings.Join(env, "\n")
 		for _, want := range []string{
 			"ANSIBLE_CALLBACK_PLUGINS=" + pluginDir,
@@ -65,8 +68,51 @@ func TestCheckpointEnv(t *testing.T) {
 
 	t.Run("plugin absent -> no checkpointing", func(t *testing.T) {
 		t.Setenv("PRAETOR_CALLBACK_PLUGINS", filepath.Join(jobDir, "does-not-exist"))
-		if env := checkpointEnv(jobDir); env != nil {
+		if env := checkpointEnv(jobDir, ""); env != nil {
 			t.Fatalf("expected nil env when plugin dir is absent, got %v", env)
 		}
 	})
+}
+
+func TestCheckpointEnvFindsCallbackFromSelectedRuntime(t *testing.T) {
+	root := t.TempDir()
+	ansiblePlaybook := filepath.Join(root, "bin", "ansible-playbook")
+	pluginDir := filepath.Join(root, "plugins", "callback")
+	if err := os.MkdirAll(filepath.Dir(ansiblePlaybook), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "praetor_checkpoint.py"), []byte("# packed callback\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PRAETOR_CALLBACK_PLUGINS", "")
+
+	env := strings.Join(checkpointEnv(t.TempDir(), ansiblePlaybook), "\n")
+	if !strings.Contains(env, "ANSIBLE_CALLBACK_PLUGINS="+pluginDir) {
+		t.Fatalf("selected runtime callback was not enabled: %s", env)
+	}
+}
+
+func TestCallbackPluginDirFindsPackedSibling(t *testing.T) {
+	root := t.TempDir()
+	executable := filepath.Join(root, "bin", "praetor-host-runner")
+	pluginDir := filepath.Join(root, "plugins", "callback")
+	if err := os.MkdirAll(filepath.Dir(executable), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "praetor_checkpoint.py"), []byte("# packed callback\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := callbackPluginDir(executable); got != pluginDir {
+		t.Fatalf("packed callback dir = %q, want %q", got, pluginDir)
+	}
+	if got := callbackPluginDir(filepath.Join(t.TempDir(), "bin", "praetor-host-runner")); got != "" {
+		t.Fatalf("missing packed callback returned %q", got)
+	}
 }
