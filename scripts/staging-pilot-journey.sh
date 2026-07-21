@@ -296,6 +296,26 @@ notification_count() {
     jq -Rr --argjson job "$workflow_job_id" --arg event "$event" 'fromjson? | select(.job_id == $job and .event == $event) | 1' | wc -l | tr -d ' '
 }
 
+# Remove only the synthetic runs whose terminal result has already been
+# validated and recorded as sanitized evidence. Active or interrupted jobs are
+# retained for recovery, and a malformed run ID can never broaden the path.
+cleanup_terminal_pilot_runs() {
+  local run_id
+  for run_id in "$@"; do
+    [[ "$run_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || die "refusing to clean invalid pilot run ID: $run_id"
+    docker exec "$PILOT_TARGET" sh -c '
+      set -eu
+      dir="/var/lib/praetor/jobs/$1"
+      [ ! -e "$dir" ] && exit 0
+      [ -f "$dir/status.json" ] || { echo "run $1 is not terminal" >&2; exit 1; }
+      grep -Eq '"(state|status)"[[:space:]]*:[[:space:]]*"(successful|failed|canceled)"' "$dir/status.json" || {
+        echo "run $1 has no recognized terminal state" >&2; exit 1;
+      }
+      rm -rf -- "$dir"
+    ' sh "$run_id" || die "refusing to remove non-terminal pilot run state: $run_id"
+  done
+}
+
 run_faults() {
   status_check >/dev/null
   install -d -m 0700 "$EVIDENCE_ROOT"
@@ -354,6 +374,7 @@ run_faults() {
     '{schema_version:1,journey:"managed-host-pilot-faults",result:"pass",recorded_at:$recorded_at,source_revision:$source_revision,runs:{canceled:$canceled,recovered:$recovered,unreachable:$unreachable},checks:["bounded-unreachable-timeout","actionable-unreachable-diagnostics","in-flight-cancellation","post-cancel-task-blocked","credential-binding-cleanup","duplicate-launch-rejected","control-plane-restart-recovered","notification-exact-once","audit-attributed"]}' >"$fault_evidence"
   chmod 0600 "$fault_evidence"
   grep -Eiq '(private.?key|bearer |password|token|BEGIN [A-Z ]+ KEY|172\.29\.)' "$fault_evidence" && die "sensitive material appeared in fault evidence"
+  cleanup_terminal_pilot_runs "$canceled_run" "$recovered_run" "$unreachable_run"
   echo "pilot managed-host fault matrix passed; sanitized evidence: $fault_evidence"
 }
 
@@ -432,6 +453,7 @@ run_journey() {
   chmod 0600 "$EVIDENCE_FILE"
   if grep -Eiq '(private.?key|bearer |password|token|BEGIN [A-Z ]+ KEY|172\.29\.)' "$EVIDENCE_FILE"; then die "sensitive material appeared in pilot evidence"; fi
   jq -e '.result == "pass" and (.checks | length == 9) and .runs.first.run_id != .runs.second.run_id' "$EVIDENCE_FILE" >/dev/null || die "pilot evidence is incomplete"
+  cleanup_terminal_pilot_runs "$first_run" "$second_run"
   echo "pilot managed-host journey passed; sanitized evidence: $EVIDENCE_FILE"
 }
 
