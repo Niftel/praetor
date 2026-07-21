@@ -398,6 +398,22 @@ func seedCredentialTypes(db *sqlx.DB) {
 				}
 			}`,
 		},
+		{
+			Name:        "VMware vCenter",
+			Description: "Username and password for VMware vCenter dynamic inventory",
+			Inputs: `{
+				"fields": [
+					{"id": "username", "label": "Username", "type": "text"},
+					{"id": "password", "label": "Password", "type": "password", "secret": true}
+				]
+			}`,
+			Injectors: `{
+				"env": {
+					"VMWARE_USER": "{{ username }}",
+					"VMWARE_PASSWORD": "{{ password }}"
+				}
+			}`,
+		},
 	}
 
 	for _, t := range types {

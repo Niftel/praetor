@@ -292,6 +292,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		groups := handlers.NewGroupsResource(db, authz)
 
 		inventories := handlers.NewInventoriesResource(db, authz)
+		r.Get("/inventory-source-types", handlers.ListInventorySourceTypes)
 		r.Route("/inventories", func(r chi.Router) {
 			r.Get("/", inventories.ListInventories)
 			r.Post("/", inventories.CreateInventory)
