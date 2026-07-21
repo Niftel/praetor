@@ -73,6 +73,15 @@ func main() {
 			os.RemoveAll(ctx)
 			log.Fatalf("write requirements.txt: %v", werr)
 		}
+		callback, rerr := os.ReadFile(filepath.Join("cmd", "host-runner", "plugins", "callback", "praetor_checkpoint.py"))
+		if rerr != nil {
+			os.RemoveAll(ctx)
+			log.Fatalf("read host-runner callback: %v", rerr)
+		}
+		if werr := os.WriteFile(filepath.Join(ctx, "praetor_checkpoint.py"), callback, 0o644); werr != nil {
+			os.RemoveAll(ctx)
+			log.Fatalf("write host-runner callback: %v", werr)
+		}
 
 		log.Printf("Building Execution Pack %q for linux/%s (python %s, %s, host-runner %s, %d pip)...",
 			spec.Name, arch, spec.Python, spec.AnsibleRequirement(), spec.HostRunner, len(spec.Pip))
