@@ -177,6 +177,11 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
+	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
+		}
+	}
 	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
@@ -215,6 +220,16 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrap := string(bootstrapRaw)
+	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker pull "$released_ref"`, `docker tag "$released_ref"`, `released_pids+=("$!")`, "released_pull_failed"} {
+		if !strings.Contains(bootstrap, required) {
+			t.Fatalf("clean fixture bootstrap acceleration contract must contain %q", required)
+		}
+	}
+	for _, checkout := range []string{"Check out Scheduler", "Check out Ingestion", "Check out Consumer", "Check out Reconciler"} {
+		if strings.Contains(workflow, checkout) {
+			t.Fatalf("clean fixture workflow must not rebuild unchanged sibling source through %q", checkout)
+		}
+	}
 	for _, required := range []string{"docker build", "k3d image import", "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag", `--set hostRunner.callbackUrl="http://praetor-ingestion:8081"`} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap must contain %q", required)

@@ -24,8 +24,31 @@ on:
 permissions:
   contents: read
 
+# A newer commit on the same pull request makes the older disposable cluster
+# irrelevant. Cancel it before it can keep consuming a runner for ten minutes.
+concurrency:
+  group: product-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with: {version: v3.18.4}
+      - name: Reject invalid lifecycle changes before allocating a cluster
+        run: |
+          helm lint deployments/helm/praetor-v2 -f deployments/helm/praetor-v2/ci/values-k3d-local.yaml
+          go test ./tests -run 'TestProductValidationFixture|TestReleaseMigrationJob'
+
   lifecycle:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -48,40 +71,17 @@ jobs:
         with:
           repository: Niftel/praetor-secrets
           path: praetor-secrets
-      - name: Check out Scheduler
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: Niftel/scheduler
-          path: scheduler
       - name: Check out Executor
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: Niftel/executor
           path: executor
-      - name: Check out Ingestion
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: Niftel/ingestion
-          path: ingestion
-      - name: Check out Consumer
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: Niftel/consumer
-          path: consumer
-      - name: Check out Reconciler
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: Niftel/reconciler
-          path: reconciler
       - name: Create clean cluster and integrated base
         timeout-minutes: 15
         env:
           PRAETOR_SECRETS_ROOT: ${{ github.workspace }}/praetor-secrets
-          PRAETOR_SCHEDULER_ROOT: ${{ github.workspace }}/scheduler
           PRAETOR_EXECUTOR_ROOT: ${{ github.workspace }}/executor
-          PRAETOR_INGESTION_ROOT: ${{ github.workspace }}/ingestion
-          PRAETOR_CONSUMER_ROOT: ${{ github.workspace }}/consumer
-          PRAETOR_RECONCILER_ROOT: ${{ github.workspace }}/reconciler
+          PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"
           PRAETOR_K3D_CLUSTER: praetor-validation
         run: |
           k3d cluster create praetor-validation --wait

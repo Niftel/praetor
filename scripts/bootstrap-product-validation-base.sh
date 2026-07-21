@@ -8,6 +8,7 @@ EXECUTOR_ROOT="${PRAETOR_EXECUTOR_ROOT:-$ROOT/../executor}"
 INGESTION_ROOT="${PRAETOR_INGESTION_ROOT:-$ROOT/../ingestion}"
 CONSUMER_ROOT="${PRAETOR_CONSUMER_ROOT:-$ROOT/../consumer}"
 RECONCILER_ROOT="${PRAETOR_RECONCILER_ROOT:-$ROOT/../reconciler}"
+USE_RELEASED_COMPONENTS="${PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS:-false}"
 NAMESPACE="${PRAETOR_VALIDATION_NAMESPACE:-praetor-secrets}"
 TRUST_DOMAIN="${PRAETOR_VALIDATION_TRUST_DOMAIN:-praetor.local}"
 CLUSTER="${PRAETOR_K3D_CLUSTER:-praetor-validation}"
@@ -17,9 +18,11 @@ SECRETS_CHART="$SECRETS_ROOT/charts/praetor-secrets-stack"
 
 for command in docker go helm k3d kubectl; do command -v "$command" >/dev/null || { echo "error: $command is required" >&2; exit 1; }; done
 [[ -f "$SECRETS_ROOT/cmd/praetor-dev-bootstrap/main.go" ]] || { echo "error: praetor-secrets checkout not found at $SECRETS_ROOT" >&2; exit 1; }
-for component_root in "$SCHEDULER_ROOT" "$EXECUTOR_ROOT" "$INGESTION_ROOT" "$CONSUMER_ROOT" "$RECONCILER_ROOT"; do
-  [[ -f "$component_root/Dockerfile" ]] || { echo "error: component checkout with Dockerfile not found at $component_root" >&2; exit 1; }
-done
+if [[ "$USE_RELEASED_COMPONENTS" != true ]]; then
+  for component_root in "$SCHEDULER_ROOT" "$EXECUTOR_ROOT" "$INGESTION_ROOT" "$CONSUMER_ROOT" "$RECONCILER_ROOT"; do
+    [[ -f "$component_root/Dockerfile" ]] || { echo "error: component checkout with Dockerfile not found at $component_root" >&2; exit 1; }
+  done
+fi
 [[ "$SECRETS_IMAGE" == *:* && "$SECRETS_IMAGE" != *@* ]] || { echo "error: PRAETOR_VALIDATION_SECRETS_IMAGE must be a tagged image name" >&2; exit 1; }
 kubectl get --raw=/readyz >/dev/null
 
@@ -28,11 +31,46 @@ validation_tag="validation"
 docker build --file "$ROOT/build/package/Dockerfile.api" --tag "praetor-api:$validation_tag" "$ROOT"
 docker build --file "$ROOT/build/package/Dockerfile.migrator" --tag "praetor-migrator:$validation_tag" "$ROOT"
 docker build --tag "praetor-ui:$validation_tag" "$ROOT/web"
-docker build --tag "praetor-scheduler:$validation_tag" "$SCHEDULER_ROOT"
-docker build --tag "praetor-executor:$validation_tag" "$EXECUTOR_ROOT"
-docker build --tag "praetor-ingestion:$validation_tag" "$INGESTION_ROOT"
-docker build --tag "praetor-consumer:$validation_tag" "$CONSUMER_ROOT"
-docker build --tag "praetor-reconciler:$validation_tag" "$RECONCILER_ROOT"
+
+released_component_ref() {
+  local component="$1"
+  awk -v component="$component" '
+    $1 == "registry:" { registry = $2 }
+    $1 == component ":" { selected = 1; next }
+    selected && $1 == "image:" { image = $2 }
+    selected && $1 == "digest:" { print registry "/" image "@" $2; exit }
+  ' "$ROOT/deployments/staging/release-lock.yaml"
+}
+
+if [[ "$USE_RELEASED_COMPONENTS" == true ]]; then
+  # The sibling repositories are unchanged by this PR. Reuse the immutable,
+  # digest-addressed platform release instead of rebuilding five repositories.
+  # Retagging keeps the existing air-gapped k3d import and pullPolicy=Never
+  # checks identical to the source-build path.
+  pull_released_component() {
+    local component="$1" released_ref
+    released_ref="$(released_component_ref "$component")"
+    [[ "$released_ref" == ghcr.io/niftel/*@sha256:* ]] || { echo "error: release lock has no immutable $component image" >&2; exit 1; }
+    docker pull "$released_ref"
+    docker tag "$released_ref" "praetor-$component:$validation_tag"
+  }
+  released_pids=()
+  for component in scheduler executor ingestion consumer reconciler; do
+    pull_released_component "$component" &
+    released_pids+=("$!")
+  done
+  released_pull_failed=0
+  for pid in "${released_pids[@]}"; do
+    wait "$pid" || released_pull_failed=1
+  done
+  (( released_pull_failed == 0 )) || { echo "error: one or more released validation images could not be pulled" >&2; exit 1; }
+else
+  docker build --tag "praetor-scheduler:$validation_tag" "$SCHEDULER_ROOT"
+  docker build --tag "praetor-executor:$validation_tag" "$EXECUTOR_ROOT"
+  docker build --tag "praetor-ingestion:$validation_tag" "$INGESTION_ROOT"
+  docker build --tag "praetor-consumer:$validation_tag" "$CONSUMER_ROOT"
+  docker build --tag "praetor-reconciler:$validation_tag" "$RECONCILER_ROOT"
+fi
 k3d image import --cluster "$CLUSTER" \
   "$SECRETS_IMAGE" \
   "praetor-api:$validation_tag" \
