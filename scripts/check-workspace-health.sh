@@ -104,18 +104,26 @@ check_repository() {
 
 resolve_module_repo() {
     local name=$1
-    local repository=$2
-    local version=$3
+    local module=$2
+    local repository=$3
+    local version=$4
     if [[ $remote != true ]]; then
         printf '%s/%s\n' "$workspace_dir" "$name"
         return
     fi
 
-    local repo="$cache_root/checkouts/$name"
-    rm -rf "$repo"
-    mkdir -p "$(dirname "$repo")"
-    if ! git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$version" "https://github.com/$repository.git" "$repo"; then
-        printf 'FAIL  module   %-12s clone %s@%s\n' "$name" "$repository" "$version" >&2
+    # A Go pseudo-version identifies a commit but is not itself a Git ref, so
+    # `git clone --branch "$version"` cannot resolve it. Ask the Go module
+    # resolver for the exact declared release instead; this also exercises the
+    # same downloadable artifact that downstream builds consume.
+    local download_json repo
+    if ! download_json=$(GOWORK=off GOMODCACHE="$cache_root/go-mod/releases" go mod download -json "$module@$version"); then
+        printf 'FAIL  module   %-12s download %s@%s (%s)\n' "$name" "$module" "$version" "$repository" >&2
+        return 1
+    fi
+    repo=$(sed -n 's/^[[:space:]]*"Dir": "\(.*\)",$/\1/p' <<<"$download_json")
+    if [[ -z $repo || ! -d $repo ]]; then
+        printf 'FAIL  module   %-12s locate %s@%s (%s)\n' "$name" "$module" "$version" "$repository" >&2
         return 1
     fi
     printf '%s\n' "$repo"
@@ -162,7 +170,7 @@ if [[ $scope != services ]]; then
             continue
         fi
         IFS=$'\t' read -r _ module repository version owner security_sensitive <<<"$row"
-        if ! repo=$(resolve_module_repo "$name" "$repository" "$version"); then
+        if ! repo=$(resolve_module_repo "$name" "$module" "$repository" "$version"); then
             failures=$((failures + 1))
             continue
         fi

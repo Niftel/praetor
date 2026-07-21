@@ -305,6 +305,7 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 				r.Post("/sources", inventories.CreateInventorySource)
 				r.Delete("/sources/{sourceId}", inventories.DeleteInventorySource)
 				r.Post("/sources/{sourceId}/sync", inventories.SyncInventorySource)
+				r.Post("/sources/{sourceId}/preview", inventories.PreviewInventorySource)
 				r.Mount("/hosts", hostsHandler.Routes())
 				r.Mount("/groups", groups.Routes())
 			})

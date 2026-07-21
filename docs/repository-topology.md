@@ -48,8 +48,8 @@ Shared modules fall into four broad groups:
 
 The authoritative module/repository/version/owner inventory is
 `sharedModules` in `platform-compatibility.yaml`. `make shared-module-health`
-checks local sibling sources; `make shared-module-health-remote` checks clean
-clones of the declared released tags.
+checks local sibling sources; `make shared-module-health-remote` downloads and
+checks the exact declared module versions, including Go pseudo-versions.
 
 Shared modules must not import deployable services. Cross-process payloads need
 explicit compatibility rules; ordinary implementation details should not be

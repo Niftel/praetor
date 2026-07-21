@@ -17,7 +17,7 @@ func TestSharedModuleHealthContract(t *testing.T) {
 		"GOWORK=off",
 		"gofmt -l",
 		"go \"$check\" ./...",
-		"clone --quiet --depth 1 --branch \"$version\"",
+		"go mod download -json \"$module@$version\"",
 		"security-tests",
 		"--modules",
 		"--remote",
@@ -26,6 +26,20 @@ func TestSharedModuleHealthContract(t *testing.T) {
 		if !strings.Contains(text, item) {
 			t.Errorf("shared-module health checker is missing %q", item)
 		}
+	}
+}
+
+func TestRemoteSharedModuleHealthSupportsPseudoVersions(t *testing.T) {
+	script, err := os.ReadFile("../scripts/check-workspace-health.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	if strings.Contains(text, "clone --quiet --depth 1 --branch \"$version\"") {
+		t.Fatal("remote health still treats module versions as Git refs")
+	}
+	if !strings.Contains(text, "go mod download -json \"$module@$version\"") {
+		t.Fatal("remote health does not resolve the exact released Go module")
 	}
 }
 
