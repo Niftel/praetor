@@ -200,10 +200,16 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery := string(recoveryRaw)
-	for _, required := range []string{"RESUMED_FROM_CHECKPOINT", "recovery-side-effects.log", "deployment/praetor-ingestion --replicas=0", "state='reconciling'", "activity-stream?limit=500", "resolution_count", "notification_count", "env PGPASSWORD=validation-only psql -U postgres -d postgres -Atc \"$RESOLUTION_QUERY\"", "PRAETOR_RECOVERY_EVIDENCE_FILE"} {
+	for _, required := range []string{"RESUMED_FROM_CHECKPOINT", "recovery-side-effects.log", "deployment/praetor-ingestion --replicas=0", "sh -c 'kill -STOP 1'", "state='reconciling'", "activity-stream?limit=500", "resolution_count", "notification_count", "env PGPASSWORD=validation-only psql -U postgres -d postgres -Atc \"$RESOLUTION_QUERY\"", "PRAETOR_RECOVERY_EVIDENCE_FILE"} {
 		if !strings.Contains(recovery, required) {
 			t.Fatalf("execution recovery journey must contain %q", required)
 		}
+	}
+	stopAt := strings.Index(recovery, `sh -c 'kill -STOP 1'`)
+	removeAt := strings.Index(recovery, `rm -rf "/var/lib/praetor/jobs/$LOST_RUN_ID"`)
+	deleteAt := strings.LastIndex(recovery, `kubectl delete pod -n "$NAMESPACE" "$EXECUTOR_POD"`)
+	if stopAt < 0 || removeAt < 0 || deleteAt < 0 || !(stopAt < removeAt && removeAt < deleteAt) {
+		t.Fatal("unrecoverable recovery fixture must quiesce the executor before removing the WAL and replacing the pod")
 	}
 	journeyRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-ldap-operator-journey.sh"))
 	if err != nil {
