@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, unwrap } from '../services/api';
-import { Inventory, Host, Group } from '../types';
+import { Inventory, Host, Group, CredentialType, InventorySourceType } from '../types';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
@@ -41,6 +41,8 @@ const InventoriesPage = () => {
   const [groupHosts, setGroupHosts] = useState<Record<number, number[]>>({});
   const [sources, setSources] = useState<any[]>([]);
   const [credentials, setCredentials] = useState<any[]>([]);
+	const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([]);
+	const [sourceTypes, setSourceTypes] = useState<InventorySourceType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { capabilities: orgCapabilities, loading: orgCapabilitiesLoading } = useCapabilities('organization', orgId);
@@ -73,7 +75,8 @@ const InventoriesPage = () => {
   const [newGroupName, setNewGroupName] = useState('');
   const [importContent, setImportContent] = useState('');
   const [importFormat, setImportFormat] = useState<'ini' | 'yaml'>('ini');
-  const [newSource, setNewSource] = useState<{ name: string; source_kind: string; source: string; credential_id: number | '' }>({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
+	const emptySource = { name: '', source_type: '', source_kind: 'inventory', source: '', credential_id: '' as number | '', values: {} as Record<string, string | boolean> };
+	const [newSource, setNewSource] = useState(emptySource);
 
   const fetchInventories = useCallback(async () => {
     try {
@@ -87,7 +90,9 @@ const InventoriesPage = () => {
 
   useEffect(() => {
     fetchInventories();
-    api.getCredentials().then(r => setCredentials(unwrap(r))).catch(() => { });
+	Promise.all([api.getCredentials(), api.getCredentialTypes(), api.getInventorySourceTypes()]).then(([creds, types, catalog]) => {
+		setCredentials(unwrap(creds)); setCredentialTypes(types || []); setSourceTypes(catalog.results || []);
+	}).catch(() => { });
     api.getOrganizations().then(o => setOrgName(unwrap<{ id: number; name: string }>(o).find(x => x.id === orgId)?.name ?? `Org ${orgId}`)).catch(() => setOrgName(`Org ${orgId}`));
   }, [orgId, fetchInventories]);
 
@@ -211,8 +216,10 @@ const InventoriesPage = () => {
   const createSource = async () => {
     if (!selectedInventoryId || !newSource.name.trim()) return;
     try {
-      await api.createInventorySource(selectedInventoryId, { ...newSource, credential_id: newSource.credential_id === '' ? null : newSource.credential_id });
-      setShowSourceModal(false); setNewSource({ name: '', source_kind: 'inventory', source: '', credential_id: '' });
+	  const selectedType = sourceTypes.find(t => t.id === newSource.source_type);
+	  const source = selectedType && !selectedType.advanced ? buildInventorySourceYAML(selectedType, newSource.values) : newSource.source;
+	  await api.createInventorySource(selectedInventoryId, { name: newSource.name, source_type: newSource.source_type, source_kind: newSource.source_kind, source, credential_id: newSource.credential_id === '' ? null : newSource.credential_id });
+	  setShowSourceModal(false); setNewSource(emptySource);
       api.getInventorySources(selectedInventoryId).then(d => setSources(d || [])).catch(() => { });
     } catch { toast.error('Failed to create source'); }
   };
@@ -233,6 +240,11 @@ const InventoriesPage = () => {
   const { capabilities: inventoryCapabilities, loading: inventoryCapabilitiesLoading } = useCapabilities('inventory', selectedInventoryId);
   const canCreateInventory = !orgCapabilitiesLoading && !!orgCapabilities.add_inventory;
   const canManageInventory = !inventoryCapabilitiesLoading && inventoryCapabilities.manage;
+	const selectedSourceType = sourceTypes.find(t => t.id === newSource.source_type);
+	const credentialTypeNames = new Map(credentialTypes.map(t => [t.id, t.name]));
+	const compatibleCredentials = selectedSourceType?.compatible_credential_types.length
+		? credentials.filter(c => selectedSourceType.compatible_credential_types.includes(credentialTypeNames.get(c.credential_type_id) || ''))
+		: credentials;
 
   // Build the tree: groups (filtered) each with member hosts, then ungrouped.
   const tree = useMemo(() => {
@@ -539,17 +551,28 @@ const InventoriesPage = () => {
 
       <Modal isOpen={canManageInventory && showSourceModal} onClose={() => setShowSourceModal(false)} title="New inventory source" size="lg">
         <div className="space-y-4">
-          <Input label="Name" value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
-          <Select label="Kind" value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
-            <option value="inventory">Inventory / plugin (YAML)</option>
-            <option value="script">Script (executable)</option>
-          </Select>
+		  <Select label="Source type" required value={newSource.source_type} onChange={e => {
+			const sourceType = sourceTypes.find(t => t.id === e.target.value);
+			setNewSource({ ...emptySource, name: newSource.name, source_type: e.target.value, source: sourceType?.example || '' });
+		  }}>
+			<option value="">Choose a source type</option>
+			{sourceTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.advanced ? ' — advanced' : ''}</option>)}
+		  </Select>
+		  {selectedSourceType && <p className="text-xs text-mut max-w-[70ch]">{selectedSourceType.description}</p>}
+		  <Input label="Name" required value={newSource.name} onChange={e => setNewSource({ ...newSource, name: e.target.value })} />
+		  {selectedSourceType?.advanced && <Select label="Advanced format" value={newSource.source_kind} onChange={e => setNewSource({ ...newSource, source_kind: e.target.value })}>
+			<option value="inventory">Raw inventory plugin YAML</option><option value="script">Executable inventory script</option>
+		  </Select>}
+		  {selectedSourceType && !selectedSourceType.advanced && selectedSourceType.fields.map(field => field.type === 'boolean' ?
+			<Select key={field.id} label={field.label} hint={field.description} value={String(newSource.values[field.id] ?? field.default ?? false)} onChange={e => setNewSource({ ...newSource, values: { ...newSource.values, [field.id]: e.target.value === 'true' } })}><option value="true">Yes</option><option value="false">No</option></Select> :
+			<Input key={field.id} label={field.label} required={field.required} hint={field.type === 'string_list' ? `${field.description || ''} Separate values with commas.` : field.description} value={String(newSource.values[field.id] ?? '')} onChange={e => setNewSource({ ...newSource, values: { ...newSource.values, [field.id]: e.target.value } })} />
+		  )}
           <Select label="Credential (optional)" hint="A cloud credential whose injectors authenticate the plugin." value={newSource.credential_id} onChange={e => setNewSource({ ...newSource, credential_id: e.target.value === '' ? '' : Number(e.target.value) })}>
             <option value="">None</option>
-            {credentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+			{compatibleCredentials.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
-          <Textarea label="Source" rows={8} className="font-mono text-xs" value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} hint="YAML plugin config, or a script emitting Ansible inventory JSON." />
-          <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setShowSourceModal(false)}>Cancel</Button><Button onClick={createSource}>Create</Button></div>
+		  {selectedSourceType?.advanced && <Textarea label={newSource.source_kind === 'script' ? 'Inventory script' : 'Plugin YAML'} required rows={10} className="font-mono text-xs" value={newSource.source} onChange={e => setNewSource({ ...newSource, source: e.target.value })} hint="Advanced configuration is validated again by the server." />}
+		  <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => { setShowSourceModal(false); setNewSource(emptySource); }}>Cancel</Button><Button onClick={createSource} disabled={!newSource.name.trim() || !selectedSourceType}>Create source</Button></div>
         </div>
       </Modal>
 
@@ -566,6 +589,20 @@ const InventoriesPage = () => {
 
 // Whether a group's own name matches the tree filter (so an empty matching group still shows).
 function g_match(g: Group, q: string) { return g.name.toLowerCase().includes(q); }
+
+function buildInventorySourceYAML(sourceType: InventorySourceType, values: Record<string, string | boolean>): string {
+	const lines = [`plugin: ${sourceType.plugin}`];
+	for (const field of sourceType.fields) {
+		const value = values[field.id] ?? field.default;
+		if (value === undefined || value === '') continue;
+		if (field.type === 'string_list') {
+			const items = String(value).split(',').map(v => v.trim()).filter(Boolean);
+			if (items.length) lines.push(`${field.id}:`, ...items.map(v => `  - ${JSON.stringify(v)}`));
+		} else if (field.type === 'boolean') lines.push(`${field.id}: ${value ? 'true' : 'false'}`);
+		else lines.push(`${field.id}: ${JSON.stringify(String(value))}`);
+	}
+	return lines.join('\n') + '\n';
+}
 
 const HostRow: React.FC<{ host: Host; sel: boolean; onClick: () => void }> = ({ host, sel, onClick }) => (
   <button onClick={onClick} className={`w-full flex items-center gap-2.5 h-7 pl-7 pr-2.5 rounded-lg max-[820px]:h-11 ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>

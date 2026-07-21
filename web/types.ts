@@ -126,6 +126,32 @@ export interface Credential {
   modified_at: string;
 }
 
+export interface InventorySourceField {
+  id: string;
+  label: string;
+  type: 'string' | 'string_list' | 'boolean' | 'yaml';
+  required: boolean;
+  description?: string;
+  default?: unknown;
+}
+
+export interface InventorySourceType {
+  id: string;
+  version: string;
+  name: string;
+  description: string;
+  plugin?: string;
+  advanced: boolean;
+  fields: InventorySourceField[];
+  compatible_credential_types: string[];
+  example: string;
+}
+
+export interface InventorySourceCatalog {
+  version: string;
+  results: InventorySourceType[];
+}
+
 export interface JobTemplate {
   id: number;
   organization_id: number;

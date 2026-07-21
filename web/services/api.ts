@@ -239,6 +239,7 @@ export const api = {
     getActivityStream: (limit = 100) => fetchWithAuth(`/activity-stream?limit=${limit}`).then(r => r.json()),
 
     // Inventory sources (dynamic inventory)
+	getInventorySourceTypes: () => fetchWithAuth('/inventory-source-types').then(r => r.json()),
     getInventorySources: (invId: number) => fetchWithAuth(`/inventories/${invId}/sources`).then(r => r.json()),
     createInventorySource: (invId: number, data: any) => fetchWithAuth(`/inventories/${invId}/sources`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     deleteInventorySource: (invId: number, sid: number) => fetchWithAuth(`/inventories/${invId}/sources/${sid}`, { method: 'DELETE' }),
