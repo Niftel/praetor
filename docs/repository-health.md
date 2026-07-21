@@ -91,8 +91,8 @@ Check only local shared-module siblings:
 make shared-module-health
 ```
 
-Check clean clones of the exact released tags, as CI and remote release
-preflight do:
+Check downloads of the exact released module versions, as CI and remote release
+preflight do. This supports both tagged releases and Go pseudo-versions:
 
 ```bash
 make shared-module-health-remote
