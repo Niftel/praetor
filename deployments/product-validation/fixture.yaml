@@ -79,6 +79,66 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: praetor-validation-inventory-provider
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+data:
+  inventory.json: |
+    {"_meta":{"hostvars":{"dynamic-alpha":{"fixture_revision":1},"dynamic-beta":{"fixture_revision":1}}},"validation":{"hosts":["dynamic-alpha","dynamic-beta"]}}
+  default.conf: |
+    map $http_authorization $inventory_authorized {
+      default 0;
+      "Bearer praetor-dynamic-inventory-fixture" 1;
+    }
+    server {
+      listen 8080;
+      location = /healthz { access_log off; return 204; }
+      location = /inventory {
+        if ($inventory_authorized = 0) { return 401; }
+        default_type application/json;
+        add_header Cache-Control "no-store";
+        alias /srv/inventory/inventory.json;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praetor-validation-inventory-provider
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: praetor-validation-inventory-provider}
+  template:
+    metadata:
+      labels: {app: praetor-validation-inventory-provider, app.kubernetes.io/part-of: praetor-validation-fixture}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: provider
+          image: nginx:alpine-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 2, periodSeconds: 3}
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+          volumeMounts:
+            - {name: fixture, mountPath: /etc/nginx/conf.d/default.conf, subPath: default.conf, readOnly: true}
+            - {name: fixture, mountPath: /srv/inventory, readOnly: true}
+      volumes:
+        - name: fixture
+          configMap: {name: praetor-validation-inventory-provider}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praetor-validation-inventory-provider
+  labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
+spec:
+  selector: {app: praetor-validation-inventory-provider}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: praetor-validation-notification-sink
   labels: {app.kubernetes.io/part-of: praetor-validation-fixture}
 data:

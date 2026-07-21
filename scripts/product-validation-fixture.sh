@@ -99,7 +99,7 @@ cluster_ready() {
 status_fixture() {
   cluster_ready
   local failed=0 target
-  for target in "deployment/$RELEASE-api" deployment/praetor-secrets deployment/praetor-audit-sink deployment/praetor-validation-ldap deployment/praetor-validation-notification-sink; do
+  for target in "deployment/$RELEASE-api" deployment/praetor-secrets deployment/praetor-audit-sink deployment/praetor-validation-ldap deployment/praetor-validation-notification-sink deployment/praetor-validation-inventory-provider; do
     if ! kubectl get "$target" -n "$NAMESPACE" >/dev/null 2>&1; then
       echo "unhealthy: $target is missing" >&2; failed=1
     elif ! kubectl wait --for=condition=available "$target" -n "$NAMESPACE" --timeout=1s >/dev/null 2>&1; then
@@ -120,6 +120,7 @@ create_fixture() {
   kubectl apply -n "$NAMESPACE" -f "$MANIFEST" >/dev/null
   kubectl rollout status deployment/praetor-validation-ldap -n "$NAMESPACE" --timeout=180s
   kubectl rollout status deployment/praetor-validation-notification-sink -n "$NAMESPACE" --timeout=180s
+  kubectl rollout status deployment/praetor-validation-inventory-provider -n "$NAMESPACE" --timeout=180s
   helm upgrade "$RELEASE" "$CHART" -n "$NAMESPACE" --reuse-values --set ldap.enabled=true --set ldap.existingConfigMap=praetor-validation-ldap-config --set secrets.ldapBindPassword=admin --wait --timeout 5m >/dev/null
   kubectl rollout status "deployment/$RELEASE-api" -n "$NAMESPACE" --timeout=180s
   status_fixture
@@ -134,6 +135,11 @@ cleanup_fixture() {
   [[ -n "$db_pod" ]] || die "Praetor database pod is missing"
   kubectl exec -i -n "$NAMESPACE" "$db_pod" -- psql -v ON_ERROR_STOP=1 -U postgres -d praetor >/dev/null <<'SQL'
 BEGIN;
+DELETE FROM schedules WHERE name = 'Dynamic Inventory E2E Schedule';
+DELETE FROM inventory_sources WHERE name = 'Dynamic Inventory E2E Source';
+DELETE FROM credentials WHERE name = 'Dynamic Inventory E2E Credential';
+DELETE FROM credential_types WHERE name = 'Dynamic Inventory E2E Credential' AND managed = false;
+DELETE FROM inventories WHERE name = 'Dynamic Inventory E2E Inventory';
 DELETE FROM workflow_templates WHERE name = 'Praetor Validation Workflow';
 DELETE FROM workflow_templates WHERE name = 'Praetor Validation LDAP Workflow';
 DELETE FROM service_principals WHERE name = 'Praetor Validation API';
@@ -145,7 +151,7 @@ DELETE FROM projects WHERE name = 'Praetor Validation Project';
 COMMIT;
 SQL
   kubectl delete all -n "$NAMESPACE" -l "$LABEL" --ignore-not-found >/dev/null
-  kubectl delete configmap -n "$NAMESPACE" praetor-validation-ldap-bootstrap praetor-validation-ldap-config --ignore-not-found >/dev/null
+  kubectl delete configmap -n "$NAMESPACE" praetor-validation-ldap-bootstrap praetor-validation-ldap-config praetor-validation-inventory-provider praetor-validation-notification-sink --ignore-not-found >/dev/null
   if helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
     helm upgrade "$RELEASE" "$CHART" -n "$NAMESPACE" --reuse-values --set ldap.enabled=false --set ldap.existingConfigMap= --wait --timeout 5m >/dev/null
   fi

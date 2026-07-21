@@ -18,8 +18,8 @@ var (
 	digestPattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
-var productJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery"}
-var stagingJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "staging-health", "staging-recovery", "ui-acceptance"}
+var productJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "dynamic-inventory"}
+var stagingJourneys = []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "dynamic-inventory", "staging-health", "staging-recovery", "ui-acceptance"}
 var pilotJourneys = []string{"managed-host-pilot", "managed-host-pilot-faults", "secrets-service"}
 var stagingComponents = []string{"api", "consumer", "executor", "ingestion", "migrator", "reconciler", "scheduler", "ui"}
 

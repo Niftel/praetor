@@ -52,7 +52,7 @@ func runReadinessAggregator(t *testing.T, evidence string) ([]byte, error) {
 
 func TestReadinessAggregatorProducesSanitizedGoReport(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery"} {
+	for _, name := range []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "dynamic-inventory"} {
 		writeJourneyEvidence(t, dir, name, map[string]any{"run_id": "synthetic-id"})
 	}
 	report, err := runReadinessAggregator(t, dir)
@@ -83,7 +83,7 @@ func TestReadinessAggregatorRejectsMissingAndSensitiveEvidence(t *testing.T) {
 
 func TestStagingReadinessAggregatorPreservesNoGoExitCode(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "staging-health", "staging-recovery"} {
+	for _, name := range []string{"ldap-operator", "secrets-service", "delegated-api", "execution-recovery", "dynamic-inventory", "staging-health", "staging-recovery"} {
 		writeJourneyEvidence(t, dir, name, nil)
 	}
 	writeJourneyEvidence(t, dir, "ui-acceptance", map[string]any{"result": "fail"})

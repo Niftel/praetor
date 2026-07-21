@@ -15,6 +15,7 @@ on:
       - 'scripts/validate-delegated-api-e2e.sh'
       - 'scripts/validate-ldap-operator-journey.sh'
       - 'scripts/validate-execution-recovery-e2e.sh'
+      - 'scripts/validate-dynamic-inventory-e2e.sh'
       - 'cmd/readiness-report/**'
       - 'internal/readiness/**'
       - 'playbooks/validate-execution-recovery.yml'
@@ -117,6 +118,10 @@ jobs:
           ./scripts/product-validation-fixture.sh create
           PRAETOR_LDAP_EVIDENCE_FILE=build/readiness-evidence/ldap-operator.json \
             ./scripts/validate-ldap-operator-journey.sh
+          PRAETOR_DYNAMIC_INVENTORY_EVIDENCE_FILE=build/readiness-evidence/dynamic-inventory.json \
+            ./scripts/validate-dynamic-inventory-e2e.sh
+          PRAETOR_DYNAMIC_INVENTORY_EVIDENCE_FILE=build/readiness-evidence/dynamic-inventory.json \
+            ./scripts/validate-dynamic-inventory-e2e.sh
           PRAETOR_EXECUTOR_ROOT="${{ github.workspace }}/executor" \
             PRAETOR_RECOVERY_PROJECT_REF="${{ github.event.pull_request.head.sha || github.sha }}" \
             PRAETOR_RECOVERY_EVIDENCE_FILE=build/readiness-evidence/execution-recovery.json \
@@ -141,6 +146,14 @@ jobs:
           kubectl exec -n praetor-secrets "$executor_pod" -- tar -czf "/tmp/ansible-runtime-linux-$executor_arch.tar.gz" -C /opt/praetor/packs ansible-runtime
           kubectl cp "praetor-secrets/$executor_pod:/tmp/ansible-runtime-linux-$executor_arch.tar.gz" "build/runtime/ansible-runtime-linux-$executor_arch.tar.gz"
           ./scripts/test-secrets-execution-e2e.sh
+      - name: Upload bounded dynamic-inventory diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dynamic-inventory-${{ github.sha }}
+          path: build/readiness-evidence/dynamic-inventory.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Capture delegated API evidence
         timeout-minutes: 5
         run: |

@@ -18,7 +18,7 @@ die() { echo "error: $*" >&2; exit 1; }
 for command in go jq shasum; do command -v "$command" >/dev/null || die "$command is required"; done
 [[ -n "$PRAETOR_REVISION" && -n "$SECRETS_REVISION" ]] || die "PRAETOR_REVISION and PRAETOR_SECRETS_REVISION are required"
 
-journeys=(ldap-operator secrets-service delegated-api execution-recovery)
+journeys=(ldap-operator secrets-service delegated-api execution-recovery dynamic-inventory)
 if [[ "$PROFILE" == staging-release-candidate ]]; then
   journeys+=(staging-health staging-recovery ui-acceptance)
   [[ -n "$COMPONENTS_FILE" ]] || die "PRAETOR_READINESS_COMPONENTS_FILE is required for the staging-release-candidate profile"
