@@ -177,6 +177,13 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
+	triggerEnd := strings.Index(workflow, "\npermissions:")
+	if triggerEnd < 0 {
+		t.Fatal("product validation workflow is missing its permissions boundary")
+	}
+	if strings.Contains(workflow[:triggerEnd], "\n  push:") {
+		t.Fatal("product validation must not rerun after a PR has been merged to main")
+	}
 	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "packages: read", "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0", "fetch-depth: 0", "Classify full lifecycle scope", `if: needs.preflight.outputs.full_lifecycle == 'true'`, `EVENT_NAME: ${{ github.event_name }}`, "classify-product-validation.sh", "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
