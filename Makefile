@@ -281,7 +281,7 @@ staging-execution-diagnostics-measure:
 staging-execution-diagnostics-verify:
 	./scripts/validate-staging-execution-diagnostics.sh verify
 
-.PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery
+.PHONY: validation-fixture-create validation-fixture-status validation-fixture-cleanup validation-ldap-operator-journey validation-execution-recovery delegated-fixture-plan delegated-fixture-setup delegated-fixture-validate delegated-fixture-cleanup delegated-fixture-rehearse
 validation-fixture-bootstrap:
 	./scripts/bootstrap-product-validation-base.sh
 
@@ -299,6 +299,21 @@ validation-ldap-operator-journey:
 
 validation-execution-recovery:
 	./scripts/validate-execution-recovery-e2e.sh
+
+delegated-fixture-plan:
+	./scripts/staging-service-principal-fixture.sh plan
+
+delegated-fixture-setup:
+	./scripts/staging-service-principal-fixture.sh setup
+
+delegated-fixture-validate:
+	./scripts/staging-service-principal-fixture.sh validate
+
+delegated-fixture-cleanup:
+	./scripts/staging-service-principal-fixture.sh cleanup
+
+delegated-fixture-rehearse:
+	./scripts/staging-service-principal-fixture.sh rehearse
 
 # Full suite against a throwaway, ISOLATED Postgres — the DB-gated integration
 # tests (RBAC, reconciler, executor, ...) mutate shared rows, so they must NOT run

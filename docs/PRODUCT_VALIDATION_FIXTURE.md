@@ -88,3 +88,40 @@ PRAETOR_DELEGATED_EVIDENCE_FILE=build/readiness-evidence/delegated-api.json \
 TEST_DATABASE_URL="$TEST_DATABASE_URL" \
 ./scripts/validate-delegated-api-e2e.sh
 ```
+
+## Delegated service-principal staging fixture
+
+The persistent staging fixture automates the pre-release procedure for a
+bounded application identity. It reuses the synthetic pilot workflow,
+Engineering inventory, managed host, and backend approval team created by
+`make staging-pilot-journey-seed`, but owns its principal, credentials, grant,
+and Kubernetes Secret independently.
+
+Always inspect the non-secret plan before mutating staging:
+
+```sh
+make delegated-fixture-plan
+make staging-pilot-journey-seed
+make delegated-fixture-setup
+make delegated-fixture-validate
+make delegated-fixture-cleanup
+```
+
+`setup` is resumable and intentionally rotates the single active credential on
+every invocation. The one-time plaintext returned by the API is piped directly
+into the namespace-scoped `praetor-delegated-staging-fixture` Secret; it is not
+printed, committed, or written to an evidence artifact. The grant is restricted
+to one named workflow, inventory, enabled host, host-count maximum, extra-
+variable key, backend approval team, and bounded expiry.
+
+The complete pre-release rehearsal proves partial-setup recovery, repeated
+setup without duplicate active credentials or grants, idempotent launch replay,
+assigned-team approval, successful completion, and fixture-owned cleanup:
+
+```sh
+make delegated-fixture-rehearse
+```
+
+Cleanup revokes every active fixture credential and grant, disables only the
+named synthetic principal, and deletes the Secret only when its ownership label
+matches. Shared product-validation resources are preserved.
