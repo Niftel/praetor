@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -30,12 +30,6 @@ jobs:
       - name: compatibility manifest
         run: go run ./cmd/compatcheck
 
-      - name: wire contracts
-        run: GOWORK=off go test ./tests/contracts
-
-      - name: deployment probe contracts
-        run: make deployment-contract-test
-
       - name: go vet
         run: go vet ./...
 
@@ -45,6 +39,23 @@ jobs:
       - name: test
         run: go test ./...
 
+  deployment-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: wire contracts
+        run: GOWORK=off go test ./tests/contracts
+      - name: deployment probe contracts
+        run: make deployment-contract-test
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: install UI dependencies
         working-directory: web
         run: npm ci
@@ -56,6 +67,23 @@ jobs:
       - name: UI production build
         working-directory: web
         run: npm run build:check
+
+  # Preserve the established required check while the independently runnable
+  # Go, deployment-contract, and UI gates execute in parallel.
+  test:
+    if: always()
+    needs: [go, deployment-contracts, ui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every isolated service gate
+        env:
+          GO_RESULT: ${{ needs.go.result }}
+          DEPLOYMENT_RESULT: ${{ needs.deployment-contracts.result }}
+          UI_RESULT: ${{ needs.ui.result }}
+        run: |
+          test "$GO_RESULT" = success
+          test "$DEPLOYMENT_RESULT" = success
+          test "$UI_RESULT" = success
 
   database-compatibility:
     runs-on: ubuntu-latest

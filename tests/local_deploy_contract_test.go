@@ -177,6 +177,11 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
+	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "packages: read", "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0", "fetch-depth: 0", "Classify full lifecycle scope", `if: needs.preflight.outputs.full_lifecycle == 'true'`, `EVENT_NAME: ${{ github.event_name }}`, "classify-product-validation.sh", "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
+		}
+	}
 	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
@@ -215,6 +220,16 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrap := string(bootstrapRaw)
+	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker pull "$released_ref"`, `docker tag "$released_ref"`, `released_pids+=("$!")`, "released_pull_failed"} {
+		if !strings.Contains(bootstrap, required) {
+			t.Fatalf("clean fixture bootstrap acceleration contract must contain %q", required)
+		}
+	}
+	for _, checkout := range []string{"Check out Scheduler", "Check out Ingestion", "Check out Consumer", "Check out Reconciler"} {
+		if strings.Contains(workflow, checkout) {
+			t.Fatalf("clean fixture workflow must not rebuild unchanged sibling source through %q", checkout)
+		}
+	}
 	for _, required := range []string{"docker build", "k3d image import", "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag", `--set hostRunner.callbackUrl="http://praetor-ingestion:8081"`} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap must contain %q", required)
@@ -228,6 +243,50 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 	for _, required := range []string{"log_format notification escape=none '$request_body'", "rewrite ^ /capture break", "proxy_pass http://127.0.0.1:8080", "location = /capture { access_log off; return 204; }", "praetor-validation-notification-sink"} {
 		if !strings.Contains(fixture, required) {
 			t.Fatalf("notification recorder must contain %q", required)
+		}
+	}
+}
+
+func TestProductValidationScopeClassifier(t *testing.T) {
+	root := repositoryRoot(t)
+	script := filepath.Join(root, "scripts", "classify-product-validation.sh")
+	tests := []struct {
+		name, event, paths, want string
+	}{
+		{"main always runs", "push", "docs/readme.md\n", "true"},
+		{"manual always runs", "workflow_dispatch", "", "true"},
+		{"isolated chart contract", "pull_request", "deployments/helm/praetor-v2/values.yaml\n", "false"},
+		{"isolated UI", "pull_request", "web/pages/JobsPage.tsx\n", "false"},
+		{"validation workflow", "pull_request", ".github/workflows/product-validation-fixture.yml\n", "true"},
+		{"LDAP journey", "pull_request", "scripts/validate-ldap-operator-journey.sh\n", "true"},
+		{"recovery implementation", "pull_request", "internal/readiness/report.go\n", "true"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", script)
+			cmd.Env = append(os.Environ(), "EVENT_NAME="+tc.event)
+			cmd.Stdin = strings.NewReader(tc.paths)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("classifier failed: %v: %s", err, out)
+			}
+			if got := strings.TrimSpace(string(out)); got != tc.want {
+				t.Fatalf("classifier returned %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCIExecutesIsolatedGatesInParallel(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "test.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{"  go:\n", "  deployment-contracts:\n", "  ui:\n", "needs: [go, deployment-contracts, ui]", "Require every isolated service gate", `${{ needs.go.result }}`, `${{ needs.deployment-contracts.result }}`, `${{ needs.ui.result }}`} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("CI isolation contract must contain %q", required)
 		}
 	}
 }
