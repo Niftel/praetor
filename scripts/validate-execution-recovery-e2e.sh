@@ -232,10 +232,11 @@ for _ in $(seq 1 60); do
   kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- test -f "/var/lib/praetor/jobs/$LOST_RUN_ID/checkpoint.json" && break
   sleep 1
 done
-# Freeze the executor before deleting its durable state. Removing the directory
-# while PID 1 is still writing checkpoints races with rm and can leave newly
-# created files behind, producing a false validation failure.
-kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- sh -c 'kill -STOP 1'
+# Freeze every executor process before deleting its durable state. PID 1 is an
+# entrypoint wrapper, while its runner child writes checkpoints; stopping only
+# the wrapper still races with rm. kill(-1) excludes the calling shell and PID 1,
+# so stop the remaining processes first and the wrapper last.
+kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- sh -c 'kill -STOP -1; kill -STOP 1'
 kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- rm -rf "/var/lib/praetor/jobs/$LOST_RUN_ID"
 kubectl delete pod -n "$NAMESPACE" "$EXECUTOR_POD" --wait=false >/dev/null
 wait_rollout "statefulset/$RELEASE-executor"
