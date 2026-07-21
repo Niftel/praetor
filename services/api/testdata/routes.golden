@@ -48,6 +48,7 @@ GET     /api/v1/inventories/{inventoryId}/
 GET     /api/v1/inventories/{inventoryId}/groups/
 GET     /api/v1/inventories/{inventoryId}/hosts/
 GET     /api/v1/inventories/{inventoryId}/sources
+GET     /api/v1/inventory-source-types
 GET     /api/v1/job-templates/
 GET     /api/v1/job-templates/{id}
 GET     /api/v1/job-templates/{id}/notifications
