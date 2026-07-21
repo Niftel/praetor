@@ -344,6 +344,7 @@ type Schedule struct {
 	Description          *string         `json:"description,omitempty"`
 	UnifiedJobTemplateID *int64          `json:"unified_job_template_id,omitempty"`
 	WorkflowTemplateID   *int64          `json:"workflow_template_id,omitempty"`
+	InventorySourceID    *int64          `json:"inventory_source_id,omitempty"`
 	RRule                string          `json:"rrule"`
 	NextRun              time.Time       `json:"next_run"`
 	Enabled              bool            `json:"enabled"`
@@ -359,6 +360,7 @@ func FromSchedule(m models.Schedule) Schedule {
 		Description:          m.Description,
 		UnifiedJobTemplateID: m.UnifiedJobTemplateID,
 		WorkflowTemplateID:   m.WorkflowTemplateID,
+		InventorySourceID:    m.InventorySourceID,
 		RRule:                m.RRule,
 		NextRun:              m.NextRun,
 		Enabled:              m.Enabled,
@@ -383,6 +385,7 @@ func (d Schedule) ToModel() models.Schedule {
 		Description:          d.Description,
 		UnifiedJobTemplateID: d.UnifiedJobTemplateID,
 		WorkflowTemplateID:   d.WorkflowTemplateID,
+		InventorySourceID:    d.InventorySourceID,
 		RRule:                d.RRule,
 		NextRun:              d.NextRun,
 		Enabled:              d.Enabled,

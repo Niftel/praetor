@@ -55,7 +55,7 @@ type inventorySyncHistoryFilter struct {
 
 func parseInventorySyncHistoryFilter(r *http.Request) (inventorySyncHistoryFilter, error) {
 	filter := inventorySyncHistoryFilter{Status: r.URL.Query().Get("status"), Phase: r.URL.Query().Get("phase"), Limit: 25}
-	if filter.Status != "" && filter.Status != "pending" && filter.Status != "running" && filter.Status != "successful" && filter.Status != "failed" {
+	if filter.Status != "" && filter.Status != "pending" && filter.Status != "running" && filter.Status != "successful" && filter.Status != "failed" && filter.Status != "canceled" {
 		return filter, fmt.Errorf("status: unsupported inventory sync status %q", filter.Status)
 	}
 	if filter.Phase != "" && filter.Phase != "queued" && filter.Phase != "acquisition" && filter.Phase != "parsing" && filter.Phase != "validation" && filter.Phase != "reconciliation" && filter.Phase != "completed" {
@@ -322,6 +322,19 @@ func (rs *InventoriesResource) enqueueInventorySourceOperation(w http.ResponseWr
 	if err != nil {
 		render.ErrInvalidRequest(nil).Render(w, r)
 		return
+	}
+	if !preview {
+		var active bool
+		if err := rs.DB.GetContext(r.Context(), &active, `SELECT EXISTS(
+			SELECT 1 FROM inventory_sync_history
+			WHERE inventory_source_id=$1 AND status IN ('pending','running'))`, sid); err != nil {
+			render.ErrInternal(err).Render(w, r)
+			return
+		}
+		if active {
+			render.Render(w, r, ErrConflict(fmt.Errorf("inventory source synchronization already active")))
+			return
+		}
 	}
 
 	opts := launch.Options{InventorySourceID: sid, InventoryPreview: preview}

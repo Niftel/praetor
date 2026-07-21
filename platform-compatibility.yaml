@@ -31,7 +31,7 @@ components:
     repository: Niftel/scheduler
     module: github.com/praetordev/scheduler
     image: praetor-scheduler
-    version: 0.1.3
+    version: 0.1.4
   reconciler:
     repository: Niftel/reconciler
     module: github.com/praetordev/reconciler
@@ -59,10 +59,10 @@ contracts:
   github.com/praetordev/eventbus: v0.1.0
   github.com/praetordev/events: v0.1.2-0.20260721152035-6660ddd52b3a
   github.com/praetordev/launch: v0.1.2-0.20260721152036-bccc41205bc4
-  github.com/praetordev/models: v0.2.0
+  github.com/praetordev/models: v0.2.1
   github.com/praetordev/packspec: v0.1.0
   github.com/praetordev/rbac/v4: v4.0.0
-  github.com/praetordev/store: v0.1.3
+  github.com/praetordev/store: v0.1.5
 
 # Independently released reusable modules. This is the authoritative health and
 # release inventory; local go.work entries are development conveniences only.
@@ -124,7 +124,7 @@ sharedModules:
   models:
     module: github.com/praetordev/models
     repository: Niftel/models
-    version: v0.2.0
+    version: v0.2.1
     owner: control-plane
     securitySensitive: false
   notify:
@@ -178,10 +178,10 @@ sharedModules:
   store:
     module: github.com/praetordev/store
     repository: Niftel/store
-    version: v0.1.3
+    version: v0.1.5
     owner: control-plane
     securitySensitive: true
 
 database:
   minimumMigration: 1
-  maximumMigration: 70
+  maximumMigration: 71

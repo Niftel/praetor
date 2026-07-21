@@ -1,12 +1,12 @@
 import React from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import InventorySourceHistoryList from './InventorySourceHistory';
 import { api } from '../services/api';
 
 vi.mock('../services/api', () => ({
-  api: { getInventorySourceHistory: vi.fn() },
+  api: { getInventorySourceHistory: vi.fn(), cancelJob: vi.fn() },
 }));
 
 afterEach(() => {
@@ -29,7 +29,7 @@ describe('InventorySourceHistoryList', () => {
       }],
     });
 
-    render(<MemoryRouter><InventorySourceHistoryList inventoryId={2} sourceId={7} /></MemoryRouter>);
+    render(<MemoryRouter><InventorySourceHistoryList inventoryId={2} sourceId={7} canCancel /></MemoryRouter>);
 
     await waitFor(() => expect(screen.getByText('failed')).toBeTruthy());
     expect(screen.getByText(/\+2 added · 1 updated · 3 disabled · 4 unchanged/)).toBeTruthy();
@@ -41,7 +41,25 @@ describe('InventorySourceHistoryList', () => {
 
   it('renders a bounded empty state', async () => {
     vi.mocked(api.getInventorySourceHistory).mockResolvedValue({ total: 0, results: [] });
-    render(<MemoryRouter><InventorySourceHistoryList inventoryId={2} sourceId={7} /></MemoryRouter>);
+    render(<MemoryRouter><InventorySourceHistoryList inventoryId={2} sourceId={7} canCancel /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('No synchronization attempts yet.')).toBeTruthy());
+  });
+
+  it('cancels an active source sync without leaving the history view', async () => {
+    vi.mocked(api.getInventorySourceHistory).mockResolvedValue({
+      total: 1,
+      results: [{
+        id: 9, correlation_id: 'active', inventory_id: 2, inventory_source_id: 7,
+        unified_job_id: 54, reconciliation_policy: 'retain_missing', phase: 'acquisition', status: 'running',
+        hosts_added: 0, hosts_updated: 0, hosts_disabled: 0, hosts_unchanged: 0,
+        groups_added: 0, groups_updated: 0, groups_unchanged: 0, diagnostic_details: {}, created_at: '2026-07-21T12:00:00Z',
+      }],
+    });
+    vi.mocked(api.cancelJob).mockResolvedValue({ status: 'canceling' });
+    render(<MemoryRouter><InventorySourceHistoryList inventoryId={2} sourceId={7} canCancel /></MemoryRouter>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /cancel/ }));
+    await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith(54));
+    expect(screen.getByText('canceled')).toBeTruthy();
   });
 });
