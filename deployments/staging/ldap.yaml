@@ -4,7 +4,6 @@ server:
   bind_dn: "cn=admin,dc=praetor,dc=local"
   bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
   start_tls: false
-  insecure_skip_verify: false
   timeout: 30s
 users:
   search_base: "ou=users,dc=praetor,dc=local"

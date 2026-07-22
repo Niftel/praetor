@@ -148,8 +148,8 @@ The staging directory contains only synthetic users from
 `deployments/ldap/bootstrap.ldif`. `demo-operator` maps to the Engineering
 organization and `backend-team`; `demo-auditor` maps to the Engineering auditor
 role. The bind password remains in `praetor-staging-runtime`, and the committed
-LDAP configuration requires `ldaps://`, a mounted CA bundle, and
-`insecure_skip_verify: false`.
+LDAP configuration requires `ldaps://` and a mounted CA bundle. Certificate
+verification cannot be disabled.
 
 ## Upgrade, backup, and isolated restore
 

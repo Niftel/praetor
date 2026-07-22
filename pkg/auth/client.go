@@ -32,23 +32,9 @@ func (c *LDAPClient) Connect() error {
 	url := c.config.Server.URL
 	useTLS := strings.HasPrefix(url, "ldaps://")
 
-	// Build TLS config
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: c.config.Server.InsecureSkipVerify,
-	}
-	if c.config.Server.CAFile != "" {
-		pem, readErr := os.ReadFile(c.config.Server.CAFile)
-		if readErr != nil {
-			return fmt.Errorf("read LDAP CA file: %w", readErr)
-		}
-		roots, rootsErr := x509.SystemCertPool()
-		if rootsErr != nil || roots == nil {
-			roots = x509.NewCertPool()
-		}
-		if !roots.AppendCertsFromPEM(pem) {
-			return fmt.Errorf("LDAP CA file contains no PEM certificates")
-		}
-		tlsConfig.RootCAs = roots
+	tlsConfig, err := c.buildTLSConfig()
+	if err != nil {
+		return err
 	}
 
 	// Set timeout
@@ -72,6 +58,27 @@ func (c *LDAPClient) Connect() error {
 
 	c.conn = conn
 	return nil
+}
+
+func (c *LDAPClient) buildTLSConfig() (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+	if c.config.Server.CAFile != "" {
+		pem, readErr := os.ReadFile(c.config.Server.CAFile)
+		if readErr != nil {
+			return nil, fmt.Errorf("read LDAP CA file: %w", readErr)
+		}
+		roots, rootsErr := x509.SystemCertPool()
+		if rootsErr != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("LDAP CA file contains no PEM certificates")
+		}
+		tlsConfig.RootCAs = roots
+	}
+	return tlsConfig, nil
 }
 
 // Bind authenticates with the LDAP server using service account credentials.

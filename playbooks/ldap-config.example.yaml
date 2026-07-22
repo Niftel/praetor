@@ -17,9 +17,6 @@ server:
   # Use StartTLS for non-SSL connections
   start_tls: false
   
-  # Skip TLS certificate verification (not recommended for production)
-  insecure_skip_verify: false
-  
   # Connection timeout
   timeout: 30s
 

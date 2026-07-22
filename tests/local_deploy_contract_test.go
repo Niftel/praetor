@@ -532,12 +532,12 @@ func TestStagingIntegrationsUseTLSAndPersistentState(t *testing.T) {
 		t.Fatal(err)
 	}
 	ldap := string(ldapRaw)
-	for _, required := range []string{"ldaps://", "ca_file:", "insecure_skip_verify: false", "bind_password_env: PRAETOR_LDAP_BIND_PASSWORD"} {
+	for _, required := range []string{"ldaps://", "ca_file:", "bind_password_env: PRAETOR_LDAP_BIND_PASSWORD"} {
 		if !strings.Contains(ldap, required) {
 			t.Fatalf("staging LDAP configuration must contain %q", required)
 		}
 	}
-	for _, forbidden := range []string{"bind_password:", "ldap://praetor"} {
+	for _, forbidden := range []string{"bind_password:", "ldap://praetor", "insecure_skip_verify"} {
 		if strings.Contains(ldap, forbidden) {
 			t.Fatalf("staging LDAP configuration must not contain %q", forbidden)
 		}

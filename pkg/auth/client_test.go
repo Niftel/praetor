@@ -1,11 +1,26 @@
 package auth
 
 import (
+	"crypto/tls"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLDAPClientTLSConfigRequiresTLS12(t *testing.T) {
+	client := NewLDAPClient(&LDAPConfig{})
+	config, err := client.buildTLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.InsecureSkipVerify {
+		t.Fatal("LDAP TLS certificate verification must always be enabled")
+	}
+	if config.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("LDAP minimum TLS version = %d, want TLS 1.2", config.MinVersion)
+	}
+}
 
 func TestLDAPClientRejectsUnreadableCAFileBeforeDial(t *testing.T) {
 	client := NewLDAPClient(&LDAPConfig{Server: LDAPServerConfig{
