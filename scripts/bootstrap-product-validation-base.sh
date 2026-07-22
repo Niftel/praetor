@@ -71,7 +71,9 @@ else
   docker build --tag "praetor-consumer:$validation_tag" "$CONSUMER_ROOT"
   docker build --tag "praetor-reconciler:$validation_tag" "$RECONCILER_ROOT"
 fi
-k3d image import --cluster "$CLUSTER" \
+# Direct mode streams each image into the k3s node and avoids the tools-node
+# shared-tarball race where k3d can log a missing archive yet still exit zero.
+k3d image import --mode direct --cluster "$CLUSTER" \
   "$SECRETS_IMAGE" \
   "praetor-api:$validation_tag" \
   "praetor-migrator:$validation_tag" \
