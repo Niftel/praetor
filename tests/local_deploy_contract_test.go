@@ -235,6 +235,13 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 	if stopAt < 0 || removeAt < 0 || deleteAt < 0 || !(stopAt < removeAt && removeAt < deleteAt) {
 		t.Fatal("unrecoverable recovery fixture must quiesce the executor before removing the WAL and replacing the pod")
 	}
+	rolloutAt := strings.Index(recovery, `wait_rollout "statefulset/$RELEASE-executor"`)
+	stageRunnerAt := strings.Index(recovery, `kubectl cp "$WORK/praetor-host-runner"`)
+	stageCallbackAt := strings.Index(recovery, `kubectl cp "$EXECUTOR_ROOT/deploy/plugins/callback/praetor_checkpoint.py"`)
+	verifyCallbackAt := strings.Index(recovery, `test -f /opt/praetor/packs/ansible-runtime/plugins/callback/praetor_checkpoint.py`)
+	if rolloutAt < 0 || stageRunnerAt < 0 || stageCallbackAt < 0 || verifyCallbackAt < 0 || !(rolloutAt < stageRunnerAt && stageRunnerAt < stageCallbackAt && stageCallbackAt < verifyCallbackAt) {
+		t.Fatal("recovery fixture must roll the executor before staging and verifying the candidate checkpoint runtime")
+	}
 	journeyRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-ldap-operator-journey.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +257,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrap := string(bootstrapRaw)
-	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker pull "$released_ref"`, `docker tag "$released_ref"`, `released_pids+=("$!")`, "released_pull_failed"} {
+	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker buildx imagetools inspect --raw "$released_ref"`, `.platform.architecture == $arch`, `docker pull "$platform_ref"`, `docker tag "$platform_ref"`, `released_pids+=("$!")`, "released_pull_failed"} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap acceleration contract must contain %q", required)
 		}
@@ -260,7 +267,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow must not rebuild unchanged sibling source through %q", checkout)
 		}
 	}
-	for _, required := range []string{"docker build", "k3d image import --mode direct", "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag", `--set hostRunner.callbackUrl="http://praetor-ingestion:8081"`} {
+	for _, required := range []string{"docker build", `for image in "${validation_images[@]}"`, `k3d image import --mode direct --cluster "$CLUSTER" "$image"`, "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag", `--set hostRunner.callbackUrl="http://praetor-ingestion:8081"`} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap must contain %q", required)
 		}

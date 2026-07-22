@@ -47,12 +47,23 @@ if [[ "$USE_RELEASED_COMPONENTS" == true ]]; then
   # digest-addressed platform release instead of rebuilding five repositories.
   # Retagging keeps the existing air-gapped k3d import and pullPolicy=Never
   # checks identical to the source-build path.
+  docker_arch="$(docker version --format '{{.Server.Arch}}')"
+  case "$docker_arch" in
+    x86_64) docker_arch=amd64 ;;
+    aarch64) docker_arch=arm64 ;;
+  esac
   pull_released_component() {
-    local component="$1" released_ref
+    local component="$1" released_ref index_json platform_digest platform_ref
     released_ref="$(released_component_ref "$component")"
     [[ "$released_ref" == ghcr.io/niftel/*@sha256:* ]] || { echo "error: release lock has no immutable $component image" >&2; exit 1; }
-    docker pull "$released_ref"
-    docker tag "$released_ref" "praetor-$component:$validation_tag"
+    index_json="$(docker buildx imagetools inspect --raw "$released_ref")"
+    platform_digest="$(jq -r --arg arch "$docker_arch" 'first(.manifests[]? | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest) // empty' <<<"$index_json")"
+    platform_ref="$released_ref"
+    if [[ -n "$platform_digest" ]]; then
+      platform_ref="${released_ref%@*}@$platform_digest"
+    fi
+    docker pull "$platform_ref"
+    docker tag "$platform_ref" "praetor-$component:$validation_tag"
   }
   released_pids=()
   for component in scheduler executor ingestion consumer reconciler; do
@@ -71,22 +82,6 @@ else
   docker build --tag "praetor-consumer:$validation_tag" "$CONSUMER_ROOT"
   docker build --tag "praetor-reconciler:$validation_tag" "$RECONCILER_ROOT"
 fi
-# Direct mode streams each image into the k3s node and avoids the tools-node
-# shared-tarball race where k3d can log a missing archive yet still exit zero.
-k3d image import --mode direct --cluster "$CLUSTER" \
-  "$SECRETS_IMAGE" \
-  "praetor-api:$validation_tag" \
-  "praetor-migrator:$validation_tag" \
-  "praetor-ui:$validation_tag" \
-  "praetor-scheduler:$validation_tag" \
-  "praetor-executor:$validation_tag" \
-  "praetor-ingestion:$validation_tag" \
-  "praetor-consumer:$validation_tag" \
-  "praetor-reconciler:$validation_tag"
-
-# Do not start Helm when an image import was incomplete. Without this check,
-# Kubernetes falls back to Docker Hub and the fixture wastes several minutes in
-# ImagePullBackOff before Helm eventually times out.
 validation_images=(
   "$SECRETS_IMAGE"
   "praetor-api:$validation_tag"
@@ -98,6 +93,17 @@ validation_images=(
   "praetor-consumer:$validation_tag"
   "praetor-reconciler:$validation_tag"
 )
+
+# Direct mode avoids the tools-node shared-tarball race. Import each image in a
+# separate stream: a single multi-image stream can fail part-way through with a
+# missing content digest, leaving an indeterminate subset in containerd.
+for image in "${validation_images[@]}"; do
+  k3d image import --mode direct --cluster "$CLUSTER" "$image"
+done
+
+# Do not start Helm when an image import was incomplete. Without this check,
+# Kubernetes falls back to Docker Hub and the fixture wastes several minutes in
+# ImagePullBackOff before Helm eventually times out.
 probe_index=0
 for image in "${validation_images[@]}"; do
   probe="praetor-image-probe-$probe_index"

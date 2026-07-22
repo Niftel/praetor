@@ -103,6 +103,17 @@ EXECUTOR_POD="$(executor_pod)"
 ARCH="$(kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
 [[ "$ARCH" == amd64 || "$ARCH" == arm64 ]] || die "unsupported executor architecture '$ARCH'"
 CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -o "$WORK/praetor-host-runner" ./cmd/host-runner
+
+# Apply the callback setting before staging the candidate runtime. Restarting
+# the executor runs its pack initialization, which may replace the runtime
+# directory on the packs PVC. Copying first therefore leaves the new pod with
+# the released runtime and no checkpoint callback, making the recovery journey
+# wait for a checkpoint that can never be written.
+kubectl set env -n "$NAMESPACE" "statefulset/$RELEASE-executor" \
+  PRAETOR_CALLBACK_PLUGINS=/opt/praetor/packs/ansible-runtime/plugins/callback >/dev/null
+wait_rollout "statefulset/$RELEASE-executor"
+EXECUTOR_POD="$(executor_pod)"
+
 kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- sh -c \
   'mkdir -p /opt/praetor/packs/ansible-runtime/bin /opt/praetor/packs/ansible-runtime/plugins/callback'
 kubectl cp "$WORK/praetor-host-runner" "$NAMESPACE/$EXECUTOR_POD:/opt/praetor/packs/ansible-runtime/bin/praetor-host-runner"
@@ -111,10 +122,14 @@ kubectl cp "$EXECUTOR_ROOT/deploy/plugins/callback/praetor_checkpoint.py" \
   "$NAMESPACE/$EXECUTOR_POD:/opt/praetor/packs/ansible-runtime/plugins/callback/praetor_checkpoint.py"
 kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- sh -c \
   'chmod 0755 /opt/praetor/packs/ansible-runtime/bin/praetor-host-runner; ln -sf /usr/local/bin/ansible-playbook /opt/praetor/packs/ansible-runtime/bin/ansible-playbook; ln -sf /usr/local/bin/python3 /opt/praetor/packs/ansible-runtime/bin/python3; rm -f /var/lib/praetor/recovery-side-effects.log /var/lib/praetor/recovery-completions.log'
-kubectl set env -n "$NAMESPACE" "statefulset/$RELEASE-executor" \
-  PRAETOR_CALLBACK_PLUGINS=/opt/praetor/packs/ansible-runtime/plugins/callback >/dev/null
-wait_rollout "statefulset/$RELEASE-executor"
-EXECUTOR_POD="$(executor_pod)"
+
+# Fail immediately if pod initialization or staging removed either candidate
+# artifact. This is cheaper and clearer than discovering it after a 60-second
+# checkpoint poll.
+kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- test -x /opt/praetor/packs/ansible-runtime/bin/praetor-host-runner \
+  || die "candidate host runner is missing after executor rollout"
+kubectl exec -n "$NAMESPACE" "$EXECUTOR_POD" -- test -f /opt/praetor/packs/ansible-runtime/plugins/callback/praetor_checkpoint.py \
+  || die "checkpoint callback is missing after executor rollout"
 
 echo "==> Tightening only the validation recovery windows"
 kubectl set env -n "$NAMESPACE" "deployment/$RELEASE-scheduler" \
