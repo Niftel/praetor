@@ -24,6 +24,7 @@ func TestDynamicInventoryStagingJourneyContract(t *testing.T) {
 		"inventory_source_id:$source", "dynamic-inventory", "secret-redaction", "PHASE=\"cleanup\"",
 		"resource_cleanup true", "credentials/$CREDENTIAL_ID", "set -Eeuo pipefail",
 		"GET /api/v1/$path returned $status", "failed during phase '$PHASE'", "PHASE=\"resource-discovery\"",
+		`get "$ADMIN_TOKEN" jobs`, `.[] | select(.id == $id) | .status`,
 		`"$STATUS" == 204`,
 	} {
 		if !strings.Contains(script, required) {
@@ -42,6 +43,9 @@ func TestDynamicInventoryStagingJourneyContract(t *testing.T) {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("dynamic inventory journey contains unsafe operation %q", forbidden)
 		}
+	}
+	if strings.Contains(script, `"jobs/$job_id"`) {
+		t.Error("dynamic inventory journey must not poll the unsupported GET /jobs/{id} route")
 	}
 }
 

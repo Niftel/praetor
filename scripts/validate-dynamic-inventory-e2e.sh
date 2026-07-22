@@ -22,6 +22,10 @@ die() { echo "error: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"; }
 for command in curl jq kubectl; do need "$command"; done
 record_failure() {
+  if [[ -n "$EVIDENCE_FILE" && -s "$EVIDENCE_FILE" ]] &&
+    jq -e '.journey == "dynamic-inventory" and .result == "fail"' "$EVIDENCE_FILE" >/dev/null 2>&1; then
+    return
+  fi
   echo "error: dynamic inventory journey failed during phase '$PHASE'" >&2
   [[ -z "$EVIDENCE_FILE" ]] || {
     umask 077
@@ -100,9 +104,13 @@ grant_team_role() {
   [[ "$STATUS" == 201 || "$STATUS" == 204 || "$STATUS" == 409 ]] || die "grant $role_name returned $STATUS: $RESPONSE"
 }
 wait_job() {
-  local token="$1" job_id="$2" expected="$3" state=""
+  local job_id="$1" expected="$2" state=""
   for _ in $(seq 1 180); do
-    state="$(get "$token" "jobs/$job_id" | jq -r .status)"
+    # Inventory-source jobs have no job template and are therefore deliberately
+    # absent from a regular user's /jobs collection. Observe their state through
+    # the supported administrator collection while all mutations remain scoped
+    # to the operator token.
+    state="$(get "$ADMIN_TOKEN" jobs | jq -r --argjson id "$job_id" '.[] | select(.id == $id) | .status' | head -n1)"
     [[ "$state" =~ ^(successful|failed|error|canceled)$ ]] && break
     sleep 1
   done
@@ -175,13 +183,13 @@ done
 PHASE="preview"
 # Preview succeeds without mutating inventory or creating synchronization history.
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/preview"
-[[ "$STATUS" == 201 ]] || die "preview returned $STATUS: $RESPONSE"; PREVIEW_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$PREVIEW_JOB" successful
+[[ "$STATUS" == 201 ]] || die "preview returned $STATUS: $RESPONSE"; PREVIEW_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$PREVIEW_JOB" successful
 [[ "$(history "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" | jq -r .total)" == 0 ]] || die "preview mutated synchronization history"
 
 PHASE="initial-sync"
 # Initial synchronization creates two source-owned hosts.
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
-[[ "$STATUS" == 201 ]] || die "initial sync returned $STATUS: $RESPONSE"; INITIAL_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$INITIAL_JOB" successful
+[[ "$STATUS" == 201 ]] || die "initial sync returned $STATUS: $RESPONSE"; INITIAL_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$INITIAL_JOB" successful
 INITIAL_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 1)"
 jq -e '.results[0] | .status == "successful" and .hosts_added == 2 and .hosts_disabled == 0' <<<"$INITIAL_HISTORY" >/dev/null || die "initial sync delta is incorrect"
 
@@ -190,7 +198,7 @@ PHASE="changed-reconciliation"
 CHANGED='{"_meta":{"hostvars":{"dynamic-alpha":{"fixture_revision":2},"dynamic-gamma":{"fixture_revision":2}}},"validation":{"hosts":["dynamic-alpha","dynamic-gamma"]}}'
 set_provider_payload "$CHANGED" dynamic-gamma
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
-[[ "$STATUS" == 201 ]] || die "changed sync returned $STATUS: $RESPONSE"; CHANGED_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$CHANGED_JOB" successful
+[[ "$STATUS" == 201 ]] || die "changed sync returned $STATUS: $RESPONSE"; CHANGED_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$CHANGED_JOB" successful
 CHANGED_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 2)"
 jq -e '.results[0] | .status == "successful" and .hosts_added == 1 and .hosts_updated == 1 and .hosts_disabled == 1' <<<"$CHANGED_HISTORY" >/dev/null || die "changed sync delta is incorrect"
 HOSTS="$(get "$OPERATOR_TOKEN" "inventories/$INVENTORY_ID/hosts" | items)"
@@ -200,21 +208,21 @@ PHASE="invalid-credential"
 request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:"invalid-fixture-token"}}')"
 [[ "$STATUS" == 200 ]] || die "invalidate credential returned $STATUS: $RESPONSE"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
-[[ "$STATUS" == 201 ]] || die "invalid-credential sync returned $STATUS: $RESPONSE"; INVALID_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$INVALID_JOB" failed
+[[ "$STATUS" == 201 ]] || die "invalid-credential sync returned $STATUS: $RESPONSE"; INVALID_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$INVALID_JOB" failed
 INVALID_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 3)"
 jq -e '.results[0] | .status == "failed" and .diagnostic_code == "provider_acquisition_failed" and (.diagnostic_details == {})' <<<"$INVALID_HISTORY" >/dev/null || die "invalid credential did not fail safely"
 ! grep -Fq 'invalid-fixture-token' <<<"$INVALID_HISTORY" || die "invalid credential leaked into history"
 request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:$secret}}')"
 [[ "$STATUS" == 200 ]] || die "restore credential returned $STATUS: $RESPONSE"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
-[[ "$STATUS" == 201 ]] || die "credential recovery sync returned $STATUS: $RESPONSE"; CREDENTIAL_RECOVERY_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$CREDENTIAL_RECOVERY_JOB" successful
+[[ "$STATUS" == 201 ]] || die "credential recovery sync returned $STATUS: $RESPONSE"; CREDENTIAL_RECOVERY_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$CREDENTIAL_RECOVERY_JOB" successful
 wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 4 >/dev/null
 
 PHASE="provider-timeout"
 request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:"praetor-timeout-fixture"}}')"
 [[ "$STATUS" == 200 ]] || die "set timeout credential returned $STATUS: $RESPONSE"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
-[[ "$STATUS" == 201 ]] || die "timeout sync returned $STATUS: $RESPONSE"; TIMEOUT_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$TIMEOUT_JOB" failed
+[[ "$STATUS" == 201 ]] || die "timeout sync returned $STATUS: $RESPONSE"; TIMEOUT_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$TIMEOUT_JOB" failed
 TIMEOUT_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 5)"
 jq -e '.results[0] | .status == "failed" and .diagnostic_code == "provider_timeout" and (.diagnostic_details == {})' <<<"$TIMEOUT_HISTORY" >/dev/null || die "provider timeout did not fail safely"
 request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:$secret}}')"
@@ -224,7 +232,7 @@ PHASE="malformed-provider-output"
 # Malformed output fails in validation, records a bounded diagnostic, and recovers.
 set_provider_payload '{"_meta":' '"_meta"'
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
-[[ "$STATUS" == 201 ]] || die "fault sync returned $STATUS: $RESPONSE"; FAULT_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$FAULT_JOB" failed
+[[ "$STATUS" == 201 ]] || die "fault sync returned $STATUS: $RESPONSE"; FAULT_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$FAULT_JOB" failed
 FAULT_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 6)"
 jq -e '.results[0] | .status == "failed" and (.diagnostic_code | length > 0) and (.diagnostic_message | length > 0) and (.diagnostic_details == {})' <<<"$FAULT_HISTORY" >/dev/null || die "safe failure diagnostic is missing"
 ! grep -Fq "$SECRET" <<<"$FAULT_HISTORY" || die "credential leaked into history"
@@ -232,7 +240,7 @@ jq -e '.results[0] | .status == "failed" and (.diagnostic_code | length > 0) and
 set_provider_payload "$CHANGED" dynamic-gamma
 PHASE="recovery"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
-[[ "$STATUS" == 201 ]] || die "recovery sync returned $STATUS: $RESPONSE"; RECOVERY_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$RECOVERY_JOB" successful
+[[ "$STATUS" == 201 ]] || die "recovery sync returned $STATUS: $RESPONSE"; RECOVERY_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$RECOVERY_JOB" successful
 RECOVERY_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 7)"
 jq -e '.results[0] | .status == "successful" and .hosts_unchanged == 2' <<<"$RECOVERY_HISTORY" >/dev/null || die "recovery sync did not converge"
 
