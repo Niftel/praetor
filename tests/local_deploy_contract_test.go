@@ -30,6 +30,23 @@ type generatedHelmValues struct {
 	ImageTags map[string]string `yaml:"imageTags"`
 }
 
+type quotaSafeDeploymentValues struct {
+	DeploymentStrategy struct {
+		Type          string `yaml:"type"`
+		RollingUpdate struct {
+			MaxSurge       int `yaml:"maxSurge"`
+			MaxUnavailable int `yaml:"maxUnavailable"`
+		} `yaml:"rollingUpdate"`
+	} `yaml:"deploymentStrategy"`
+	Migrator struct {
+		TTLSecondsAfterFinished int `yaml:"ttlSecondsAfterFinished"`
+		Resources               struct {
+			Requests map[string]string `yaml:"requests"`
+			Limits   map[string]string `yaml:"limits"`
+		} `yaml:"resources"`
+	} `yaml:"migrator"`
+}
+
 func TestLocalDeploymentReleaseValuesMatchCompatibilityManifest(t *testing.T) {
 	root := repositoryRoot(t)
 
@@ -218,6 +235,13 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 	if stopAt < 0 || removeAt < 0 || deleteAt < 0 || !(stopAt < removeAt && removeAt < deleteAt) {
 		t.Fatal("unrecoverable recovery fixture must quiesce the executor before removing the WAL and replacing the pod")
 	}
+	rolloutAt := strings.Index(recovery, `wait_rollout "statefulset/$RELEASE-executor"`)
+	stageRunnerAt := strings.Index(recovery, `kubectl cp "$WORK/praetor-host-runner"`)
+	stageCallbackAt := strings.Index(recovery, `kubectl cp "$EXECUTOR_ROOT/deploy/plugins/callback/praetor_checkpoint.py"`)
+	verifyCallbackAt := strings.Index(recovery, `test -f /opt/praetor/packs/ansible-runtime/plugins/callback/praetor_checkpoint.py`)
+	if rolloutAt < 0 || stageRunnerAt < 0 || stageCallbackAt < 0 || verifyCallbackAt < 0 || !(rolloutAt < stageRunnerAt && stageRunnerAt < stageCallbackAt && stageCallbackAt < verifyCallbackAt) {
+		t.Fatal("recovery fixture must roll the executor before staging and verifying the candidate checkpoint runtime")
+	}
 	journeyRaw, err := os.ReadFile(filepath.Join(root, "scripts", "validate-ldap-operator-journey.sh"))
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +257,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrap := string(bootstrapRaw)
-	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker pull "$released_ref"`, `docker tag "$released_ref"`, `released_pids+=("$!")`, "released_pull_failed"} {
+	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker buildx imagetools inspect --raw "$released_ref"`, `.platform.architecture == $arch`, `docker pull "$platform_ref"`, `docker tag "$platform_ref"`, `released_pids+=("$!")`, "released_pull_failed"} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap acceleration contract must contain %q", required)
 		}
@@ -243,7 +267,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow must not rebuild unchanged sibling source through %q", checkout)
 		}
 	}
-	for _, required := range []string{"docker build", "k3d image import --mode direct", "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag", `--set hostRunner.callbackUrl="http://praetor-ingestion:8081"`} {
+	for _, required := range []string{"docker build", `for image in "${validation_images[@]}"`, `k3d image import --mode direct --cluster "$CLUSTER" "$image"`, "praetor-secrets:validation", "praetor-api:$validation_tag", "praetor-migrator:$validation_tag", "praetor-ui:$validation_tag", "praetor-scheduler:$validation_tag", "praetor-executor:$validation_tag", "praetor-ingestion:$validation_tag", "praetor-consumer:$validation_tag", "praetor-reconciler:$validation_tag", "praetor-secrets.image.repository", "praetor-audit-sink.image.repository", "--set image.tag", `--set hostRunner.callbackUrl="http://praetor-ingestion:8081"`} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap must contain %q", required)
 		}
@@ -572,14 +596,51 @@ func TestStagingIntegrationsUseTLSAndPersistentState(t *testing.T) {
 	}
 }
 
-func TestCompletedMigratorReleasesRolloutQuotaQuickly(t *testing.T) {
+func TestQuotaConstrainedDeploymentsAvoidSurgeAndKeepMigratorObservable(t *testing.T) {
 	root := repositoryRoot(t)
+	for _, relativePath := range []string{
+		filepath.Join("deployments", "helm", "praetor-v2", "ci", "values-k3d-local.yaml"),
+		filepath.Join("deployments", "staging", "values.yaml"),
+	} {
+		raw, err := os.ReadFile(filepath.Join(root, relativePath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var values quotaSafeDeploymentValues
+		if err := yaml.Unmarshal(raw, &values); err != nil {
+			t.Fatalf("decode %s: %v", relativePath, err)
+		}
+		if values.DeploymentStrategy.Type != "RollingUpdate" ||
+			values.DeploymentStrategy.RollingUpdate.MaxSurge != 0 ||
+			values.DeploymentStrategy.RollingUpdate.MaxUnavailable != 1 {
+			t.Errorf("%s must use a zero-surge rolling update, got %+v", relativePath, values.DeploymentStrategy)
+		}
+		if values.Migrator.TTLSecondsAfterFinished < 600 {
+			t.Errorf("%s migrator TTL = %d, must outlive the deployment pipeline wait", relativePath, values.Migrator.TTLSecondsAfterFinished)
+		}
+		if values.Migrator.Resources.Requests["cpu"] == "" || values.Migrator.Resources.Limits["cpu"] == "" {
+			t.Errorf("%s must bound migrator CPU requests and limits", relativePath)
+		}
+	}
+
+	for _, name := range []string{"api", "consumer", "ingestion", "reconciler", "scheduler", "ui"} {
+		raw, err := os.ReadFile(filepath.Join(root, "deployments", "helm", "praetor-v2", "templates", name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), ".Values.deploymentStrategy") {
+			t.Errorf("%s deployment must apply the configured rollout strategy", name)
+		}
+	}
+
 	raw, err := os.ReadFile(filepath.Join(root, "deployments", "helm", "praetor-v2", "templates", "migrator-job.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "ttlSecondsAfterFinished: 30") {
-		t.Fatal("completed migration pods must release staging rollout quota within 30 seconds")
+	for _, required := range []string{".Values.migrator.ttlSecondsAfterFinished", ".Values.migrator.resources"} {
+		if !strings.Contains(string(raw), required) {
+			t.Errorf("migrator template must use %s", required)
+		}
 	}
 }
 

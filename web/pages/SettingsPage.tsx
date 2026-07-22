@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
 import { Users, Lock, FileText, Sliders, Bell, Server, Shield } from 'lucide-react';
 import { PageSpinner } from '../components/ui/PageSpinner';
+import NotificationSettings from './NotificationSettings';
 
 interface LdapConfig {
   configured: boolean;
@@ -16,14 +18,17 @@ interface LdapConfig {
 }
 
 const NAV = [
-  { id: 'auth', label: 'Authentication', icon: Lock, active: true },
+  { id: 'authentication', label: 'Authentication', icon: Lock },
   { id: 'exec', label: 'Execution defaults', icon: Sliders, soon: true },
-  { id: 'notif', label: 'Notifications', icon: Bell, soon: true },
+  { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'system', label: 'System', icon: Server, soon: true },
   { id: 'license', label: 'License', icon: Shield, soon: true },
 ];
 
 const SettingsPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { section } = useParams();
+  const activeSection = section === 'notifications' ? 'notifications' : 'authentication';
   const [cfg, setCfg] = useState<LdapConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [provider, setProvider] = useState<'ldap' | 'saml'>('ldap');
@@ -41,17 +46,24 @@ const SettingsPage: React.FC = () => {
         {NAV.map(n => {
           const Icon = n.icon;
           return (
-            <div key={n.id} className={`flex items-center gap-3 h-9 px-2.5 rounded-lg ${n.active ? 'bg-acc/[0.09] text-ink' : n.soon ? 'text-faint cursor-default' : 'text-mut hover:bg-white/[0.028] cursor-pointer'}`}>
-              <Icon size={15} className={n.active ? 'text-acc2' : ''} />
+            <button type="button" key={n.id} disabled={n.soon} onClick={() => navigate(`/settings/${n.id}`)} className={`flex w-full items-center gap-3 h-9 px-2.5 rounded-lg ${activeSection === n.id ? 'bg-acc/[0.09] text-ink' : n.soon ? 'text-faint cursor-default' : 'text-mut hover:bg-white/[0.028] cursor-pointer'}`}>
+              <Icon size={15} className={activeSection === n.id ? 'text-acc2' : ''} />
               <span className="text-[12.5px]">{n.label}</span>
               {n.soon && <span className="ml-auto font-mono text-[8.5px] uppercase tracking-[0.08em] text-faint border border-line rounded px-1.5 py-px">soon</span>}
-            </div>
+            </button>
           );
         })}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-auto scroll-tint">
+        <div className="hidden max-[820px]:flex gap-1 border-b border-line p-2">
+          {NAV.filter(item => !item.soon).map(item => {
+            const Icon = item.icon;
+            return <button type="button" key={item.id} onClick={() => navigate(`/settings/${item.id}`)} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] ${activeSection === item.id ? 'bg-acc/[0.09] text-ink' : 'text-mut hover:bg-white/[0.04]'}`}><Icon size={14} />{item.label}</button>;
+          })}
+        </div>
+        {activeSection === 'notifications' ? <NotificationSettings /> : <>
         <div className="px-9 pt-6 pb-5 border-b border-line">
           <h1 className="text-[20px] font-semibold tracking-tight">Authentication</h1>
           <p className="mt-1.5 text-[12.5px] text-mut">How users sign in, and how directory groups map to Praetor roles.</p>
@@ -121,6 +133,7 @@ const SettingsPage: React.FC = () => {
             )}
           </div>
         )}
+        </>}
       </div>
     </div>
   );

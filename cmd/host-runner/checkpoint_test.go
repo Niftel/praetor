@@ -87,10 +87,28 @@ func TestCheckpointEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("plugin absent -> no checkpointing", func(t *testing.T) {
+	t.Run("plugin absent -> embedded callback", func(t *testing.T) {
+		jobDir := t.TempDir()
 		t.Setenv("PRAETOR_CALLBACK_PLUGINS", filepath.Join(jobDir, "does-not-exist"))
-		if env := checkpointEnv(jobDir, ""); env != nil {
-			t.Fatalf("expected nil env when plugin dir is absent, got %v", env)
+		env := strings.Join(checkpointEnv(jobDir, ""), "\n")
+		pluginDir := filepath.Join(jobDir, ".praetor", "plugins", "callback")
+		if !strings.Contains(env, "ANSIBLE_CALLBACK_PLUGINS="+pluginDir) {
+			t.Fatalf("embedded callback was not enabled: %s", env)
+		}
+		pluginPath := filepath.Join(pluginDir, "praetor_checkpoint.py")
+		data, err := os.ReadFile(pluginPath)
+		if err != nil {
+			t.Fatalf("embedded callback was not materialized: %v", err)
+		}
+		if !strings.Contains(string(data), "class CallbackModule") {
+			t.Fatal("materialized callback does not contain the checkpoint plugin")
+		}
+		info, err := os.Stat(pluginPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("embedded callback mode = %o, want 600", info.Mode().Perm())
 		}
 	})
 }

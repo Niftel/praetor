@@ -3,6 +3,12 @@ image:
   pullSecrets:
     - name: praetor-staging-registry
 
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
 secrets:
   existingSecret: praetor-staging-runtime
 
@@ -37,6 +43,28 @@ api:
   extraEnv:
     - name: SSL_CERT_FILE
       value: /etc/praetor/ldap/ca.crt
+    - name: PRAETOR_NOTIFICATION_ALLOWED_HOSTS
+      value: praetor-staging-acceptance-sink,praetor-validation-notification-sink
+
+consumer:
+  extraEnv:
+    - name: PRAETOR_NOTIFICATION_ALLOWED_HOSTS
+      value: praetor-staging-acceptance-sink,praetor-validation-notification-sink
+
+scheduler:
+  extraEnv:
+    - name: PRAETOR_NOTIFICATION_ALLOWED_HOSTS
+      value: praetor-staging-acceptance-sink,praetor-validation-notification-sink
+
+migrator:
+  ttlSecondsAfterFinished: 900
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 
 secretsService:
   enabled: true

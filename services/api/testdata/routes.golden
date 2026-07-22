@@ -132,6 +132,7 @@ POST    /api/v1/jobs/runs/{runID}/events
 POST    /api/v1/jobs/{id}/cancel
 POST    /api/v1/ldap/test-connection
 POST    /api/v1/notification-templates
+POST    /api/v1/notification-templates/{id}/test
 POST    /api/v1/organizations/
 POST    /api/v1/organizations/{id}/admins
 POST    /api/v1/organizations/{id}/galaxy-credentials

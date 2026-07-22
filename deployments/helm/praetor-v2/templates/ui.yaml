@@ -52,6 +52,10 @@ metadata:
     app.kubernetes.io/component: ui
 spec:
   replicas: {{ .Values.ui.replicas }}
+  {{- with .Values.deploymentStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "praetor.selectorLabels" . | nindent 6 }}

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -495,6 +496,21 @@ func fetchProject(projectURL, ref, destDir string) error {
 		}
 	}
 	log.Printf("Cloning project from %s into %s", projectURL, destDir)
+	if isGitCommitID(ref) {
+		if err := runProjectGit("init", "init", destDir); err != nil {
+			return err
+		}
+		if err := runProjectGit("remote", "-C", destDir, "remote", "add", "origin", projectURL); err != nil {
+			return err
+		}
+		if err := runProjectGit("fetch", "-C", destDir, "fetch", "--depth=1", "origin", ref); err != nil {
+			return err
+		}
+		if err := runProjectGit("checkout", "-C", destDir, "checkout", "--detach", "FETCH_HEAD"); err != nil {
+			return err
+		}
+		return nil
+	}
 	args := []string{"clone", "--depth=1"}
 	if ref != "" {
 		args = append(args, "--branch", ref)
@@ -504,6 +520,25 @@ func fetchProject(projectURL, ref, destDir string) error {
 		return fmt.Errorf("project fetch failed: no HTTP archive and git clone failed: %v, output: %s", err, string(out))
 	}
 	return nil
+}
+
+func runProjectGit(step string, args ...string) error {
+	// The executable is fixed, exec.Command does not invoke a shell, and immutable
+	// refs are hex-validated before this helper is used. Project URLs and paths are
+	// passed as single argv values rather than interpreted as command text.
+	command := exec.Command("git", args...) // #nosec G204 -- fixed executable with structured argv; no shell evaluation
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("project commit fetch failed at git %s: %v, output: %s", step, err, string(output))
+	}
+	return nil
+}
+
+func isGitCommitID(ref string) bool {
+	if len(ref) != 40 && len(ref) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(ref)
+	return err == nil
 }
 
 // archiveURLFor derives the archive endpoint for an http(s) git URL, matching

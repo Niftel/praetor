@@ -11,10 +11,10 @@ metadata:
     app.kubernetes.io/component: migrator
 spec:
   backoffLimit: 10
-  # Helm observes the terminal Job condition before continuing. Retaining the
-  # completed pod for ten minutes needlessly consumes LimitRange CPU quota and
-  # can block rolling-update surge pods in a quota-bound namespace.
-  ttlSecondsAfterFinished: 30
+  # Keep the completed Job longer than the deployment pipeline's Helm wait.
+  # Deleting it while Helm is still observing other resources turns a successful
+  # migration into a false "Job NotFound" release failure.
+  ttlSecondsAfterFinished: {{ .Values.migrator.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:
@@ -42,6 +42,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "praetor.secretName" . }}
                   key: DATABASE_URL
+          {{- with .Values.migrator.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       containers:
         - name: migrator
           image: {{ include "praetor.image" (dict "root" . "svc" "migrator") }}
@@ -51,3 +55,7 @@ spec:
                 name: {{ include "praetor.configMapName" . }}
             - secretRef:
                 name: {{ include "praetor.secretName" . }}
+          {{- with .Values.migrator.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

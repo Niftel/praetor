@@ -103,6 +103,7 @@ const App = () => {
 
           {/* Settings */}
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings/:section" element={<SettingsPage />} />
           <Route path="settings/auth-providers" element={<AuthProvidersPage />} />
           {/* Back-compat: the old top-level path now lives under Settings */}
           <Route path="auth-providers" element={<Navigate to="/settings/auth-providers" replace />} />

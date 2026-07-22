@@ -60,11 +60,11 @@ type SecretFieldProps = {
   multiline?: boolean;
   placeholder?: string;
   error?: string;
+  hint?: string;
 };
 
 /** Write-only secret control. It intentionally has no stored-value/default-value API. */
-export function SecretField({ label, value, onChange, multiline = false, placeholder, error }: SecretFieldProps) {
-  const hint = 'Write-only. Leave blank to keep the stored value.';
+export function SecretField({ label, value, onChange, multiline = false, placeholder, error, hint = 'Write-only. Leave blank to keep the stored value.' }: SecretFieldProps) {
   return multiline
     ? <Textarea label={label} value={value} onChange={onChange} rows={6} placeholder={placeholder} error={error} hint={hint} autoComplete="off" spellCheck={false} className="font-mono text-xs" />
     : <Input label={label} type="password" value={value} onChange={onChange} placeholder={placeholder} error={error} hint={hint} autoComplete="new-password" spellCheck={false} />;
