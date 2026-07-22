@@ -1,66 +1,76 @@
 {
   "version": 1,
-  "description": "Existing high-severity gosec findings. New findings fail CI; remove entries as findings are resolved.",
+  "description": "Existing high-severity gosec findings. New findings fail CI; every accepted finding references open remediation work; remove entries as findings are resolved.",
   "findings": [
     {
       "rule": "G101",
       "file": "pkg/accesscontrol/catalog.go",
       "message": "Potential hardcoded credentials",
-      "snippet": "ManageCredentialType = \"manage_credentialtype\""
+      "snippet": "ManageCredentialType = \"manage_credentialtype\"",
+      "tracking_issue": 306
     },
     {
       "rule": "G101",
       "file": "pkg/accesscontrol/roles.go",
       "message": "Potential hardcoded credentials",
-      "snippet": "CredentialAdminRole   RoleKind = \"credential_admin_role\""
+      "snippet": "CredentialAdminRole   RoleKind = \"credential_admin_role\"",
+      "tracking_issue": 306
     },
     {
       "rule": "G101",
       "file": "services/api/middleware/auth.go",
       "message": "Potential hardcoded credentials",
-      "snippet": "const ServiceTokenPrefix = \"prtr_sp_\""
+      "snippet": "const ServiceTokenPrefix = \"prtr_sp_\"",
+      "tracking_issue": 306
     },
     {
       "rule": "G115",
       "file": "cmd/host-runner/runner.go",
       "message": "integer overflow conversion int64 -> uint32",
-      "snippet": "f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)"
+      "snippet": "f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)",
+      "tracking_issue": 305
     },
     {
       "rule": "G118",
       "file": "services/api/middleware/activity.go",
       "message": "Goroutine uses context.Background/TODO while request-scoped context is available",
-      "snippet": "go func(uid int64, uname, act, rtype string, rid *int64, method, path string, code int) {"
+      "snippet": "go func(uid int64, uname, act, rtype string, rid *int64, method, path string, code int) {",
+      "tracking_issue": 304
     },
     {
       "rule": "G702",
       "file": "cmd/execpack/main.go",
       "message": "Command injection via taint analysis",
-      "snippet": "cmd := exec.Command(\"docker\", args...)"
+      "snippet": "cmd := exec.Command(\"docker\", args...)",
+      "tracking_issue": 303
     },
     {
       "rule": "G702",
       "file": "cmd/packbuilder/main.go",
       "message": "Command injection via taint analysis",
-      "snippet": "build := exec.Command(\"buildctl\", args...)"
+      "snippet": "build := exec.Command(\"buildctl\", args...)",
+      "tracking_issue": 303
     },
     {
       "rule": "G703",
       "file": "cmd/execpack/main.go",
       "message": "Path traversal via taint analysis",
-      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"praetor_checkpoint.py\"), callback, 0o644); werr != nil {"
+      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"praetor_checkpoint.py\"), callback, 0o644); werr != nil {",
+      "tracking_issue": 303
     },
     {
       "rule": "G703",
       "file": "cmd/execpack/main.go",
       "message": "Path traversal via taint analysis",
-      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"requirements.txt\"), []byte(requirements), 0o644); werr != nil {"
+      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"requirements.txt\"), []byte(requirements), 0o644); werr != nil {",
+      "tracking_issue": 303
     },
     {
       "rule": "G703",
       "file": "cmd/host-runner/checkpoint.go",
       "message": "Path traversal via taint analysis",
-      "snippet": "st, err := os.Stat(path)"
+      "snippet": "st, err := os.Stat(path)",
+      "tracking_issue": 303
     }
   ]
 }

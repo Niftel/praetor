@@ -14,7 +14,7 @@ REPOSITORY="$OWNER/$REPO"
 
 usage() {
   cat <<EOF
-usage: $0 <bootstrap|validate-issue|sync-issue|sync-pr|verify-main|repair-project>
+usage: $0 <bootstrap|validate-issue|sync-issue|sync-pr|verify-main|repair-project|audit-completion|close-milestone>
 
   bootstrap       create labels, milestones, project, fields, and saved state
   validate-issue  validate EVENT_PATH issue content before accepting it
@@ -22,6 +22,8 @@ usage: $0 <bootstrap|validate-issue|sync-issue|sync-pr|verify-main|repair-projec
   sync-pr         move the linked issue from In Progress to In Review/Verification
   verify-main     mark merged issues Done only after successful main workflows
   repair-project  reconcile canonical project Status from authoritative flow labels
+  audit-completion fail when milestone, issue, project, or security-debt state disagrees
+  close-milestone close MILESTONE_TITLE only after the completion audit passes
 EOF
 }
 
@@ -124,7 +126,7 @@ has_open_linked_pr() {
 }
 
 authoritative_issue_status() {
-  local issue="$1" fallback="$2" details
+  local issue="$1" fallback="$2" details current
   details="$(gh issue view "$issue" --repo "$REPOSITORY" --json state,labels)"
   if jq -e '.labels | any(.name == "flow:done")' <<<"$details" >/dev/null; then
     echo "Done"
@@ -133,7 +135,11 @@ authoritative_issue_status() {
   elif has_open_linked_pr "$issue"; then
     echo "In Review"
   else
-    echo "$fallback"
+    current="$(jq -r --slurpfile config "$CONFIG" '
+      [.labels[].name as $label | $config[0].labels[$label] // empty]
+      | if length == 1 then .[0] else empty end
+    ' <<<"$details")"
+    echo "${current:-$fallback}"
   fi
 }
 
@@ -179,31 +185,156 @@ canonical_project_status() {
   esac
 }
 
+project_issue_repairs() {
+  jq -r --arg repository "https://github.com/$REPOSITORY" '
+    .items[]
+    | select(.content.type == "Issue" and .repository == $repository)
+    | ([.labels[]? | select(startswith("flow:"))]) as $flow
+    | if ($flow | length) != 1 then
+        error("issue #\(.content.number) must have exactly one flow label")
+      else . end
+    | (if $flow[0] == "flow:done" then "Done"
+       elif $flow[0] == "flow:backlog" or $flow[0] == "flow:ready" then "Todo"
+       elif $flow[0] == "flow:in-progress" or $flow[0] == "flow:in-review" or $flow[0] == "flow:verification" then "In Progress"
+       else error("issue #\(.content.number) has unsupported flow label \($flow[0])") end) as $expected
+    | select((.status // "") != $expected)
+    | [.id, $expected, .content.number] | @tsv
+  '
+}
+
 repair_project() {
-  local number items url status issue details
+  local number items repairs project_id field_id item_id status issue option_id repaired=0
   number="$(state_project_number)"
   items="$(project_gh project item-list "$number" --owner "$OWNER" --format json --limit 500)"
-  while IFS= read -r url; do
-    [[ -n "$url" ]] || continue
-    issue="${url##*/}"
-    details="$(gh issue view "$issue" --repo "$REPOSITORY" --json labels)"
-    if jq -e '.labels | any(.name == "flow:in-progress" or .name == "flow:in-review" or .name == "flow:verification")' <<<"$details" >/dev/null; then
-      status="In Progress"
-    elif jq -e '.labels | any(.name == "flow:ready")' <<<"$details" >/dev/null; then
-      status="Ready"
-    else
-      status="Backlog"
+  repairs="$(project_issue_repairs <<<"$items")"
+  project_id="$(jq -r .project_id "$STATE_FILE")"
+  field_id="$(jq -r .project_status.field_id "$STATE_FILE")"
+  while IFS=$'\t' read -r item_id status issue; do
+    [[ -n "$item_id" ]] || continue
+    option_id="$(jq -r --arg status "$status" '.project_status.options[$status] // empty' "$STATE_FILE")"
+    [[ -n "$option_id" ]] || { echo "error: project has no canonical Status option '$status'" >&2; return 1; }
+    project_gh project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" \
+      --single-select-option-id "$option_id" >/dev/null
+    echo "repaired issue #$issue project Status -> $status"
+    repaired=$((repaired + 1))
+  done <<<"$repairs"
+  echo "canonical project Status repaired from flow labels ($repaired item(s) changed)"
+}
+
+audit_milestone_issues() {
+  local title="$1" issues invalid
+  issues="$(gh issue list --repo "$REPOSITORY" --milestone "$title" --state all --limit 1000 --json number,state,labels,url)"
+  invalid="$(jq -r '
+    .[]
+    | ([.labels[].name] | index("flow:done")) as $done
+    | select(.state != "CLOSED" or ($done | not))
+    | "#\(.number) state=\(.state) flow=" + ([.labels[].name | select(startswith("flow:"))] | join(","))
+  ' <<<"$issues")"
+  if [[ -n "$invalid" ]]; then
+    echo "error: milestone '$title' is not complete:" >&2
+    sed 's/^/  /' <<<"$invalid" >&2
+    return 1
+  fi
+}
+
+audit_closed_milestones() {
+  local milestones title failed=0
+  milestones="$(gh api "repos/$REPOSITORY/milestones?state=closed&per_page=100")"
+  while IFS= read -r title; do
+    [[ -n "$title" ]] || continue
+    audit_milestone_issues "$title" || failed=1
+  done < <(jq -r '.[].title' <<<"$milestones")
+  (( failed == 0 ))
+}
+
+audit_project_statuses() {
+  local number items invalid
+  number="$(state_project_number)"
+  items="$(project_gh project item-list "$number" --owner "$OWNER" --format json --limit 500)"
+  invalid="$(jq -r --arg repository "$REPOSITORY" '
+    .items[]
+    | select(.content.type == "Issue")
+    | select(.repository == ("https://github.com/" + $repository))
+    | ([.labels[]? | select(startswith("flow:"))]) as $flow
+    | (if ($flow | index("flow:done")) then "Done"
+       elif ($flow | index("flow:backlog")) or ($flow | index("flow:ready")) then "Todo"
+       elif ($flow | index("flow:in-progress")) or ($flow | index("flow:in-review")) or ($flow | index("flow:verification")) then "In Progress"
+       else "INVALID" end) as $expected
+    | select(($flow | length) != 1 or (.status // "") != $expected)
+    | "#\(.content.number) project=\(.status // "missing") flow=\($flow | join(",")) expected=\($expected)"
+  ' <<<"$items")"
+  if [[ -n "$invalid" ]]; then
+    echo "error: project Status disagrees with authoritative flow labels:" >&2
+    sed 's/^/  /' <<<"$invalid" >&2
+    return 1
+  fi
+}
+
+audit_stale_closed_issues() {
+  local now cutoff issues invalid
+  now="${AUDIT_NOW_EPOCH:-$(date +%s)}"
+  cutoff="$((now - 86400))"
+  issues="$(gh issue list --repo "$REPOSITORY" --state closed --limit 1000 --json number,closedAt,labels,url)"
+  invalid="$(jq -r --argjson cutoff "$cutoff" '
+    .[]
+    | ([.labels[].name | select(startswith("flow:"))]) as $flow
+    | select(($flow | length) > 0 and ($flow | index("flow:done") | not))
+    | select((.closedAt | fromdateiso8601) < $cutoff)
+    | "#\(.number) closedAt=\(.closedAt) flow=\($flow | join(","))"
+  ' <<<"$issues")"
+  if [[ -n "$invalid" ]]; then
+    echo "error: closed issues remained outside Done for more than 24 hours:" >&2
+    sed 's/^/  /' <<<"$invalid" >&2
+    return 1
+  fi
+}
+
+audit_security_tracking() {
+  local baseline="$ROOT/.github/gosec-high-baseline.json" issue state failed=0
+  while IFS= read -r issue; do
+    [[ -n "$issue" ]] || continue
+    state="$(gh issue view "$issue" --repo "$REPOSITORY" --json state --jq .state)"
+    if [[ "$state" != OPEN ]]; then
+      echo "error: unresolved gosec baseline finding references non-open issue #$issue ($state)" >&2
+      failed=1
     fi
-    reconcile_issue "$issue" "$url" "$status"
-  done < <(jq -r '.items[] | select(.content.type == "Issue") | .content.url' <<<"$items" | sort -u)
-  echo "canonical project Status repaired from flow labels"
+  done < <(jq -r '[.findings[].tracking_issue] | unique[]' "$baseline")
+  (( failed == 0 ))
+}
+
+audit_completion() {
+  local failed=0
+  audit_closed_milestones || failed=1
+  audit_stale_closed_issues || failed=1
+  audit_project_statuses || failed=1
+  audit_security_tracking || failed=1
+  if (( failed != 0 )); then
+    echo "error: development completion audit failed" >&2
+    return 1
+  fi
+  echo "development completion audit passed"
+}
+
+close_milestone() {
+  local title="${1:-${MILESTONE_TITLE:-}}" milestones milestone number state
+  [[ -n "$title" ]] || { echo "error: milestone title argument or MILESTONE_TITLE is required" >&2; return 1; }
+  milestones="$(gh api "repos/$REPOSITORY/milestones?state=all&per_page=100")"
+  milestone="$(jq -c --arg title "$title" '.[] | select(.title == $title)' <<<"$milestones")"
+  [[ -n "$milestone" ]] || { echo "error: milestone '$title' does not exist" >&2; return 1; }
+  number="$(jq -r .number <<<"$milestone")"
+  state="$(jq -r .state <<<"$milestone")"
+  [[ "$state" == open ]] || { echo "error: milestone '$title' is already $state" >&2; return 1; }
+  audit_milestone_issues "$title"
+  audit_project_statuses
+  gh api --method PATCH "repos/$REPOSITORY/milestones/$number" -f state=closed >/dev/null
+  echo "milestone '$title' closed after completion audit"
 }
 
 sync_issue() {
   local event="${EVENT_PATH:-${GITHUB_EVENT_PATH:-}}" number url action
   number="$(jq -r .issue.number "$event")"; url="$(jq -r .issue.html_url "$event")"; action="$(jq -r .action "$event")"
   add_to_project "$url"
-  if [[ "$action" == opened ]]; then reconcile_issue "$number" "$url" "Backlog"; fi
+  if [[ "$action" == opened || "$action" == edited ]]; then reconcile_issue "$number" "$url" "Backlog"; fi
   if [[ "$action" == closed ]]; then reconcile_issue "$number" "$url" "Verification"; fi
   if [[ "$action" == reopened ]]; then reconcile_issue "$number" "$url" "In Progress"; fi
   if [[ "$action" == labeled ]]; then
@@ -274,6 +405,8 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     sync-pr) sync_pr ;;
     verify-main) verify_main ;;
     repair-project) repair_project ;;
+    audit-completion) audit_completion ;;
+    close-milestone) close_milestone "${2:-}" ;;
     *) usage >&2; exit 2 ;;
   esac
 fi
