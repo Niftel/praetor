@@ -312,7 +312,7 @@ func (rs *ServicePrincipalsResource) validateCredentialInput(body *serviceCreden
 }
 
 func mintServiceToken() (string, error) {
-	raw := make([]byte, 32)
+	raw := make([]byte, middleware.ServiceTokenEntropyBytes)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}

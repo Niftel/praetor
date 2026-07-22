@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -30,8 +31,13 @@ func getJWTSecret() string {
 const PATPrefix = "prtr_pat_"
 
 // ServiceTokenPrefix distinguishes non-human application credentials from
-// personal access tokens. The two credential classes are never interchangeable.
-const ServiceTokenPrefix = "prtr_sp_"
+// personal access tokens. It is public type metadata and cannot authenticate
+// without the independently generated random payload that follows it.
+const ServiceTokenPrefix = "prtr_sp_" // #nosec G101 -- public token type prefix, not secret authentication material.
+
+// ServiceTokenEntropyBytes is the required random payload size for service
+// credentials. The encoded prefix alone never reaches the credential store.
+const ServiceTokenEntropyBytes = 32
 
 // HashToken returns the hex SHA-256 of a token — what's stored and looked up, so
 // the plaintext never touches the database.
@@ -152,6 +158,9 @@ func authenticatePAT(db *sqlx.DB, ctx context.Context, token string) (UserContex
 }
 
 func authenticateServiceCredential(db *sqlx.DB, ctx context.Context, token string) (UserContext, bool) {
+	if !isServiceTokenFormat(token) {
+		return UserContext{}, false
+	}
 	var row struct {
 		CredentialID   int64  `db:"credential_id"`
 		PrincipalID    int64  `db:"principal_id"`
@@ -179,6 +188,14 @@ func authenticateServiceCredential(db *sqlx.DB, ctx context.Context, token strin
 		ServiceCredentialID: row.CredentialID,
 		OrganizationID:      row.OrganizationID,
 	}, true
+}
+
+func isServiceTokenFormat(token string) bool {
+	if !strings.HasPrefix(token, ServiceTokenPrefix) {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(token, ServiceTokenPrefix))
+	return err == nil && len(payload) == ServiceTokenEntropyBytes
 }
 
 // authenticateJWT validates a login JWT and extracts its claims.

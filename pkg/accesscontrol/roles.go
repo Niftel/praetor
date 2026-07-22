@@ -5,14 +5,15 @@ package accesscontrol
 type RoleKind string
 
 const (
-	AdminRole             RoleKind = "admin_role"
-	MemberRole            RoleKind = "member_role"
-	ReadRole              RoleKind = "read_role"
-	AuditorRole           RoleKind = "auditor_role"
-	ExecuteRole           RoleKind = "execute_role"
-	ProjectAdminRole      RoleKind = "project_admin_role"
-	InventoryAdminRole    RoleKind = "inventory_admin_role"
-	CredentialAdminRole   RoleKind = "credential_admin_role"
+	AdminRole          RoleKind = "admin_role"
+	MemberRole         RoleKind = "member_role"
+	ReadRole           RoleKind = "read_role"
+	AuditorRole        RoleKind = "auditor_role"
+	ExecuteRole        RoleKind = "execute_role"
+	ProjectAdminRole   RoleKind = "project_admin_role"
+	InventoryAdminRole RoleKind = "inventory_admin_role"
+	// CredentialAdminRole is a public RBAC role identifier, not a credential value.
+	CredentialAdminRole   RoleKind = "credential_admin_role" // #nosec G101 -- stable authorization vocabulary contains no authentication material.
 	WorkflowAdminRole     RoleKind = "workflow_admin_role"
 	NotificationAdminRole RoleKind = "notification_admin_role"
 	JobTemplateAdminRole  RoleKind = "job_template_admin_role"

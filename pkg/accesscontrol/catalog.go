@@ -44,7 +44,8 @@ const (
 	ManageUsers          = "manage_user"
 	ViewActivityStream   = "view_activitystream"
 	ManageExecutionPacks = "manage_executionpack"
-	ManageCredentialType = "manage_credentialtype"
+	// ManageCredentialType is a public RBAC capability codename, not a credential value.
+	ManageCredentialType = "manage_credentialtype" // #nosec G101 -- stable authorization vocabulary contains no authentication material.
 	ManageEventSources   = "manage_eventsource"
 )
 
