@@ -1,0 +1,55 @@
+name: Go security scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "11 4 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: gosec-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gosec:
+    name: gosec
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Keep the scan outcome available long enough to upload SARIF even when
+      # the incremental high-severity gate rejects a new finding.
+      - name: Scan Go code
+        id: scan
+        continue-on-error: true
+        run: make gosec GOSEC_REPORT=gosec.sarif
+
+      - name: Upload gosec results
+        if: >-
+          always() &&
+          hashFiles('gosec.sarif') != '' &&
+          (github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+      - name: Require gosec gate
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        run: test "$SCAN_OUTCOME" = success

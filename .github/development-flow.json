@@ -2,7 +2,7 @@
   "owner": "Niftel",
   "repository": "praetor",
   "project_title": "Praetor Development",
-  "required_workflows": ["CI", "CodeQL", "Go vulnerability scan", "Image"],
+  "required_workflows": ["CI", "CodeQL", "Go vulnerability scan", "Go security scan", "Image"],
   "milestones": ["Current Development", "Next", "Backlog", "Future / Experimental"],
   "statuses": ["Backlog", "Ready", "In Progress", "In Review", "Verification", "Done"],
   "labels": {

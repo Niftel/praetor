@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "description": "Existing high-severity gosec findings. New findings fail CI; remove entries as findings are resolved.",
+  "findings": [
+    {
+      "rule": "G101",
+      "file": "pkg/accesscontrol/catalog.go",
+      "message": "Potential hardcoded credentials",
+      "snippet": "ManageCredentialType = \"manage_credentialtype\""
+    },
+    {
+      "rule": "G101",
+      "file": "pkg/accesscontrol/roles.go",
+      "message": "Potential hardcoded credentials",
+      "snippet": "CredentialAdminRole   RoleKind = \"credential_admin_role\""
+    },
+    {
+      "rule": "G101",
+      "file": "services/api/middleware/auth.go",
+      "message": "Potential hardcoded credentials",
+      "snippet": "const ServiceTokenPrefix = \"prtr_sp_\""
+    },
+    {
+      "rule": "G115",
+      "file": "cmd/host-runner/runner.go",
+      "message": "integer overflow conversion int64 -> uint32",
+      "snippet": "f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)"
+    },
+    {
+      "rule": "G118",
+      "file": "services/api/middleware/activity.go",
+      "message": "Goroutine uses context.Background/TODO while request-scoped context is available",
+      "snippet": "go func(uid int64, uname, act, rtype string, rid *int64, method, path string, code int) {"
+    },
+    {
+      "rule": "G402",
+      "file": "pkg/auth/client.go",
+      "message": "TLS InsecureSkipVerify may be set to true.",
+      "snippet": "InsecureSkipVerify: c.config.Server.InsecureSkipVerify,"
+    },
+    {
+      "rule": "G702",
+      "file": "cmd/execpack/main.go",
+      "message": "Command injection via taint analysis",
+      "snippet": "cmd := exec.Command(\"docker\", args...)"
+    },
+    {
+      "rule": "G702",
+      "file": "cmd/packbuilder/main.go",
+      "message": "Command injection via taint analysis",
+      "snippet": "build := exec.Command(\"buildctl\", args...)"
+    },
+    {
+      "rule": "G703",
+      "file": "cmd/execpack/main.go",
+      "message": "Path traversal via taint analysis",
+      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"praetor_checkpoint.py\"), callback, 0o644); werr != nil {"
+    },
+    {
+      "rule": "G703",
+      "file": "cmd/execpack/main.go",
+      "message": "Path traversal via taint analysis",
+      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"requirements.txt\"), []byte(requirements), 0o644); werr != nil {"
+    },
+    {
+      "rule": "G703",
+      "file": "cmd/host-runner/checkpoint.go",
+      "message": "Path traversal via taint analysis",
+      "snippet": "st, err := os.Stat(path)"
+    },
+    {
+      "rule": "G704",
+      "file": "services/api/handlers/jobs.go",
+      "message": "SSRF via taint analysis",
+      "snippet": "req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream, nil)"
+    },
+    {
+      "rule": "G704",
+      "file": "services/api/handlers/jobs.go",
+      "message": "SSRF via taint analysis",
+      "snippet": "resp, err := http.DefaultClient.Do(req)"
+    }
+  ]
+}
