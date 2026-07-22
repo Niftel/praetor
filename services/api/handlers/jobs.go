@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -54,25 +53,23 @@ type JobStore interface {
 type JobsResource struct {
 	DB *sqlx.DB
 	*Authorizer
-	// IngestionURL is the base URL the API proxies run-log reads to. Resolved in
-	// main from env; empty falls back to the in-cluster default.
-	IngestionURL string
-	// internalToken is the shared cluster secret the API presents to ingestion's
-	// authenticated log-read endpoint (the run-scoped GET logs is no longer open).
-	internalToken string
+	ingestionLogs *ingestionLogClient
 	store         JobStore
 	log           *slog.Logger
 }
 
-func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string, authz *Authorizer) *JobsResource {
+func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string, authz *Authorizer) (*JobsResource, error) {
+	ingestionLogs, err := newIngestionLogClient(ingestionURL, internalToken)
+	if err != nil {
+		return nil, err
+	}
 	return &JobsResource{
 		DB:            db,
 		Authorizer:    authz,
-		IngestionURL:  ingestionURL,
-		internalToken: internalToken,
+		ingestionLogs: ingestionLogs,
 		store:         store.NewJobStore(db),
 		log:           plog.New("api.jobs"),
-	}
+	}, nil
 }
 
 // authorizeRunRead allows reading a run/its events when the user can read the
@@ -399,10 +396,6 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := rs.IngestionURL
-	if base == "" {
-		base = "http://ingestion:8081"
-	}
 	// The upstream chunk query is exclusive (seq > since) and chunks start at
 	// seq 0, so a full fetch must pass since=-1 — defaulting to 0 would silently
 	// drop the first chunk (the start of the playbook output).
@@ -410,19 +403,7 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 	if since == "" {
 		since = "-1"
 	}
-	upstream := fmt.Sprintf("%s/api/v1/runs/%s/logs?since=%s", base, runID, url.QueryEscape(since))
-
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream, nil)
-	if err != nil {
-		render.Render(w, r, ErrInternal(err))
-		return
-	}
-	// ingestion's log-read endpoint is authenticated (in-cluster); present the
-	// shared internal token. Edge RBAC already happened above via authorizeRunRead.
-	if rs.internalToken != "" {
-		req.Header.Set("Authorization", "Bearer "+rs.internalToken)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rs.ingestionLogs.fetch(r.Context(), runID, since)
 	if err != nil {
 		render.Render(w, r, ErrInternal(fmt.Errorf("reach ingestion logs: %w", err)))
 		return

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -41,7 +42,7 @@ type Config struct {
 }
 
 // NewRouter instantiates the chi Router and wires middleware.
-func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
+func NewRouter(db *sqlx.DB, cfg Config) (*chi.Mux, error) {
 	r := chi.NewRouter()
 
 	// The authorization enforcement helper (PEP) is built once and injected into
@@ -77,6 +78,10 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 	teams := handlers.NewTeamsResource(db, authz)
 	access := handlers.NewAccessResource(db, authz)
 	servicePrincipals := handlers.NewServicePrincipalsResource(db, authz)
+	jobs, err := handlers.NewJobsResource(db, cfg.IngestionURL, cfg.InternalToken, authz)
+	if err != nil {
+		return nil, fmt.Errorf("configure ingestion log proxy: %w", err)
+	}
 
 	// Auth Routes (Public). Login is rate-limited per IP to blunt password
 	// brute-forcing (20 attempts/minute).
@@ -248,7 +253,6 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 		// =======================================================================
 		// Jobs
 		// =======================================================================
-		jobs := handlers.NewJobsResource(db, cfg.IngestionURL, cfg.InternalToken, authz)
 		r.Mount("/jobs", jobs.Routes())
 
 		// =======================================================================
@@ -333,5 +337,5 @@ func NewRouter(db *sqlx.DB, cfg Config) *chi.Mux {
 
 	})
 
-	return r
+	return r, nil
 }

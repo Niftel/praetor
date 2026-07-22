@@ -11,7 +11,10 @@ import (
 
 func TestAPISkeletonPing(t *testing.T) {
 	// Pass nil DB for skeleton test (ping doesn't need DB)
-	router := api.NewRouter(nil, api.Config{})
+	router, err := api.NewRouter(nil, api.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -31,7 +34,10 @@ func TestAPISkeletonPing(t *testing.T) {
 }
 
 func TestAPIReadinessRequiresDatabase(t *testing.T) {
-	router := api.NewRouter(nil, api.Config{})
+	router, err := api.NewRouter(nil, api.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil)
 	rec := httptest.NewRecorder()
 

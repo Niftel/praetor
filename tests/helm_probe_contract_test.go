@@ -27,7 +27,10 @@ func TestHelmAPIProbeRoutes(t *testing.T) {
 		t.Fatalf("API Helm template contains %d HTTP probe paths, want readiness and liveness", len(matches))
 	}
 
-	router := api.NewRouter(nil, api.Config{})
+	router, err := api.NewRouter(nil, api.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, match := range matches {
 		probe := string(match[1])
 		path := string(match[2])

@@ -43,7 +43,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("secrets service misconfigured: %v", err)
 	}
-	router := api.NewRouter(database, api.Config{
+	router, err := api.NewRouter(database, api.Config{
 		CredentialSecrets:         credentialSecrets,
 		IngestionURL:              env.String("INGESTION_URL", ""),
 		InternalToken:             env.String("PRAETOR_INTERNAL_TOKEN", ""),
@@ -53,6 +53,9 @@ func main() {
 		RBACPolicyRefreshInterval: refreshInterval,
 		RBACDecisionAudit:         auditDecisions,
 	})
+	if err != nil {
+		log.Fatalf("API configuration invalid: %v", err)
+	}
 
 	fmt.Printf("Praetor API Service starting on port %s...\n", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {

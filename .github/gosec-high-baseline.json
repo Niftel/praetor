@@ -61,18 +61,6 @@
       "file": "cmd/host-runner/checkpoint.go",
       "message": "Path traversal via taint analysis",
       "snippet": "st, err := os.Stat(path)"
-    },
-    {
-      "rule": "G704",
-      "file": "services/api/handlers/jobs.go",
-      "message": "SSRF via taint analysis",
-      "snippet": "req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream, nil)"
-    },
-    {
-      "rule": "G704",
-      "file": "services/api/handlers/jobs.go",
-      "message": "SSRF via taint analysis",
-      "snippet": "resp, err := http.DefaultClient.Do(req)"
     }
   ]
 }
