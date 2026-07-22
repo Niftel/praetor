@@ -36,41 +36,6 @@
       "message": "Goroutine uses context.Background/TODO while request-scoped context is available",
       "snippet": "go func(uid int64, uname, act, rtype string, rid *int64, method, path string, code int) {",
       "tracking_issue": 304
-    },
-    {
-      "rule": "G702",
-      "file": "cmd/execpack/main.go",
-      "message": "Command injection via taint analysis",
-      "snippet": "cmd := exec.Command(\"docker\", args...)",
-      "tracking_issue": 303
-    },
-    {
-      "rule": "G702",
-      "file": "cmd/packbuilder/main.go",
-      "message": "Command injection via taint analysis",
-      "snippet": "build := exec.Command(\"buildctl\", args...)",
-      "tracking_issue": 303
-    },
-    {
-      "rule": "G703",
-      "file": "cmd/execpack/main.go",
-      "message": "Path traversal via taint analysis",
-      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"praetor_checkpoint.py\"), callback, 0o644); werr != nil {",
-      "tracking_issue": 303
-    },
-    {
-      "rule": "G703",
-      "file": "cmd/execpack/main.go",
-      "message": "Path traversal via taint analysis",
-      "snippet": "if werr := os.WriteFile(filepath.Join(ctx, \"requirements.txt\"), []byte(requirements), 0o644); werr != nil {",
-      "tracking_issue": 303
-    },
-    {
-      "rule": "G703",
-      "file": "cmd/host-runner/checkpoint.go",
-      "message": "Path traversal via taint analysis",
-      "snippet": "st, err := os.Stat(path)",
-      "tracking_issue": 303
     }
   ]
 }

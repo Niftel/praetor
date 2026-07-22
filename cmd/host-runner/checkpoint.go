@@ -55,7 +55,16 @@ func callbackPluginDir(executable string) string {
 
 // fileExists reports whether path exists and is a regular file.
 func fileExists(path string) bool {
-	st, err := os.Stat(path)
+	directory, name := filepath.Split(path)
+	if directory == "" {
+		directory = "."
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	st, err := root.Stat(name)
 	return err == nil && st.Mode().IsRegular()
 }
 
@@ -65,8 +74,14 @@ func fileExists(path string) bool {
 // returned slice always starts with "--start-at-task" followed by the task
 // name, so callers can log resume[1].
 func resumeArgs(jobDir string) []string {
+	root, err := os.OpenRoot(jobDir)
+	if err != nil {
+		log.Printf("resume: could not open job root %s: %v", jobDir, err)
+		return nil
+	}
+	defer root.Close()
 	cpPath := filepath.Join(jobDir, "checkpoint.json")
-	data, err := os.ReadFile(cpPath)
+	data, err := root.ReadFile("checkpoint.json")
 	if err != nil {
 		log.Printf("resume: no checkpoint at %s: %v", cpPath, err)
 		return nil
@@ -86,7 +101,7 @@ func resumeArgs(jobDir string) []string {
 	if len(cp.Vars) > 0 {
 		varsPath := filepath.Join(jobDir, "restored-vars.json")
 		if b, err := json.Marshal(cp.Vars); err == nil {
-			if err := os.WriteFile(varsPath, b, 0644); err == nil {
+			if err := root.WriteFile("restored-vars.json", b, 0o600); err == nil {
 				args = append(args, "-e", "@"+varsPath)
 			} else {
 				log.Printf("resume: could not write restored vars: %v", err)
