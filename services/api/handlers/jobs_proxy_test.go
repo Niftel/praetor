@@ -2,8 +2,9 @@ package handlers
 
 import (
 	"context"
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestIngestionLogRequestUsesOnlyConfiguredOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	runID := uuid.MustParse("047da59d-8d0d-4e82-9333-e3f258d8d8be")
-	req, err := resource.newIngestionLogRequest(context.Background(), runID, "-1")
+	req, err := resource.ingestionLogs.newRequest(context.Background(), runID, "-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,26 +47,13 @@ func TestIngestionLogRequestUsesOnlyConfiguredOrigin(t *testing.T) {
 }
 
 func TestIngestionClientDoesNotFollowRedirects(t *testing.T) {
-	var redirectedRequests atomic.Int32
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		redirectedRequests.Add(1)
-	}))
-	defer target.Close()
-
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusFound)
-	}))
-	defer origin.Close()
-
-	resource, err := NewJobsResource(nil, origin.URL, "internal-token", nil)
+	transport := &redirectRoundTripper{location: "https://attacker.example/logs"}
+	resource, err := NewJobsResource(nil, "https://ingestion.example:8443", "internal-token", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := resource.newIngestionLogRequest(context.Background(), uuid.New(), "-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := resource.ingestionClient.Do(req)
+	resource.ingestionLogs.httpClient.Transport = transport
+	resp, err := resource.ingestionLogs.fetch(context.Background(), uuid.New(), "-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +61,65 @@ func TestIngestionClientDoesNotFollowRedirects(t *testing.T) {
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusFound)
 	}
-	if got := redirectedRequests.Load(); got != 0 {
-		t.Fatalf("redirect target received %d request(s), want 0", got)
+	if got := transport.calls.Load(); got != 1 {
+		t.Fatalf("transport received %d request(s), want only the initial request", got)
 	}
+}
+
+func TestIngestionClientRejectsChangedOriginBeforeTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "host", url: "https://attacker.example/api/v1/runs/047da59d-8d0d-4e82-9333-e3f258d8d8be/logs"},
+		{name: "scheme", url: "http://ingestion.example:8443/api/v1/runs/047da59d-8d0d-4e82-9333-e3f258d8d8be/logs"},
+		{name: "userinfo", url: "https://user@ingestion.example:8443/api/v1/runs/047da59d-8d0d-4e82-9333-e3f258d8d8be/logs"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &countingRoundTripper{}
+			client, err := newIngestionLogClient("https://ingestion.example:8443", "internal-token")
+			if err != nil {
+				t.Fatal(err)
+			}
+			client.httpClient.Transport = transport
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, tc.url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := client.do(req); err == nil || !strings.Contains(err.Error(), "does not match configured origin") {
+				t.Fatalf("do() error = %v, want origin mismatch", err)
+			}
+			if got := transport.calls.Load(); got != 0 {
+				t.Fatalf("transport received %d request(s), want 0", got)
+			}
+		})
+	}
+}
+
+type countingRoundTripper struct {
+	calls atomic.Int32
+}
+
+func (t *countingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	t.calls.Add(1)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("ok")),
+		Header:     make(http.Header),
+	}, nil
+}
+
+type redirectRoundTripper struct {
+	calls    atomic.Int32
+	location string
+}
+
+func (t *redirectRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	t.calls.Add(1)
+	return &http.Response{
+		StatusCode: http.StatusFound,
+		Body:       io.NopCloser(strings.NewReader("redirect")),
+		Header:     http.Header{"Location": []string{t.location}},
+	}, nil
 }
