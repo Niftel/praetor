@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"log"
 	"os"
@@ -10,6 +11,13 @@ import (
 // defaultPluginDir is where the bootstrap installs the praetor_checkpoint
 // Ansible callback plugin on the host.
 const defaultPluginDir = "/usr/local/share/praetor/plugins/callback"
+
+// embeddedCheckpointPlugin keeps task-level recovery available when the host
+// runner crosses an SSH boundary that does not preserve executor environment
+// variables or execution-pack paths.
+//
+//go:embed plugins/callback/praetor_checkpoint.py
+var embeddedCheckpointPlugin []byte
 
 // checkpointEnv returns the environment that enables the praetor_checkpoint
 // callback for an ansible-playbook run (so progress + registered vars are
@@ -31,7 +39,10 @@ func checkpointEnv(jobDir, ansiblePlaybook string) []string {
 		}
 	}
 	if !fileExists(filepath.Join(pluginDir, "praetor_checkpoint.py")) {
-		return nil
+		pluginDir = materializeEmbeddedCheckpointPlugin(jobDir)
+		if pluginDir == "" {
+			return nil
+		}
 	}
 	return []string{
 		"ANSIBLE_CALLBACK_PLUGINS=" + pluginDir,
@@ -39,6 +50,26 @@ func checkpointEnv(jobDir, ansiblePlaybook string) []string {
 		"PRAETOR_CHECKPOINT=" + filepath.Join(jobDir, "checkpoint.json"),
 		"PRAETOR_DIAGNOSTIC_EVENTS=" + filepath.Join(jobDir, "diagnostic-events.jsonl"),
 	}
+}
+
+func materializeEmbeddedCheckpointPlugin(jobDir string) string {
+	const pluginDir = ".praetor/plugins/callback"
+	const pluginPath = pluginDir + "/praetor_checkpoint.py"
+	root, err := os.OpenRoot(jobDir)
+	if err != nil {
+		log.Printf("checkpoint: could not open job root for embedded callback: %v", err)
+		return ""
+	}
+	defer root.Close()
+	if err := root.MkdirAll(pluginDir, 0o700); err != nil {
+		log.Printf("checkpoint: could not create embedded callback directory: %v", err)
+		return ""
+	}
+	if err := root.WriteFile(pluginPath, embeddedCheckpointPlugin, 0o600); err != nil {
+		log.Printf("checkpoint: could not materialize embedded callback: %v", err)
+		return ""
+	}
+	return filepath.Join(jobDir, filepath.FromSlash(pluginDir))
 }
 
 // callbackPluginDir returns the callback directory bundled beside a packed
