@@ -22,11 +22,20 @@ func TestDynamicInventoryStagingJourneyContract(t *testing.T) {
 		"diagnostic_details == {}", "unauthorized team", "credential leaked into history",
 		"invalid-credential", "provider_acquisition_failed", "provider-timeout", "provider_timeout", "time.sleep(70)", "record_failure", "phase:$phase",
 		"inventory_source_id:$source", "dynamic-inventory", "secret-redaction", "PHASE=\"cleanup\"",
-		"resource_cleanup true", "credentials/$CREDENTIAL_ID",
+		"resource_cleanup true", "credentials/$CREDENTIAL_ID", "set -Eeuo pipefail",
+		"GET /api/v1/$path returned $status", "failed during phase '$PHASE'", "PHASE=\"resource-discovery\"",
 		`"$STATUS" == 204`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("dynamic inventory journey is missing %q", required)
+		}
+	}
+	for _, nonCanonical := range []string{
+		"find_id organizations/", "find_id teams/", "find_id credential-types/",
+		`"inventories/$INVENTORY_ID/hosts/"`, "POST schedules/", "schedules/ |",
+	} {
+		if strings.Contains(script, nonCanonical) {
+			t.Errorf("dynamic inventory journey uses non-canonical collection path %q", nonCanonical)
 		}
 	}
 	for _, forbidden := range []string{"set -x", "echo $SECRET", "docker system prune", "k3d cluster delete"} {

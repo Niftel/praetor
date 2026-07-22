@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 # Proves the complete dynamic-inventory operator boundary against the disposable
 # product-validation cluster. Provider data and credentials are synthetic; the
@@ -22,11 +22,16 @@ die() { echo "error: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"; }
 for command in curl jq kubectl; do need "$command"; done
 record_failure() {
-  [[ -z "$EVIDENCE_FILE" ]] || { umask 077; jq -n --arg phase "$PHASE" '{schema_version:1,journey:"dynamic-inventory",result:"fail",phase:$phase}' >"$EVIDENCE_FILE"; }
+  echo "error: dynamic inventory journey failed during phase '$PHASE'" >&2
+  [[ -z "$EVIDENCE_FILE" ]] || {
+    umask 077
+    mkdir -p "$(dirname "$EVIDENCE_FILE")"
+    jq -n --arg phase "$PHASE" \
+      '{schema_version:1,journey:"dynamic-inventory",result:"fail",phase:$phase}' >"$EVIDENCE_FILE"
+  }
 }
 cleanup() { [[ -z "$PORT_FORWARD_PID" ]] || kill "$PORT_FORWARD_PID" 2>/dev/null || true; rm -rf "$WORK"; }
 trap record_failure ERR
-trap cleanup EXIT
 
 kubectl port-forward -n "$NAMESPACE" "svc/$RELEASE-api" "$API_PORT:8080" >"$WORK/port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!
@@ -38,8 +43,12 @@ done
 curl -fsS "$API/ping" >/dev/null || die "API did not become reachable"
 
 login() {
-  curl -fsS -H 'Content-Type: application/json' \
-    -d "$(jq -nc --arg username "$1" --arg password "$2" '{username:$username,password:$password}')" "$API/auth/login" | jq -er .token
+  local username="$1" password="$2" output="$WORK/login-response.json" status response
+  status="$(curl -sS -o "$output" -w '%{http_code}' -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg username "$username" --arg password "$password" '{username:$username,password:$password}')" "$API/auth/login")"
+  response="$(cat "$output")"
+  [[ "$status" == 200 ]] || die "login for $username returned $status"
+  jq -er .token <<<"$response"
 }
 ADMIN_TOKEN="$(login "${PRAETOR_VALIDATION_ADMIN_USERNAME:-admin}" "${PRAETOR_VALIDATION_ADMIN_PASSWORD:-admin}")"
 OPERATOR_TOKEN="$(login demo-operator "$PASSWORD")"
@@ -69,7 +78,12 @@ resource_cleanup() {
   [[ "$strict" != true || "$failed" == 0 ]]
 }
 trap 'resource_cleanup false; cleanup' EXIT
-get() { curl -fsS -H "Authorization: Bearer $1" "$API/$2"; }
+get() {
+  local token="$1" path="$2" output="$WORK/get-response.json" status
+  status="$(curl -sS -o "$output" -w '%{http_code}' -H "Authorization: Bearer $token" "$API/$path")"
+  [[ "$status" == 200 ]] || die "GET /api/v1/$path returned $status"
+  cat "$output"
+}
 items() { jq -c 'if type == "object" and has("items") then .items else . end'; }
 find_id() { get "$ADMIN_TOKEN" "$1" | items | jq -r --arg name "$2" '.[] | select(.name == $name) | .id' | head -n1; }
 
@@ -114,8 +128,9 @@ set_provider_payload() {
   die "synthetic provider did not publish $expected"
 }
 
-ORG_ID="$(find_id organizations/ Engineering)"; [[ -n "$ORG_ID" ]] || die "Engineering organization is missing"
-TEAM_ID="$(find_id teams/ backend-team)"; [[ -n "$TEAM_ID" ]] || die "backend-team is missing"
+PHASE="resource-discovery"
+ORG_ID="$(find_id organizations Engineering)"; [[ -n "$ORG_ID" ]] || die "Engineering organization is missing"
+TEAM_ID="$(find_id teams backend-team)"; [[ -n "$TEAM_ID" ]] || die "backend-team is missing"
 INVENTORY_ID="$(find_id inventories "$PREFIX Inventory")"
 if [[ -z "$INVENTORY_ID" ]]; then
   request "$ADMIN_TOKEN" POST inventories "$(jq -nc --argjson org "$ORG_ID" --arg name "$PREFIX Inventory" '{organization_id:$org,name:$name,kind:"dynamic"}')"
@@ -123,7 +138,7 @@ if [[ -z "$INVENTORY_ID" ]]; then
 fi
 
 PHASE="credential-and-source"
-CREDENTIAL_TYPE_ID="$(find_id credential-types/ Machine)"; [[ -n "$CREDENTIAL_TYPE_ID" ]] || die "built-in Machine credential type is missing"
+CREDENTIAL_TYPE_ID="$(find_id credential-types Machine)"; [[ -n "$CREDENTIAL_TYPE_ID" ]] || die "built-in Machine credential type is missing"
 CREDENTIAL_ID="$(ensure_post credentials credentials "$PREFIX Credential" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:$secret}}')")"
 [[ "$(get "$ADMIN_TOKEN" "credentials/$CREDENTIAL_ID" | jq -r .inputs.password)" == '$encrypted$' ]] || die "provider credential is not sealed"
 
@@ -178,7 +193,7 @@ request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/syn
 [[ "$STATUS" == 201 ]] || die "changed sync returned $STATUS: $RESPONSE"; CHANGED_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$CHANGED_JOB" successful
 CHANGED_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 2)"
 jq -e '.results[0] | .status == "successful" and .hosts_added == 1 and .hosts_updated == 1 and .hosts_disabled == 1' <<<"$CHANGED_HISTORY" >/dev/null || die "changed sync delta is incorrect"
-HOSTS="$(get "$OPERATOR_TOKEN" "inventories/$INVENTORY_ID/hosts/" | items)"
+HOSTS="$(get "$OPERATOR_TOKEN" "inventories/$INVENTORY_ID/hosts" | items)"
 jq -e '[.[] | select(.name == "dynamic-beta" and .enabled == false)] | length == 1' <<<"$HOSTS" >/dev/null || die "missing host was not safely disabled"
 
 PHASE="invalid-credential"
@@ -225,9 +240,9 @@ PHASE="scheduling"
 # Scheduling uses the same source-scoped update permission and is hidden from outsiders.
 START="$(date -u -v+2M +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -d '+2 minutes' +%Y%m%dT%H%M%SZ)"
 RRULE="$(printf 'DTSTART:%s\nRRULE:FREQ=DAILY;COUNT=1' "$START")"
-request "$OPERATOR_TOKEN" POST schedules/ "$(jq -nc --arg name "$PREFIX Schedule" --argjson source "$SOURCE_ID" --arg rule "$RRULE" '{name:$name,inventory_source_id:$source,rrule:$rule}')"
+request "$OPERATOR_TOKEN" POST schedules "$(jq -nc --arg name "$PREFIX Schedule" --argjson source "$SOURCE_ID" --arg rule "$RRULE" '{name:$name,inventory_source_id:$source,rrule:$rule}')"
 [[ "$STATUS" == 201 ]] || die "source schedule returned $STATUS: $RESPONSE"; SCHEDULE_ID="$(jq -er .id <<<"$RESPONSE")"
-get "$OUTSIDER_TOKEN" schedules/ | jq -e --argjson id "$SCHEDULE_ID" 'all(.[]; .id != $id)' >/dev/null || die "unauthorized team can list source schedule"
+get "$OUTSIDER_TOKEN" schedules | jq -e --argjson id "$SCHEDULE_ID" 'all(.[]; .id != $id)' >/dev/null || die "unauthorized team can list source schedule"
 
 PHASE="evidence"
 EVIDENCE="$(jq -n --argjson inventory_id "$INVENTORY_ID" --argjson source_id "$SOURCE_ID" --argjson schedule_id "$SCHEDULE_ID" --argjson initial_job "$INITIAL_JOB" --argjson changed_job "$CHANGED_JOB" --argjson invalid_job "$INVALID_JOB" --argjson timeout_job "$TIMEOUT_JOB" --argjson fault_job "$FAULT_JOB" --argjson recovery_job "$RECOVERY_JOB" '{schema_version:1,journey:"dynamic-inventory",result:"pass",inventory_id:$inventory_id,source_id:$source_id,schedule_id:$schedule_id,jobs:{initial:$initial_job,changed:$changed_job,invalid_credential:$invalid_job,timeout:$timeout_job,fault:$fault_job,recovery:$recovery_job},checks:["sealed-credential","preview-no-mutation","initial-sync","changed-reconciliation","invalid-credential","provider-timeout","safe-failure","recovery","source-schedule","cross-team-denial","secret-redaction"]}')"
