@@ -116,7 +116,7 @@ func (h *NotificationsResource) CreateNotificationTemplate(w http.ResponseWriter
 			continue
 		}
 		if err := notify.ValidateDestination(r.Context(), body.Config[field.ID]); err != nil {
-			render.ErrInvalidRequest(err).Render(w, r)
+			renderNotificationError(w, r, render.ErrInvalidRequest(err))
 			return
 		}
 	}
@@ -149,7 +149,7 @@ type notificationDeliveryTarget struct {
 func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
-		render.ErrInvalidRequest(fmt.Errorf("invalid notification template id")).Render(w, r)
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("invalid notification template id")))
 		return
 	}
 	var target notificationDeliveryTarget
@@ -157,10 +157,10 @@ func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, 
 		SELECT id, organization_id, name, notification_type, config
 		FROM notification_templates WHERE id = $1`, id); err != nil {
 		if err == sql.ErrNoRows {
-			render.ErrNotFound(err).Render(w, r)
+			renderNotificationError(w, r, render.ErrNotFound(err))
 			return
 		}
-		render.ErrInternal(err).Render(w, r)
+		renderNotificationError(w, r, render.ErrInternal(err))
 		return
 	}
 	if !h.authorizeOrgRole(w, r, target.OrganizationID, rbac.NotificationAdminRole) {
@@ -184,7 +184,7 @@ func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, 
 		// Delivery errors can contain a webhook URL whose path embeds a secret.
 		// Record only bounded identifiers and a stable failure code.
 		logger.Warn("notification test delivery failed", "notification_template_id", target.ID, "organization_id", target.OrganizationID, "notification_type", target.NotificationType, "failure_code", failureCode)
-		(&render.ErrorResponse{Err: err, HTTPStatusCode: http.StatusBadGateway, ErrorText: "Test notification could not be delivered (" + failureCode + ")"}).Render(w, r)
+		renderNotificationError(w, r, &render.ErrorResponse{Err: err, HTTPStatusCode: http.StatusBadGateway, ErrorText: "Test notification could not be delivered (" + failureCode + ")"})
 		return
 	}
 	render.JSON(w, r, map[string]interface{}{
@@ -192,6 +192,16 @@ func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, 
 		"notification_template_id": target.ID,
 		"tested_at":                time.Now().UTC(),
 	})
+}
+
+type notificationErrorRenderer interface {
+	Render(http.ResponseWriter, *http.Request) error
+}
+
+func renderNotificationError(w http.ResponseWriter, r *http.Request, response notificationErrorRenderer) {
+	if err := response.Render(w, r); err != nil {
+		logger.Error("notification error response rendering failed", "error", err)
+	}
 }
 
 // DeleteNotificationTemplate DELETE /api/v1/notification-templates/{id}

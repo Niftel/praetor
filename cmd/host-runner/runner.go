@@ -497,16 +497,17 @@ func fetchProject(projectURL, ref, destDir string) error {
 	}
 	log.Printf("Cloning project from %s into %s", projectURL, destDir)
 	if isGitCommitID(ref) {
-		commands := [][]string{
-			{"init", destDir},
-			{"-C", destDir, "remote", "add", "origin", projectURL},
-			{"-C", destDir, "fetch", "--depth=1", "origin", ref},
-			{"-C", destDir, "checkout", "--detach", "FETCH_HEAD"},
+		if err := runProjectGit("init", "init", destDir); err != nil {
+			return err
 		}
-		for _, args := range commands {
-			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-				return fmt.Errorf("project commit fetch failed at git %s: %v, output: %s", args[0], err, string(out))
-			}
+		if err := runProjectGit("remote", "-C", destDir, "remote", "add", "origin", projectURL); err != nil {
+			return err
+		}
+		if err := runProjectGit("fetch", "-C", destDir, "fetch", "--depth=1", "origin", ref); err != nil {
+			return err
+		}
+		if err := runProjectGit("checkout", "-C", destDir, "checkout", "--detach", "FETCH_HEAD"); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -517,6 +518,17 @@ func fetchProject(projectURL, ref, destDir string) error {
 	args = append(args, projectURL, destDir)
 	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("project fetch failed: no HTTP archive and git clone failed: %v, output: %s", err, string(out))
+	}
+	return nil
+}
+
+func runProjectGit(step string, args ...string) error {
+	// The executable is fixed, exec.Command does not invoke a shell, and immutable
+	// refs are hex-validated before this helper is used. Project URLs and paths are
+	// passed as single argv values rather than interpreted as command text.
+	command := exec.Command("git", args...) // #nosec G204 -- fixed executable with structured argv; no shell evaluation
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("project commit fetch failed at git %s: %v, output: %s", step, err, string(output))
 	}
 	return nil
 }
