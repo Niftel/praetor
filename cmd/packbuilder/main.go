@@ -219,12 +219,12 @@ func buildPack(name, specYAML string) (string, error) {
 		// BUILDKIT_HOST (env, e.g. tcp://buildkitd:1234) points buildctl at the daemon.
 		build, err := executionboundary.Command("buildctl", args...)
 		if err != nil {
-			os.RemoveAll(ctx)
-			os.RemoveAll(outDir)
+			removeBuildDirectory(ctx)
+			removeBuildDirectory(outDir)
 			return out.String(), fmt.Errorf("prepare buildctl command: %w", err)
 		}
 		b, err := build.CombinedOutput()
-		os.RemoveAll(ctx)
+		removeBuildDirectory(ctx)
 		out.Write(b)
 		if err != nil {
 			os.RemoveAll(outDir)
@@ -337,6 +337,12 @@ func runGit(args ...string) ([]byte, error) {
 		return nil, err
 	}
 	return command.CombinedOutput()
+}
+
+func removeBuildDirectory(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		log.Printf("warning: remove temporary build directory %s: %v", path, err)
+	}
 }
 
 // envOr returns the env var k, or d when it is unset/empty.

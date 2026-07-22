@@ -118,17 +118,23 @@ func main() {
 		)
 		cmd, err := executionboundary.Command("docker", args...)
 		if err != nil {
-			os.RemoveAll(ctx)
+			removeBuildDirectory(ctx)
 			log.Fatalf("prepare docker build for %s: %v", arch, err)
 		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
-		os.RemoveAll(ctx)
+		removeBuildDirectory(ctx)
 		if err != nil {
 			log.Fatalf("docker build for %s failed: %v", arch, err)
 		}
 		fmt.Printf("  -> %s/%s-linux-%s.tar.gz\n", outputDir, spec.Name, arch)
 	}
 	log.Printf("Execution Pack %q built.", spec.Name)
+}
+
+func removeBuildDirectory(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		log.Printf("warning: remove temporary build directory %s: %v", path, err)
+	}
 }
