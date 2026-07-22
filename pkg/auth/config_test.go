@@ -102,6 +102,19 @@ users:
 `,
 			wantError: "invalid search scope",
 		},
+		{
+			name: "certificate verification cannot be disabled",
+			yaml: `
+server:
+  url: "ldaps://ldap.example.com:636"
+  bind_dn: "cn=admin"
+  bind_password: "secret"
+  insecure_skip_verify: true
+users:
+  search_base: "ou=users"
+`,
+			wantError: "server.insecure_skip_verify is no longer supported",
+		},
 	}
 
 	for _, tt := range tests {

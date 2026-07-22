@@ -118,7 +118,6 @@ ldap:
     server:
       bind_dn: cn=admin,dc=praetor,dc=local
       bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
-      insecure_skip_verify: true
       start_tls: false
       timeout: 30s
       url: ldap://ldap:389

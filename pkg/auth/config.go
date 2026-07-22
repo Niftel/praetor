@@ -120,6 +120,9 @@ func (c *LDAPConfig) Validate() error {
 	if c.Server.BindPassword == "" {
 		errs = append(errs, "server.bind_password or server.bind_password_env is required")
 	}
+	if c.Server.InsecureSkipVerify {
+		errs = append(errs, "server.insecure_skip_verify is no longer supported; configure server.ca_file for a private CA")
+	}
 
 	// User validation
 	if c.Users.SearchBase == "" {

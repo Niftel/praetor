@@ -33,12 +33,6 @@
       "snippet": "go func(uid int64, uname, act, rtype string, rid *int64, method, path string, code int) {"
     },
     {
-      "rule": "G402",
-      "file": "pkg/auth/client.go",
-      "message": "TLS InsecureSkipVerify may be set to true.",
-      "snippet": "InsecureSkipVerify: c.config.Server.InsecureSkipVerify,"
-    },
-    {
       "rule": "G702",
       "file": "cmd/execpack/main.go",
       "message": "Command injection via taint analysis",

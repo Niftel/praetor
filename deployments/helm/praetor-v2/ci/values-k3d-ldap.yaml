@@ -4,8 +4,8 @@
 #     -f deployments/helm/praetor-v2/ci/values-k3d-ldap.yaml -n praetor --create-namespace
 #
 # ldap.config is DERIVED from deployments/ldap/ldap-config.yaml with server.url
-# repointed at the in-cluster mock (ci/openldap.yaml). DEMO ONLY — insecure_skip_verify
-# and the plaintext ldap:// bind exist because the mock speaks no TLS.
+# repointed at the in-cluster mock (ci/openldap.yaml). DEMO ONLY — the plaintext
+# ldap:// bind exists because the mock speaks no TLS.
 ldap:
   enabled: true
   config:
@@ -13,7 +13,7 @@ ldap:
     # AAP/AWX-style login-time group→role mapping (see pkg/auth/LDAP-REDESIGN.md).
     # Connects to the mock OpenLDAP container in docker-compose. Do NOT copy this file
     # to production as-is: bind_password comes from an env var (never commit a real
-    # one), and insecure_skip_verify must be false against a real ldaps:// directory.
+    # one), and a real directory must use verified LDAPS or StartTLS.
     
     server:
       url: "ldap://praetor-openldap:389"
@@ -22,9 +22,6 @@ ldap:
       # in docker-compose). The loader requires bind_password or bind_password_env.
       bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
       start_tls: false
-      # DEMO ONLY: the mock speaks plaintext ldap:// (no TLS). Against a real directory
-      # this MUST be false.
-      insecure_skip_verify: true
       timeout: 30s
     
     users:

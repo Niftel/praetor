@@ -2,7 +2,7 @@
 # AAP/AWX-style login-time group→role mapping (see pkg/auth/LDAP-REDESIGN.md).
 # Connects to the mock OpenLDAP container in docker-compose. Do NOT copy this file
 # to production as-is: bind_password comes from an env var (never commit a real
-# one), and insecure_skip_verify must be false against a real ldaps:// directory.
+# one), and a real directory must use verified LDAPS or StartTLS.
 
 server:
   url: "ldap://ldap:389"
@@ -11,9 +11,6 @@ server:
   # in docker-compose). The loader requires bind_password or bind_password_env.
   bind_password_env: PRAETOR_LDAP_BIND_PASSWORD
   start_tls: false
-  # DEMO ONLY: the mock speaks plaintext ldap:// (no TLS). Against a real directory
-  # this MUST be false.
-  insecure_skip_verify: true
   timeout: 30s
 
 users:

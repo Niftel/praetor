@@ -55,7 +55,9 @@ type LDAPServerConfig struct {
 	BindPassword       string        `yaml:"bind_password"`        // Direct password (not recommended)
 	BindPasswordEnv    string        `yaml:"bind_password_env"`    // Environment variable name for password
 	StartTLS           bool          `yaml:"start_tls"`            // Use StartTLS
-	InsecureSkipVerify bool          `yaml:"insecure_skip_verify"` // Skip TLS verification (not recommended)
+	// InsecureSkipVerify is retained only to reject legacy unsafe configuration.
+	// Certificate verification cannot be disabled.
+	InsecureSkipVerify bool          `yaml:"insecure_skip_verify"`
 	Timeout            time.Duration `yaml:"timeout"`              // Connection timeout
 	PageSize           int           `yaml:"page_size"`            // Results per page (0 = no paging)
 	FollowReferrals    bool          `yaml:"follow_referrals"`     // Chase LDAP referrals

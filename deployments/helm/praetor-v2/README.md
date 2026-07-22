@@ -153,7 +153,7 @@ server:
   url: "ldaps://ldap.corp.example.com:636"
   bind_dn: "cn=svc-praetor,ou=svc,dc=corp,dc=example,dc=com"
   bind_password_env: PRAETOR_LDAP_BIND_PASSWORD   # sourced from secrets.ldapBindPassword
-  insecure_skip_verify: false                     # verify TLS against a real directory
+  ca_file: /etc/praetor/ldap/ca.crt               # optional private CA; verification is mandatory
 users:
   search_base: "ou=users,dc=corp,dc=example,dc=com"
 group_type:
@@ -171,8 +171,8 @@ team_map:                                         # keyed by team NAME
 
 > The `ldap` container in `docker-compose.yml` (osixia/openldap) is a **local-dev
 > mock only** — a stand-in for a real directory. Do not model production on it;
-> point `ldap.config` at your own LDAP/AD instead. `insecure_skip_verify: true` in
-> the demo config exists solely because the mock speaks plaintext `ldap://`.
+> point `ldap.config` at your own LDAP/AD instead. The demo mock speaks plaintext
+> `ldap://`; production directories should use verified LDAPS or StartTLS.
 
 ### Break-glass local superuser
 
