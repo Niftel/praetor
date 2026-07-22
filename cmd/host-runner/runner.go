@@ -539,7 +539,11 @@ func fetchArchive(archiveURL, destDir string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("archive HTTP %d", resp.StatusCode)
 	}
-	gz, err := gzip.NewReader(resp.Body)
+	return extractProjectArchive(resp.Body, destDir)
+}
+
+func extractProjectArchive(source io.Reader, destDir string) error {
+	gz, err := gzip.NewReader(source)
 	if err != nil {
 		return err
 	}
@@ -547,6 +551,11 @@ func fetchArchive(archiveURL, destDir string) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
 	}
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -562,21 +571,24 @@ func fetchArchive(archiveURL, destDir string) error {
 		if rel == "" {
 			continue
 		}
-		// Guard against path traversal (../ or absolute) in archive entries.
-		target := filepath.Join(destDir, rel)
-		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+		rel = filepath.FromSlash(rel)
+		if !filepath.IsLocal(rel) {
 			return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := root.MkdirAll(rel, 0o755); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			mode, err := validatedArchiveFileMode(hdr.Mode)
+			if err != nil {
+				return fmt.Errorf("archive entry %q: %w", hdr.Name, err)
+			}
+			if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
 				return err
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)
+			f, err := root.OpenFile(rel, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 			if err != nil {
 				return err
 			}
@@ -592,6 +604,19 @@ func fetchArchive(archiveURL, destDir string) error {
 		}
 	}
 	return nil
+}
+
+// validatedArchiveFileMode accepts only ordinary POSIX permission bits. Tar
+// modes are signed int64 values supplied by the archive, while os.FileMode is a
+// uint32. Validate the complete range before crossing that type boundary so a
+// negative or oversized value cannot truncate into an unintended permission.
+// Setuid, setgid, sticky, and file-type bits are not needed for extracted
+// playbook files and are rejected rather than silently discarded.
+func validatedArchiveFileMode(mode int64) (os.FileMode, error) {
+	if mode < 0 || mode > 0o777 {
+		return 0, fmt.Errorf("unsupported file mode %#o", mode)
+	}
+	return os.FileMode(mode) & os.ModePerm, nil // #nosec G115 -- mode is proven to be within 0..0777 above.
 }
 
 // stripFirstComponent removes the leading path element of a tar entry name
