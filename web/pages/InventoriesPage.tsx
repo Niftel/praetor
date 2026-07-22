@@ -9,12 +9,19 @@ import ResourceAccess from '../components/ResourceAccess';
 import { splitConnection, mergeConnection, emptyConnection, HostConnection } from '../lib/hostConnection';
 import {
   Plus, Trash2, Loader, Search, ChevronDown, ChevronRight, ArrowLeft,
-  Server, RefreshCw, Radio, Check, MoreHorizontal, Upload, Shield,
+  Server, RefreshCw, Radio, Check, MoreHorizontal, Upload, Shield, Bell,
 } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 import { useCapabilities } from '../lib/useCapabilities';
 import InventorySourceHistoryList from '../components/InventorySourceHistory';
+import NotificationPolicyManager, { NotificationPolicyEvent } from '../components/NotificationPolicyManager';
+
+const INVENTORY_SOURCE_NOTIFICATION_EVENTS: NotificationPolicyEvent[] = [
+  { id: 'started', label: 'Sync started', description: 'Sent once when an inventory synchronization begins.' },
+  { id: 'success', label: 'Sync successful', description: 'Sent when synchronization completes successfully.' },
+  { id: 'error', label: 'Sync failed', description: 'Sent with the source and organization name, without source configuration or credentials.' },
+];
 
 // Coerce an edited string back toward its JSON-native type (number / bool /
 // object) so round-tripping a var through the editor doesn't stringify it.
@@ -45,6 +52,7 @@ const InventoriesPage = () => {
   const [groupHosts, setGroupHosts] = useState<Record<number, number[]>>({});
   const [sources, setSources] = useState<any[]>([]);
   const [expandedSourceHistory, setExpandedSourceHistory] = useState<number | null>(null);
+  const [expandedSourcePolicies, setExpandedSourcePolicies] = useState<number | null>(null);
   const [credentials, setCredentials] = useState<any[]>([]);
 	const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([]);
 	const [sourceTypes, setSourceTypes] = useState<InventorySourceType[]>([]);
@@ -508,11 +516,13 @@ const InventoriesPage = () => {
                             <span className="font-mono text-[11px] text-dim">{s.source_kind}</span>
                             <span className="ml-auto font-mono text-[11px] text-dim max-[520px]:order-4 max-[520px]:basis-full max-[520px]:ml-0">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : 'never synced'}</span>
 							<button onClick={() => setExpandedSourceHistory(current => current === s.id ? null : s.id)} className="font-mono text-[10px] text-dim hover:text-ink" aria-expanded={expandedSourceHistory === s.id}>history</button>
+							<button onClick={() => setExpandedSourcePolicies(current => current === s.id ? null : s.id)} className="text-mut hover:text-acc" aria-label={`Notification routes for ${s.name}`} aria-expanded={expandedSourcePolicies === s.id} title="Notification routes"><Bell size={13} /></button>
 							{canSyncInventory && <button onClick={() => previewSource(s.id)} className="text-mut hover:text-ink" title="Test and preview without changing inventory"><Search size={14} /></button>}
 							{canSyncInventory && <button onClick={() => syncSource(s.id)} className="text-mut hover:text-acc" title="Sync now"><RefreshCw size={14} /></button>}
                             {canManageInventory && <button onClick={() => deleteSource(s.id)} className="text-faint hover:text-err" title="Delete source"><Trash2 size={13} /></button>}
                           </div>
 						  {expandedSourceHistory === s.id && selectedInventoryId && <InventorySourceHistoryList inventoryId={selectedInventoryId} sourceId={s.id} onTerminal={refreshHosts} canCancel={canSyncInventory} />}
+						  {expandedSourcePolicies === s.id && <div className="border-t border-line py-3"><NotificationPolicyManager organizationId={orgId} resourceType="inventory_source" resourceId={s.id} events={INVENTORY_SOURCE_NOTIFICATION_EVENTS} canManage={canManageInventory} compact /></div>}
                           </div>
                         ))}
                       </div>

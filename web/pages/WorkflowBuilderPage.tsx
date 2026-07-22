@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import { toast } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
 import { useCapabilities } from '../lib/useCapabilities';
+import NotificationPolicyManager, { NotificationPolicyEvent } from '../components/NotificationPolicyManager';
 import {
   ArrowLeft, Check, Play, Pause, ArrowDownToLine, ArrowUpFromLine, Plus, Trash2,
   Minus, Maximize2, GitFork, ChevronRight, ChevronDown,
@@ -15,6 +16,15 @@ import {
 const NODE_W = 158, NODE_H = 62, COL_GAP = 66, ROW_GAP = 26, MARGIN = 40;
 const EDGE_TYPES: WorkflowEdgeType[] = ['success', 'failure', 'always'];
 const EDGE_COLOR = { success: '#3ad07f', failure: '#f2685f', always: '#565f70' };
+const WORKFLOW_NOTIFICATION_EVENTS: NotificationPolicyEvent[] = [
+  { id: 'started', label: 'Started', description: 'Sent once when the workflow begins.' },
+  { id: 'success', label: 'Successful', description: 'Sent when the workflow completes successfully.' },
+  { id: 'error', label: 'Failed', description: 'Sent when the workflow reaches a failed terminal state.' },
+  { id: 'approval', label: 'Approval requested', description: 'Sent only to the team assigned to approve this run.', requiresTeam: true },
+  { id: 'approved', label: 'Approved', description: 'Sent only to the team assigned to approve this run.', requiresTeam: true },
+  { id: 'denied', label: 'Denied', description: 'Sent only to the team assigned to approve this run.', requiresTeam: true },
+  { id: 'timeout', label: 'Approval expired', description: 'Sent only to the team assigned to approve this run.', requiresTeam: true },
+];
 
 // Definition-mode node tint by type (no live status in the builder).
 const TYPE_TONE: Record<string, { led: string; icon: string; border: string }> = {
@@ -393,6 +403,11 @@ const WorkflowBuilderPage = () => {
               </div>
             )}
           </div>
+          {editingId && (
+            <div className="border-t border-line px-4 py-4">
+              <NotificationPolicyManager organizationId={orgId} resourceType="workflow_template" resourceId={editingId} events={WORKFLOW_NOTIFICATION_EVENTS} canManage compact />
+            </div>
+          )}
         </div>
       </div>
     </div>

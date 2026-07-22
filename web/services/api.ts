@@ -260,6 +260,13 @@ export const api = {
     createNotificationTemplate: (data: any) => fetchWithAuth('/notification-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     deleteNotificationTemplate: (id: number) => fetchWithAuth(`/notification-templates/${id}`, { method: 'DELETE' }),
     testNotificationTemplate: (id: number) => fetchWithAuth(`/notification-templates/${id}/test`, { method: 'POST' }).then(r => r.json()),
+    getNotificationPolicies: (resourceType: string, resourceId: number) => {
+        const query = new URLSearchParams({ resource_type: resourceType, resource_id: String(resourceId) });
+        return fetchWithAuth(`/notification-policies?${query}`).then(r => r.json());
+    },
+    createNotificationPolicy: (data: { notification_template_id: number; resource_type: string; resource_id: number; event: string; team_id?: number }) =>
+        fetchWithAuth('/notification-policies', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    deleteNotificationPolicy: (id: number) => fetchWithAuth(`/notification-policies/${id}`, { method: 'DELETE' }),
     getTemplateNotifications: (jtId: number) => fetchWithAuth(`/job-templates/${jtId}/notifications`).then(r => r.json()),
     attachTemplateNotification: (jtId: number, data: any) => fetchWithAuth(`/job-templates/${jtId}/notifications`, { method: 'POST', body: JSON.stringify(data) }),
     detachTemplateNotification: (jtId: number, ntId: number, event: string) => fetchWithAuth(`/job-templates/${jtId}/notifications/${ntId}/${event}`, { method: 'DELETE' }),
