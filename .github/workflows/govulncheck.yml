@@ -1,8 +1,6 @@
 name: Go vulnerability scan
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -13,24 +11,58 @@ permissions:
   contents: read
 
 concurrency:
-  group: govulncheck-${{ github.ref }}
-  cancel-in-progress: true
+  group: govulncheck-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  govulncheck:
-    name: govulncheck
+  classify:
+    name: Classify vulnerability inputs
+    runs-on: ubuntu-latest
+    outputs:
+      run_security: ${{ steps.plan.outputs.run_security }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Plan vulnerability scan
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: ./scripts/github-ci-plan.sh >> "$GITHUB_OUTPUT"
+
+  scan:
+    name: govulncheck scan
+    needs: classify
+    if: needs.classify.outputs.run_security == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
-
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-
       - name: Scan reachable Go code
         run: govulncheck ./...
+
+  govulncheck:
+    name: govulncheck
+    if: always()
+    needs: [classify, scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require selected vulnerability scan
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          SCAN_RESULT: ${{ needs.scan.result }}
+        run: |
+          test "$CLASSIFY_RESULT" = success
+          case "$SCAN_RESULT" in
+            success|skipped) ;;
+            *) echo "selected vulnerability scan finished with $SCAN_RESULT" >&2; exit 1 ;;
+          esac

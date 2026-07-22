@@ -1,9 +1,10 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test gosec release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset staging-pilot-access-plan staging-pilot-access-seed staging-pilot-access-status staging-pilot-journey-plan staging-pilot-journey-seed staging-pilot-journey-status staging-pilot-journey-run staging-pilot-journey-faults staging-pilot-credential-faults staging-pilot-readiness
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test workflow-lint verify-changed verify-changed-images secrets-execution-contract-test secrets-execution-e2e readiness-report-test gosec release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset staging-pilot-access-plan staging-pilot-access-seed staging-pilot-access-status staging-pilot-journey-plan staging-pilot-journey-seed staging-pilot-journey-status staging-pilot-journey-run staging-pilot-journey-faults staging-pilot-credential-faults staging-pilot-readiness
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
 GOSEC_VERSION ?= v2.28.0
 GOSEC_REPORT ?= $(CURDIR)/.gosec/gosec.sarif
+ACTIONLINT_VERSION ?= v1.7.12
 
 # Host-runner cross-compilation target. The binary is bootstrapped onto your
 # MANAGED hosts, so this is their CPU arch, not necessarily the build machine's.
@@ -36,6 +37,17 @@ deployment-contract-test:
 # Keep both local deployment paths immutable and manifest-driven.
 local-deploy-contract-test:
 	go test ./tests -run '^TestLocalDeployment'
+
+workflow-lint:
+	GOWORK=off go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+
+# Use the same path classifier as pull-request CI and run only affected gates.
+# Add image builds when changing Dockerfiles or validating a release candidate.
+verify-changed:
+	./scripts/verify-changed.sh
+
+verify-changed-images:
+	./scripts/verify-changed.sh --images
 
 # Live integration gate for the deployed Praetor + Secrets Service stack.
 secrets-execution-contract-test:
