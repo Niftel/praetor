@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,9 +55,12 @@ type JobStore interface {
 type JobsResource struct {
 	DB *sqlx.DB
 	*Authorizer
-	// IngestionURL is the base URL the API proxies run-log reads to. Resolved in
-	// main from env; empty falls back to the in-cluster default.
-	IngestionURL string
+	// ingestionBase is parsed and origin-validated once at startup. Request data
+	// can only contribute a UUID path segment and an integer cursor.
+	ingestionBase *url.URL
+	// ingestionClient does not follow redirects. This prevents the internal
+	// bearer token from being forwarded away from the configured origin.
+	ingestionClient *http.Client
 	// internalToken is the shared cluster secret the API presents to ingestion's
 	// authenticated log-read endpoint (the run-scoped GET logs is no longer open).
 	internalToken string
@@ -64,15 +68,52 @@ type JobsResource struct {
 	log           *slog.Logger
 }
 
-func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string, authz *Authorizer) *JobsResource {
+func NewJobsResource(db *sqlx.DB, ingestionURL, internalToken string, authz *Authorizer) (*JobsResource, error) {
+	base, err := parseIngestionBaseURL(ingestionURL)
+	if err != nil {
+		return nil, err
+	}
 	return &JobsResource{
 		DB:            db,
 		Authorizer:    authz,
-		IngestionURL:  ingestionURL,
+		ingestionBase: base,
+		ingestionClient: &http.Client{
+			Timeout: 30 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		internalToken: internalToken,
 		store:         store.NewJobStore(db),
 		log:           plog.New("api.jobs"),
+	}, nil
+}
+
+func parseIngestionBaseURL(raw string) (*url.URL, error) {
+	if strings.TrimSpace(raw) == "" {
+		raw = "http://ingestion:8081"
 	}
+	base, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse ingestion URL: %w", err)
+	}
+	if base.Scheme != "http" && base.Scheme != "https" {
+		return nil, fmt.Errorf("ingestion URL scheme must be http or https")
+	}
+	if base.Hostname() == "" {
+		return nil, fmt.Errorf("ingestion URL must include a host")
+	}
+	if base.User != nil {
+		return nil, fmt.Errorf("ingestion URL must not include user information")
+	}
+	if base.Path != "" && base.Path != "/" {
+		return nil, fmt.Errorf("ingestion URL must not include a path")
+	}
+	if base.RawQuery != "" || base.ForceQuery || base.Fragment != "" {
+		return nil, fmt.Errorf("ingestion URL must not include a query or fragment")
+	}
+	base.Path = ""
+	return base, nil
 }
 
 // authorizeRunRead allows reading a run/its events when the user can read the
@@ -399,10 +440,6 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := rs.IngestionURL
-	if base == "" {
-		base = "http://ingestion:8081"
-	}
 	// The upstream chunk query is exclusive (seq > since) and chunks start at
 	// seq 0, so a full fetch must pass since=-1 — defaulting to 0 would silently
 	// drop the first chunk (the start of the playbook output).
@@ -410,19 +447,14 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 	if since == "" {
 		since = "-1"
 	}
-	upstream := fmt.Sprintf("%s/api/v1/runs/%s/logs?since=%s", base, runID, url.QueryEscape(since))
-
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream, nil)
+	req, err := rs.newIngestionLogRequest(r.Context(), runID, since)
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	// ingestion's log-read endpoint is authenticated (in-cluster); present the
-	// shared internal token. Edge RBAC already happened above via authorizeRunRead.
-	if rs.internalToken != "" {
-		req.Header.Set("Authorization", "Bearer "+rs.internalToken)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	// #nosec G704 -- the origin is parsed and allowlisted at startup, the path is
+	// composed only from a parsed UUID, and this client refuses all redirects.
+	resp, err := rs.ingestionClient.Do(req)
 	if err != nil {
 		render.Render(w, r, ErrInternal(fmt.Errorf("reach ingestion logs: %w", err)))
 		return
@@ -437,6 +469,25 @@ func (rs *JobsResource) StreamRunLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+func (rs *JobsResource) newIngestionLogRequest(ctx context.Context, runID uuid.UUID, since string) (*http.Request, error) {
+	upstream := *rs.ingestionBase
+	upstream.Path = "/api/v1/runs/" + runID.String() + "/logs"
+	query := upstream.Query()
+	query.Set("since", since)
+	upstream.RawQuery = query.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	// Ingestion's log-read endpoint is authenticated (in-cluster); present the
+	// shared internal token. Edge RBAC already happened via authorizeRunRead.
+	if rs.internalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+rs.internalToken)
+	}
+	return req, nil
 }
 
 // CreateJobEvent ingests a new event (used by host-runner)

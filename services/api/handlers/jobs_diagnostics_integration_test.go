@@ -53,7 +53,10 @@ func TestRunDiagnosticsPaginationAndRBAC(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, readerID, deniedID)
 	})
 
-	resource := handlers.NewJobsResource(db, "", "", handlers.NewAuthorizer(db))
+	resource, err := handlers.NewJobsResource(db, "", "", handlers.NewAuthorizer(db))
+	if err != nil {
+		t.Fatal(err)
+	}
 	first := callDiagnostics(t, resource, runID, "?kind=host&limit=2", readerID)
 	if len(first.Events) != 2 || first.Events[0].Seq != 1 || first.Events[1].Seq != 2 || first.NextCursor == nil || *first.NextCursor != 2 {
 		t.Fatalf("unstable first page: %#v", first)

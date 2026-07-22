@@ -41,7 +41,10 @@ func TestRouterTableGolden(t *testing.T) {
 	db := sqlx.NewDb(sqlDB, "postgres")
 	t.Cleanup(func() { _ = db.Close() })
 
-	r := NewRouter(db, Config{})
+	r, err := NewRouter(db, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var lines []string
 	err = chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
@@ -75,5 +78,11 @@ func TestRouterTableGolden(t *testing.T) {
 	if got != string(want) {
 		t.Errorf("API route table drifted.\n"+
 			"If intentional, regenerate with:  go test ./services/api -run RouterTable -update\n\n--- got ---\n%s", got)
+	}
+}
+
+func TestNewRouterRejectsUnsafeIngestionURL(t *testing.T) {
+	if _, err := NewRouter(nil, Config{IngestionURL: "file:///etc/passwd"}); err == nil {
+		t.Fatal("NewRouter accepted an unsafe ingestion URL")
 	}
 }

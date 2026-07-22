@@ -183,7 +183,10 @@ func TestTemplateExecuteRBAC(t *testing.T) {
 	db := rbacTestDB(t)
 	defer db.Close()
 	tmplRes := handlers.NewTemplatesResource(db, handlers.NewAuthorizer(db))
-	jobsRes := handlers.NewJobsResource(db, "", "", handlers.NewAuthorizer(db))
+	jobsRes, err := handlers.NewJobsResource(db, "", "", handlers.NewAuthorizer(db))
+	if err != nil {
+		t.Fatal(err)
+	}
 	access := rbac.NewStore(db, testResourceTables)
 
 	uniq := time.Now().UnixNano()
