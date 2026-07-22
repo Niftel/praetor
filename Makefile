@@ -1,7 +1,9 @@
-.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset staging-pilot-access-plan staging-pilot-access-seed staging-pilot-access-status staging-pilot-journey-plan staging-pilot-journey-seed staging-pilot-journey-status staging-pilot-journey-run staging-pilot-journey-faults staging-pilot-credential-faults staging-pilot-readiness
+.PHONY: build compat-check contract-test deployment-contract-test local-deploy-contract-test secrets-execution-contract-test secrets-execution-e2e readiness-report-test gosec release-preflight release-preflight-remote release-plan workspace-health shared-module-health shared-module-health-remote host-runner release-host-runner mirror-python mirror-pip execpack test chaos-test clean run-api up up-demo down restart local-cluster-create local-cluster-status local-cluster-start local-cluster-stop local-cluster-recover local-cluster-update local-cluster-release staging-environment-plan staging-environment-provision staging-environment-status pilot-host-plan pilot-host-provision pilot-host-status pilot-host-reset staging-pilot-access-plan staging-pilot-access-seed staging-pilot-access-status staging-pilot-journey-plan staging-pilot-journey-seed staging-pilot-journey-status staging-pilot-journey-run staging-pilot-journey-faults staging-pilot-credential-faults staging-pilot-readiness
 
 BINARY_DIR=bin
 API_BINARY=$(BINARY_DIR)/praetor-api
+GOSEC_VERSION ?= v2.28.0
+GOSEC_REPORT ?= $(CURDIR)/.gosec/gosec.sarif
 
 # Host-runner cross-compilation target. The binary is bootstrapped onto your
 # MANAGED hosts, so this is their CPU arch, not necessarily the build machine's.
@@ -58,6 +60,14 @@ readiness-report-test:
 	bash -n ./scripts/generate-readiness-report.sh
 	bash -n ./scripts/validate-delegated-api-e2e.sh
 	bash -n ./scripts/wait-for-postgres.sh
+
+# Run the same pinned Go security scan locally and in CI. The complete report is
+# uploaded to code scanning; existing high-severity findings are baselined so
+# only new regressions block development.
+gosec:
+	mkdir -p "$(dir $(GOSEC_REPORT))"
+	GOWORK=off go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) -no-fail -fmt sarif -out "$(GOSEC_REPORT)" ./...
+	./scripts/check-gosec-baseline.sh "$(GOSEC_REPORT)"
 
 # A release preflight intentionally fails while the manifest is marked
 # development. The remote form also verifies GHCR images and Go module tags.

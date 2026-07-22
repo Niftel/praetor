@@ -6,7 +6,7 @@ on:
   pull_request_target:
     types: [opened, edited, reopened, synchronize, closed]
   workflow_run:
-    workflows: ["CI", "CodeQL", "Go vulnerability scan", "Image"]
+    workflows: ["CI", "CodeQL", "Go vulnerability scan", "Go security scan", "Image"]
     types: [completed]
   workflow_dispatch:
     inputs:
