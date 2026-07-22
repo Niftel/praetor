@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -495,6 +496,20 @@ func fetchProject(projectURL, ref, destDir string) error {
 		}
 	}
 	log.Printf("Cloning project from %s into %s", projectURL, destDir)
+	if isGitCommitID(ref) {
+		commands := [][]string{
+			{"init", destDir},
+			{"-C", destDir, "remote", "add", "origin", projectURL},
+			{"-C", destDir, "fetch", "--depth=1", "origin", ref},
+			{"-C", destDir, "checkout", "--detach", "FETCH_HEAD"},
+		}
+		for _, args := range commands {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				return fmt.Errorf("project commit fetch failed at git %s: %v, output: %s", args[0], err, string(out))
+			}
+		}
+		return nil
+	}
 	args := []string{"clone", "--depth=1"}
 	if ref != "" {
 		args = append(args, "--branch", ref)
@@ -504,6 +519,14 @@ func fetchProject(projectURL, ref, destDir string) error {
 		return fmt.Errorf("project fetch failed: no HTTP archive and git clone failed: %v, output: %s", err, string(out))
 	}
 	return nil
+}
+
+func isGitCommitID(ref string) bool {
+	if len(ref) != 40 && len(ref) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(ref)
+	return err == nil
 }
 
 // archiveURLFor derives the archive endpoint for an http(s) git URL, matching
