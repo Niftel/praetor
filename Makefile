@@ -31,11 +31,11 @@ contract-test:
 
 # Keep deployable health probes synchronized with routes registered by the API.
 deployment-contract-test:
-	go test ./tests -run '^TestHelmAPIProbeRoutes$$'
+	GOWORK=off go test ./tests -run '^TestHelmAPIProbeRoutes$$'
 
 # Keep both local deployment paths immutable and manifest-driven.
 local-deploy-contract-test:
-	go test ./tests -run '^TestLocalDeployment'
+	GOWORK=off go test ./tests -run '^TestLocalDeployment'
 
 # Live integration gate for the deployed Praetor + Secrets Service stack.
 secrets-execution-contract-test:

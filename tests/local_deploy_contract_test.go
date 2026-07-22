@@ -30,6 +30,23 @@ type generatedHelmValues struct {
 	ImageTags map[string]string `yaml:"imageTags"`
 }
 
+type quotaSafeDeploymentValues struct {
+	DeploymentStrategy struct {
+		Type          string `yaml:"type"`
+		RollingUpdate struct {
+			MaxSurge       int `yaml:"maxSurge"`
+			MaxUnavailable int `yaml:"maxUnavailable"`
+		} `yaml:"rollingUpdate"`
+	} `yaml:"deploymentStrategy"`
+	Migrator struct {
+		TTLSecondsAfterFinished int `yaml:"ttlSecondsAfterFinished"`
+		Resources               struct {
+			Requests map[string]string `yaml:"requests"`
+			Limits   map[string]string `yaml:"limits"`
+		} `yaml:"resources"`
+	} `yaml:"migrator"`
+}
+
 func TestLocalDeploymentReleaseValuesMatchCompatibilityManifest(t *testing.T) {
 	root := repositoryRoot(t)
 
@@ -295,7 +312,7 @@ func TestProductValidationJourneyPlanner(t *testing.T) {
 	script := filepath.Join(root, "scripts", "plan-product-validation.sh")
 	tests := []struct {
 		name, event, journey, paths string
-		want                         map[string]string
+		want                        map[string]string
 	}{
 		{"dynamic PR is focused", "pull_request", "all", "scripts/validate-dynamic-inventory-e2e.sh\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "false", "run_readiness": "false"}},
 		{"generic fixture PR is complete", "pull_request", "all", "deployments/product-validation/fixture.yaml\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "true", "run_readiness": "true"}},
@@ -572,14 +589,51 @@ func TestStagingIntegrationsUseTLSAndPersistentState(t *testing.T) {
 	}
 }
 
-func TestCompletedMigratorReleasesRolloutQuotaQuickly(t *testing.T) {
+func TestQuotaConstrainedDeploymentsAvoidSurgeAndKeepMigratorObservable(t *testing.T) {
 	root := repositoryRoot(t)
+	for _, relativePath := range []string{
+		filepath.Join("deployments", "helm", "praetor-v2", "ci", "values-k3d-local.yaml"),
+		filepath.Join("deployments", "staging", "values.yaml"),
+	} {
+		raw, err := os.ReadFile(filepath.Join(root, relativePath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var values quotaSafeDeploymentValues
+		if err := yaml.Unmarshal(raw, &values); err != nil {
+			t.Fatalf("decode %s: %v", relativePath, err)
+		}
+		if values.DeploymentStrategy.Type != "RollingUpdate" ||
+			values.DeploymentStrategy.RollingUpdate.MaxSurge != 0 ||
+			values.DeploymentStrategy.RollingUpdate.MaxUnavailable != 1 {
+			t.Errorf("%s must use a zero-surge rolling update, got %+v", relativePath, values.DeploymentStrategy)
+		}
+		if values.Migrator.TTLSecondsAfterFinished < 600 {
+			t.Errorf("%s migrator TTL = %d, must outlive the deployment pipeline wait", relativePath, values.Migrator.TTLSecondsAfterFinished)
+		}
+		if values.Migrator.Resources.Requests["cpu"] == "" || values.Migrator.Resources.Limits["cpu"] == "" {
+			t.Errorf("%s must bound migrator CPU requests and limits", relativePath)
+		}
+	}
+
+	for _, name := range []string{"api", "consumer", "ingestion", "reconciler", "scheduler", "ui"} {
+		raw, err := os.ReadFile(filepath.Join(root, "deployments", "helm", "praetor-v2", "templates", name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), ".Values.deploymentStrategy") {
+			t.Errorf("%s deployment must apply the configured rollout strategy", name)
+		}
+	}
+
 	raw, err := os.ReadFile(filepath.Join(root, "deployments", "helm", "praetor-v2", "templates", "migrator-job.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "ttlSecondsAfterFinished: 30") {
-		t.Fatal("completed migration pods must release staging rollout quota within 30 seconds")
+	for _, required := range []string{".Values.migrator.ttlSecondsAfterFinished", ".Values.migrator.resources"} {
+		if !strings.Contains(string(raw), required) {
+			t.Errorf("migrator template must use %s", required)
+		}
 	}
 }
 

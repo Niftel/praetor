@@ -3,6 +3,11 @@
 # the URL-based env and never silently drops ingress/LDAP again. Committed so it
 # is the single source of truth for the local deploy. Dev-only secrets.
 allowInsecureDefaults: false
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
 bootstrapAdmin:
   enabled: true
   password: admin
@@ -33,12 +38,32 @@ image:
   pullPolicy: IfNotPresent
   registry: ""
   tag: dev
+api:
+  extraEnv:
+    - name: PRAETOR_NOTIFICATION_ALLOWED_HOSTS
+      value: praetor-validation-notification-sink
+consumer:
+  extraEnv:
+    - name: PRAETOR_NOTIFICATION_ALLOWED_HOSTS
+      value: praetor-validation-notification-sink
+migrator:
+  ttlSecondsAfterFinished: 900
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 ingestion:
   logStoreMaxMB: 128
 scheduler:
   # Lab: recover fast. A remote job whose result never reached ingestion is handed
   # to the reconciler after 90s instead of the 10m prod default.
   reconcileQueuedTimeout: "90s"
+  extraEnv:
+    - name: PRAETOR_NOTIFICATION_ALLOWED_HOSTS
+      value: praetor-validation-notification-sink
 reconciler:
   # HA: two replicas, safe because candidates are claimed with FOR UPDATE SKIP LOCKED
   # and leased via reconcile_after — the two pods partition each batch, never

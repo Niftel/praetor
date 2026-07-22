@@ -7,6 +7,10 @@ metadata:
     app.kubernetes.io/component: consumer
 spec:
   replicas: {{ .Values.consumer.replicas }}
+  {{- with .Values.deploymentStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "praetor.selectorLabels" . | nindent 6 }}

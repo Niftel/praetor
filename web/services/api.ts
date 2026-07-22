@@ -259,6 +259,7 @@ export const api = {
     getNotificationTemplates: (orgId: number) => fetchWithAuth(`/notification-templates?organization_id=${orgId}`).then(r => r.json()),
     createNotificationTemplate: (data: any) => fetchWithAuth('/notification-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     deleteNotificationTemplate: (id: number) => fetchWithAuth(`/notification-templates/${id}`, { method: 'DELETE' }),
+    testNotificationTemplate: (id: number) => fetchWithAuth(`/notification-templates/${id}/test`, { method: 'POST' }).then(r => r.json()),
     getTemplateNotifications: (jtId: number) => fetchWithAuth(`/job-templates/${jtId}/notifications`).then(r => r.json()),
     attachTemplateNotification: (jtId: number, data: any) => fetchWithAuth(`/job-templates/${jtId}/notifications`, { method: 'POST', body: JSON.stringify(data) }),
     detachTemplateNotification: (jtId: number, ntId: number, event: string) => fetchWithAuth(`/job-templates/${jtId}/notifications/${ntId}/${event}`, { method: 'DELETE' }),

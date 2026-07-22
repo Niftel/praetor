@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
@@ -86,7 +89,7 @@ func (h *NotificationsResource) CreateNotificationTemplate(w http.ResponseWriter
 		Config           map[string]string `json:"config"`
 		URL              string            `json:"url"` // legacy shorthand for config.url
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" || body.OrganizationID <= 0 {
 		render.ErrInvalidRequest(fmt.Errorf("name required")).Render(w, r)
 		return
 	}
@@ -108,18 +111,87 @@ func (h *NotificationsResource) CreateNotificationTemplate(w http.ResponseWriter
 		render.ErrInvalidRequest(fmt.Errorf("unknown notification type %q", body.NotificationType)).Render(w, r)
 		return
 	}
+	for _, field := range backend.ConfigFields() {
+		if field.ID != "url" {
+			continue
+		}
+		if err := notify.ValidateDestination(r.Context(), body.Config[field.ID]); err != nil {
+			render.ErrInvalidRequest(err).Render(w, r)
+			return
+		}
+	}
 	cfg, err := notify.EncryptConfig(backend, body.Config)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
 		return
 	}
 
-	id, err := h.store.CreateTemplate(r.Context(), body.OrganizationID, body.Name, body.NotificationType, cfg)
+	id, err := h.store.CreateTemplate(r.Context(), body.OrganizationID, strings.TrimSpace(body.Name), body.NotificationType, cfg)
 	if err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
 	render.Created(w, r, map[string]interface{}{"id": id})
+}
+
+type notificationDeliveryTarget struct {
+	ID               int64           `db:"id"`
+	OrganizationID   int64           `db:"organization_id"`
+	Name             string          `db:"name"`
+	NotificationType string          `db:"notification_type"`
+	Config           json.RawMessage `db:"config"`
+}
+
+// TestNotificationTemplate POST /api/v1/notification-templates/{id}/test
+// sends a bounded synthetic message through the same decrypt-and-deliver path
+// used by lifecycle notifications. Stored config remains server-side and is
+// never serialized into the response.
+func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		render.ErrInvalidRequest(fmt.Errorf("invalid notification template id")).Render(w, r)
+		return
+	}
+	var target notificationDeliveryTarget
+	if err := h.DB.GetContext(r.Context(), &target, `
+		SELECT id, organization_id, name, notification_type, config
+		FROM notification_templates WHERE id = $1`, id); err != nil {
+		if err == sql.ErrNoRows {
+			render.ErrNotFound(err).Render(w, r)
+			return
+		}
+		render.ErrInternal(err).Render(w, r)
+		return
+	}
+	if !h.authorizeOrgRole(w, r, target.OrganizationID, rbac.NotificationAdminRole) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	err = notify.SendOne(ctx, target.NotificationType, target.Config, notify.Message{
+		JobID:   target.ID,
+		JobName: target.Name,
+		Event:   "test",
+		Status:  "test notification delivered",
+		Kind:    "notification target",
+	})
+	if err != nil {
+		failureCode := "delivery_failed"
+		if ctx.Err() != nil {
+			failureCode = "delivery_timeout"
+		}
+		// Delivery errors can contain a webhook URL whose path embeds a secret.
+		// Record only bounded identifiers and a stable failure code.
+		logger.Warn("notification test delivery failed", "notification_template_id", target.ID, "organization_id", target.OrganizationID, "notification_type", target.NotificationType, "failure_code", failureCode)
+		(&render.ErrorResponse{Err: err, HTTPStatusCode: http.StatusBadGateway, ErrorText: "Test notification could not be delivered (" + failureCode + ")"}).Render(w, r)
+		return
+	}
+	render.JSON(w, r, map[string]interface{}{
+		"status":                   "delivered",
+		"notification_template_id": target.ID,
+		"tested_at":                time.Now().UTC(),
+	})
 }
 
 // DeleteNotificationTemplate DELETE /api/v1/notification-templates/{id}

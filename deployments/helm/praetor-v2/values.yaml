@@ -43,6 +43,11 @@ imageTags:
 # Release-candidate environments should populate every first-party component.
 imageDigests: {}
 
+# Optional strategy shared by stateless Deployments. Leave empty for the
+# Kubernetes rolling-update default. Resource-constrained local environments
+# can set maxSurge: 0 and maxUnavailable: 1 to avoid temporary quota spikes.
+deploymentStrategy: {}
+
 serviceAccount:
   create: true
   name: ""
@@ -171,6 +176,12 @@ consumer:
   resources: {}
   podAnnotations: {}
   extraEnv: []
+
+migrator:
+  # Must outlive Helm's longest configured --wait timeout so the waiter cannot
+  # observe a completed Job disappearing and report a false failed release.
+  ttlSecondsAfterFinished: 900
+  resources: {}
 
 reconciler:
   # Safe to scale >1: candidates are claimed with FOR UPDATE SKIP LOCKED and leased

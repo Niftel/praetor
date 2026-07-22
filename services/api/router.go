@@ -274,6 +274,7 @@ func NewRouter(db *sqlx.DB, cfg Config) (*chi.Mux, error) {
 		r.Get("/notification-templates", notifications.ListNotificationTemplates)
 		r.Post("/notification-templates", notifications.CreateNotificationTemplate)
 		r.Delete("/notification-templates/{id}", notifications.DeleteNotificationTemplate)
+		r.Post("/notification-templates/{id}/test", notifications.TestNotificationTemplate)
 
 		// Workflows (DAG of templates with success/failure/approval edges)
 		wf := handlers.NewWorkflowsResource(db, authz)

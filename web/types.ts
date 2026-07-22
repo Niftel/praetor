@@ -308,6 +308,32 @@ export interface Organization {
   modified_at?: string;
 }
 
+export interface NotificationField {
+  id: string;
+  label: string;
+  type: 'text' | 'password' | 'textarea';
+  secret?: boolean;
+  default?: string;
+}
+
+export interface NotificationType {
+  type: string;
+  fields: NotificationField[];
+}
+
+export interface NotificationTarget {
+  id: number;
+  organization_id: number;
+  name: string;
+  notification_type: string;
+}
+
+export interface NotificationTestResult {
+  status: 'delivered';
+  notification_template_id: number;
+  tested_at: string;
+}
+
 // Workflows
 export type WorkflowNodeType = 'job' | 'approval' | 'webhook_in' | 'webhook_out';
 export type WorkflowEdgeType = 'success' | 'failure' | 'always';
