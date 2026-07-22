@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	secretsclient "github.com/Niftel/praetor-secrets/client"
@@ -13,6 +18,7 @@ import (
 	"github.com/praetordev/env"
 	"github.com/praetordev/plog"
 	"github.com/praetordev/praetor/services/api"
+	modelAuth "github.com/praetordev/praetor/services/api/middleware"
 )
 
 func main() {
@@ -43,6 +49,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("secrets service misconfigured: %v", err)
 	}
+	activityTimeout, err := time.ParseDuration(env.String("PRAETOR_ACTIVITY_WRITE_TIMEOUT", "2s"))
+	if err != nil {
+		log.Fatalf("invalid PRAETOR_ACTIVITY_WRITE_TIMEOUT: %v", err)
+	}
+	if activityTimeout <= 0 {
+		log.Fatal("PRAETOR_ACTIVITY_WRITE_TIMEOUT must be positive")
+	}
+	activityRecorder := modelAuth.NewActivityRecorder(context.Background(), database, activityTimeout)
 	router, err := api.NewRouter(database, api.Config{
 		CredentialSecrets:         credentialSecrets,
 		IngestionURL:              env.String("INGESTION_URL", ""),
@@ -52,14 +66,40 @@ func main() {
 		RBACPolicySHA256:          env.String("PRAETOR_RBAC_POLICY_SHA256", ""),
 		RBACPolicyRefreshInterval: refreshInterval,
 		RBACDecisionAudit:         auditDecisions,
+		ActivityRecorder:          activityRecorder,
 	})
 	if err != nil {
 		log.Fatalf("API configuration invalid: %v", err)
 	}
 
 	fmt.Printf("Praetor API Service starting on port %s...\n", port)
-	if err := http.ListenAndServe(":"+port, router); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	server := &http.Server{Addr: ":" + port, Handler: router, ReadHeaderTimeout: 10 * time.Second}
+	serviceCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	serveError := make(chan error, 1)
+	go func() { serveError <- server.ListenAndServe() }()
+
+	var serverFailure error
+	select {
+	case <-serviceCtx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("API shutdown failed: %v", err)
+		}
+		cancel()
+	case err := <-serveError:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverFailure = err
+		}
+	}
+
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), activityTimeout+time.Second)
+	if err := activityRecorder.Close(drainCtx); err != nil {
+		log.Printf("activity audit drain failed: %v", err)
+	}
+	cancelDrain()
+	if serverFailure != nil {
+		log.Fatalf("API server failed: %v", serverFailure)
 	}
 }
 

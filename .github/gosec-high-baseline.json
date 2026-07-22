@@ -29,13 +29,6 @@
       "message": "integer overflow conversion int64 -> uint32",
       "snippet": "f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)",
       "tracking_issue": 305
-    },
-    {
-      "rule": "G118",
-      "file": "services/api/middleware/activity.go",
-      "message": "Goroutine uses context.Background/TODO while request-scoped context is available",
-      "snippet": "go func(uid int64, uname, act, rtype string, rid *int64, method, path string, code int) {",
-      "tracking_issue": 304
     }
   ]
 }
