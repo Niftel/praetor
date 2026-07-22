@@ -83,7 +83,7 @@ grant_team_role() {
   local content_type="$1" object_id="$2" role_name="$3" team_id="$4" role_id
   role_id="$(get "$ADMIN_TOKEN" "role-definitions?content_type=$content_type" | jq -er --arg name "$role_name" '.[] | select(.name == $name) | .id' | head -n1)"
   request "$ADMIN_TOKEN" POST access "$(jq -nc --arg type "$content_type" --argjson object "$object_id" --argjson role "$role_id" --argjson team "$team_id" '{content_type:$type,object_id:$object,role_definition_id:$role,team_id:$team}')"
-  [[ "$STATUS" == 201 || "$STATUS" == 409 ]] || die "grant $role_name returned $STATUS: $RESPONSE"
+  [[ "$STATUS" == 201 || "$STATUS" == 204 || "$STATUS" == 409 ]] || die "grant $role_name returned $STATUS: $RESPONSE"
 }
 wait_job() {
   local token="$1" job_id="$2" expected="$3" state=""

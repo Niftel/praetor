@@ -23,6 +23,7 @@ func TestDynamicInventoryStagingJourneyContract(t *testing.T) {
 		"invalid-credential", "provider_acquisition_failed", "provider-timeout", "provider_timeout", "time.sleep(70)", "record_failure", "phase:$phase",
 		"inventory_source_id:$source", "dynamic-inventory", "secret-redaction", "PHASE=\"cleanup\"",
 		"resource_cleanup true", "credentials/$CREDENTIAL_ID",
+		`"$STATUS" == 204`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("dynamic inventory journey is missing %q", required)
