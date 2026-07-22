@@ -16,6 +16,7 @@ EVIDENCE_FILE="${PRAETOR_DYNAMIC_INVENTORY_EVIDENCE_FILE:-}"
 PORT_FORWARD_PID=""
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/praetor-dynamic-inventory.XXXXXX")"
 PHASE="bootstrap"
+INVENTORY_ID=""; SOURCE_ID=""; CREDENTIAL_ID=""; SCHEDULE_ID=""
 
 die() { echo "error: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"; }
@@ -50,6 +51,24 @@ request() {
   [[ -z "$body" ]] || args+=(-H 'Content-Type: application/json' -d "$body")
   STATUS="$(curl "${args[@]}" "$API/$path")"; RESPONSE="$(cat "$output")"
 }
+resource_cleanup() {
+  local strict="${1:-false}" spec status failed=0
+  [[ -n "${ADMIN_TOKEN:-}" ]] || return 0
+  for spec in \
+    "${SCHEDULE_ID:+schedules/$SCHEDULE_ID}" \
+    "${SOURCE_ID:+inventories/$INVENTORY_ID/sources/$SOURCE_ID}" \
+    "${CREDENTIAL_ID:+credentials/$CREDENTIAL_ID}" \
+    "${INVENTORY_ID:+inventories/$INVENTORY_ID}"; do
+    [[ -z "$spec" ]] && continue
+    request "$ADMIN_TOKEN" DELETE "$spec"
+    if [[ "$STATUS" != 204 && "$STATUS" != 404 ]]; then
+      echo "error: cleanup $spec returned $STATUS" >&2; failed=1
+    fi
+  done
+  SCHEDULE_ID=""; SOURCE_ID=""; CREDENTIAL_ID=""; INVENTORY_ID=""
+  [[ "$strict" != true || "$failed" == 0 ]]
+}
+trap 'resource_cleanup false; cleanup' EXIT
 get() { curl -fsS -H "Authorization: Bearer $1" "$API/$2"; }
 items() { jq -c 'if type == "object" and has("items") then .items else . end'; }
 find_id() { get "$ADMIN_TOKEN" "$1" | items | jq -r --arg name "$2" '.[] | select(.name == $name) | .id' | head -n1; }
@@ -103,13 +122,15 @@ if [[ -z "$INVENTORY_ID" ]]; then
   [[ "$STATUS" == 201 ]] || die "create inventory returned $STATUS: $RESPONSE"; INVENTORY_ID="$(jq -er .id <<<"$RESPONSE")"
 fi
 
-CREDENTIAL_TYPE_ID="$(ensure_post credential-types/ credential-types/ "$PREFIX Credential" "$(jq -nc --arg name "$PREFIX Credential" '{name:$name,description:"Synthetic provider bearer token",inputs:{fields:[{id:"token",label:"Token",type:"password",secret:true}]},injectors:{env:{PRAETOR_INVENTORY_TOKEN:"{{ token }}"}}}')")"
-CREDENTIAL_ID="$(ensure_post credentials credentials "$PREFIX Credential" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{token:$secret}}')")"
-[[ "$(get "$ADMIN_TOKEN" "credentials/$CREDENTIAL_ID" | jq -r .inputs.token)" == '$encrypted$' ]] || die "provider credential is not sealed"
+PHASE="credential-and-source"
+CREDENTIAL_TYPE_ID="$(find_id credential-types/ Machine)"; [[ -n "$CREDENTIAL_TYPE_ID" ]] || die "built-in Machine credential type is missing"
+CREDENTIAL_ID="$(ensure_post credentials credentials "$PREFIX Credential" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:$secret}}')")"
+[[ "$(get "$ADMIN_TOKEN" "credentials/$CREDENTIAL_ID" | jq -r .inputs.password)" == '$encrypted$' ]] || die "provider credential is not sealed"
 
 SOURCE_SCRIPT='#!/usr/bin/env python3
 import os, time, urllib.request
-token = os.environ["PRAETOR_INVENTORY_TOKEN"]
+with open(os.environ["ANSIBLE_PASSWORD_FILE"], encoding="utf-8") as credential_file:
+    token = credential_file.read()
 if token == "praetor-timeout-fixture":
     time.sleep(70)
 request = urllib.request.Request("http://praetor-validation-inventory-provider:8080/inventory")
@@ -161,27 +182,27 @@ HOSTS="$(get "$OPERATOR_TOKEN" "inventories/$INVENTORY_ID/hosts/" | items)"
 jq -e '[.[] | select(.name == "dynamic-beta" and .enabled == false)] | length == 1' <<<"$HOSTS" >/dev/null || die "missing host was not safely disabled"
 
 PHASE="invalid-credential"
-request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{token:"invalid-fixture-token"}}')"
+request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:"invalid-fixture-token"}}')"
 [[ "$STATUS" == 200 ]] || die "invalidate credential returned $STATUS: $RESPONSE"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
 [[ "$STATUS" == 201 ]] || die "invalid-credential sync returned $STATUS: $RESPONSE"; INVALID_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$INVALID_JOB" failed
 INVALID_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 3)"
 jq -e '.results[0] | .status == "failed" and .diagnostic_code == "provider_acquisition_failed" and (.diagnostic_details == {})' <<<"$INVALID_HISTORY" >/dev/null || die "invalid credential did not fail safely"
 ! grep -Fq 'invalid-fixture-token' <<<"$INVALID_HISTORY" || die "invalid credential leaked into history"
-request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{token:$secret}}')"
+request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:$secret}}')"
 [[ "$STATUS" == 200 ]] || die "restore credential returned $STATUS: $RESPONSE"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
 [[ "$STATUS" == 201 ]] || die "credential recovery sync returned $STATUS: $RESPONSE"; CREDENTIAL_RECOVERY_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$CREDENTIAL_RECOVERY_JOB" successful
 wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 4 >/dev/null
 
 PHASE="provider-timeout"
-request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{token:"praetor-timeout-fixture"}}')"
+request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:"praetor-timeout-fixture"}}')"
 [[ "$STATUS" == 200 ]] || die "set timeout credential returned $STATUS: $RESPONSE"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
 [[ "$STATUS" == 201 ]] || die "timeout sync returned $STATUS: $RESPONSE"; TIMEOUT_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$OPERATOR_TOKEN" "$TIMEOUT_JOB" failed
 TIMEOUT_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 5)"
 jq -e '.results[0] | .status == "failed" and .diagnostic_code == "provider_timeout" and (.diagnostic_details == {})' <<<"$TIMEOUT_HISTORY" >/dev/null || die "provider timeout did not fail safely"
-request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{token:$secret}}')"
+request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:$secret}}')"
 [[ "$STATUS" == 200 ]] || die "restore credential after timeout returned $STATUS: $RESPONSE"
 
 PHASE="malformed-provider-output"
@@ -214,9 +235,6 @@ if [[ -n "$EVIDENCE_FILE" ]]; then umask 077; printf '%s\n' "$EVIDENCE" >"$EVIDE
 printf '%s\n' "$EVIDENCE"
 
 PHASE="cleanup"
-for spec in "schedules/$SCHEDULE_ID" "inventories/$INVENTORY_ID/sources/$SOURCE_ID" "credentials/$CREDENTIAL_ID" "inventories/$INVENTORY_ID" "credential-types/$CREDENTIAL_TYPE_ID"; do
-  request "$ADMIN_TOKEN" DELETE "$spec"
-  [[ "$STATUS" == 204 ]] || die "cleanup $spec returned $STATUS: $RESPONSE"
-done
+resource_cleanup true || die "dynamic inventory fixture cleanup failed"
 PHASE="complete"
 trap - ERR

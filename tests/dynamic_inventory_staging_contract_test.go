@@ -15,13 +15,14 @@ func TestDynamicInventoryStagingJourneyContract(t *testing.T) {
 	}
 	script := string(raw)
 	for _, required := range []string{
-		"PRAETOR_DYNAMIC_INVENTORY_EVIDENCE_FILE", "PRAETOR_INVENTORY_TOKEN",
+		"PRAETOR_DYNAMIC_INVENTORY_EVIDENCE_FILE", "ANSIBLE_PASSWORD_FILE", "built-in Machine credential type",
 		"source_type:\"custom\"", "source_kind:\"script\"", "reconciliation_policy:\"disable_missing\"",
 		"/preview", "/sync", "/history", "Inventory Update", "Credential Use",
 		"hosts_added == 2", "hosts_updated == 1", "hosts_disabled == 1", "hosts_unchanged == 2",
 		"diagnostic_details == {}", "unauthorized team", "credential leaked into history",
 		"invalid-credential", "provider_acquisition_failed", "provider-timeout", "provider_timeout", "time.sleep(70)", "record_failure", "phase:$phase",
 		"inventory_source_id:$source", "dynamic-inventory", "secret-redaction", "PHASE=\"cleanup\"",
+		"resource_cleanup true", "credentials/$CREDENTIAL_ID",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("dynamic inventory journey is missing %q", required)

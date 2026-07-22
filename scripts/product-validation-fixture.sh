@@ -138,7 +138,6 @@ BEGIN;
 DELETE FROM schedules WHERE name = 'Dynamic Inventory E2E Schedule';
 DELETE FROM inventory_sources WHERE name = 'Dynamic Inventory E2E Source';
 DELETE FROM credentials WHERE name = 'Dynamic Inventory E2E Credential';
-DELETE FROM credential_types WHERE name = 'Dynamic Inventory E2E Credential' AND managed = false;
 DELETE FROM inventories WHERE name = 'Dynamic Inventory E2E Inventory';
 DELETE FROM workflow_templates WHERE name = 'Praetor Validation Workflow';
 DELETE FROM workflow_templates WHERE name = 'Praetor Validation LDAP Workflow';
