@@ -295,7 +295,7 @@ func TestProductValidationJourneyPlanner(t *testing.T) {
 	script := filepath.Join(root, "scripts", "plan-product-validation.sh")
 	tests := []struct {
 		name, event, journey, paths string
-		want                         map[string]string
+		want                        map[string]string
 	}{
 		{"dynamic PR is focused", "pull_request", "all", "scripts/validate-dynamic-inventory-e2e.sh\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "false", "run_readiness": "false"}},
 		{"generic fixture PR is complete", "pull_request", "all", "deployments/product-validation/fixture.yaml\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "true", "run_readiness": "true"}},
@@ -334,7 +334,7 @@ func TestCIExecutesIsolatedGatesInParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"  go:\n", "  deployment-contracts:\n", "  ui:\n", "needs: [go, deployment-contracts, ui]", "Require every isolated service gate", `${{ needs.go.result }}`, `${{ needs.deployment-contracts.result }}`, `${{ needs.ui.result }}`} {
+	for _, required := range []string{"  classify:\n", "  go:\n", "  deployment-contracts:\n", "  ui:\n", "  database-compatibility:\n", "needs: [classify, go, deployment-contracts, ui, database-compatibility]", "Require every selected gate", `${{ needs.classify.result }}`, `${{ needs.go.result }}`, `${{ needs.deployment-contracts.result }}`, `${{ needs.ui.result }}`, `${{ needs.database-compatibility.result }}`} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("CI isolation contract must contain %q", required)
 		}

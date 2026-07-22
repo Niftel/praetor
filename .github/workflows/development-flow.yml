@@ -8,7 +8,10 @@ on:
   pull_request_target:
     types: [opened, edited, reopened, synchronize, closed]
   workflow_run:
-    workflows: ["CI", "CodeQL", "Go vulnerability scan", "Go security scan", "Image"]
+    # Image is the single authoritative post-merge workflow. It always ends in
+    # image-gate, even when the merge changes no image inputs, so project state
+    # is reconciled once instead of once per independent PR security check.
+    workflows: ["Image"]
     types: [completed]
   workflow_dispatch:
     inputs:

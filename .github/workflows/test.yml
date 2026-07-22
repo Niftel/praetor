@@ -1,45 +1,61 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
-# Cancel superseded runs on the same ref.
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  classify:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      run_go: ${{ steps.plan.outputs.run_go }}
+      run_ui: ${{ steps.plan.outputs.run_ui }}
+      run_database: ${{ steps.plan.outputs.run_database }}
+      run_deployment: ${{ steps.plan.outputs.run_deployment }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Plan affected gates
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: ./scripts/github-ci-plan.sh >> "$GITHUB_OUTPUT"
+
   go:
+    needs: classify
+    if: needs.classify.outputs.run_go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
-
-      # No gofmt gate: this repo's house style is `goimports -local` (external
-      # praetordev/* imports first, praetordev/praetor/* internal last), which
-      # plain `gofmt -l` reports as "unformatted" by design. vet + build + test
-      # are the real gates. go.work is gitignored, so CI resolves the extracted
-      # service/lib modules from their published tags via the proxy.
       - name: compatibility manifest
-        run: go run ./cmd/compatcheck
-
+        run: GOWORK=off go run ./cmd/compatcheck
       - name: go vet
-        run: go vet ./...
-
+        run: GOWORK=off go vet ./...
       - name: build
-        run: go build ./...
-
+        run: GOWORK=off go build ./...
       - name: test
-        run: go test ./...
+        run: GOWORK=off go test ./...
 
   deployment-contracts:
+    needs: classify
+    if: needs.classify.outputs.run_deployment == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -49,43 +65,30 @@ jobs:
           cache: true
       - name: wire contracts
         run: GOWORK=off go test ./tests/contracts
+      - name: workflow syntax
+        run: make workflow-lint
       - name: deployment probe contracts
-        run: make deployment-contract-test
+        run: GOWORK=off make deployment-contract-test
 
   ui:
+    needs: classify
+    if: needs.classify.outputs.run_ui == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: install UI dependencies
         working-directory: web
         run: npm ci
-
       - name: UI regression tests
         working-directory: web
         run: npm test
-
       - name: UI production build
         working-directory: web
         run: npm run build:check
 
-  # Preserve the established required check while the independently runnable
-  # Go, deployment-contract, and UI gates execute in parallel.
-  test:
-    if: always()
-    needs: [go, deployment-contracts, ui]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require every isolated service gate
-        env:
-          GO_RESULT: ${{ needs.go.result }}
-          DEPLOYMENT_RESULT: ${{ needs.deployment-contracts.result }}
-          UI_RESULT: ${{ needs.ui.result }}
-        run: |
-          test "$GO_RESULT" = success
-          test "$DEPLOYMENT_RESULT" = success
-          test "$UI_RESULT" = success
-
   database-compatibility:
+    needs: classify
+    if: needs.classify.outputs.run_database == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -113,4 +116,27 @@ jobs:
       - name: post-upgrade API database smoke tests
         env:
           TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
-        run: go test -count=1 ./services/api/handlers ./services/api/middleware
+        run: GOWORK=off go test -count=1 ./services/api/handlers ./services/api/middleware
+
+  # Preserve the established required check name. Individual gates may be
+  # skipped by the shared planner, but any selected gate must succeed.
+  test:
+    if: always()
+    needs: [classify, go, deployment-contracts, ui, database-compatibility]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected gate
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          GO_RESULT: ${{ needs.go.result }}
+          DEPLOYMENT_RESULT: ${{ needs.deployment-contracts.result }}
+          UI_RESULT: ${{ needs.ui.result }}
+          DATABASE_RESULT: ${{ needs.database-compatibility.result }}
+        run: |
+          test "$CLASSIFY_RESULT" = success
+          for result in "$GO_RESULT" "$DEPLOYMENT_RESULT" "$UI_RESULT" "$DATABASE_RESULT"; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "selected CI gate finished with $result" >&2; exit 1 ;;
+            esac
+          done
