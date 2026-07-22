@@ -22,13 +22,6 @@
       "message": "Potential hardcoded credentials",
       "snippet": "const ServiceTokenPrefix = \"prtr_sp_\"",
       "tracking_issue": 306
-    },
-    {
-      "rule": "G115",
-      "file": "cmd/host-runner/runner.go",
-      "message": "integer overflow conversion int64 -> uint32",
-      "snippet": "f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)",
-      "tracking_issue": 305
     }
   ]
 }
