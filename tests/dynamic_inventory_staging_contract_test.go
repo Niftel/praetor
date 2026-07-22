@@ -25,6 +25,9 @@ func TestDynamicInventoryStagingJourneyContract(t *testing.T) {
 		"resource_cleanup true", "credentials/$CREDENTIAL_ID", "set -Eeuo pipefail",
 		"GET /api/v1/$path returned $status", "failed during phase '$PHASE'", "PHASE=\"resource-discovery\"",
 		`get "$ADMIN_TOKEN" jobs`, `.[] | select(.id == $id) | .status`,
+		"PRAETOR_DYNAMIC_INVENTORY_DB_OBSERVER_POD", "SELECT status FROM unified_jobs WHERE id=$job_id",
+		`.results[0].status | IN("successful", "failed", "error", "canceled")`, "terminal entries",
+		"kubectl rollout restart", "deployment/praetor-validation-inventory-provider", "--timeout=60s",
 		`"$STATUS" == 204`,
 	} {
 		if !strings.Contains(script, required) {
@@ -55,19 +58,19 @@ func TestProductValidationRunsDynamicInventoryJourney(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"validate-dynamic-inventory-e2e.sh", "dynamic-inventory.json", "Upload bounded dynamic-inventory diagnostics", "if: always()"} {
+	for _, required := range []string{"validate-dynamic-inventory-e2e.sh", "dynamic-inventory.json", "Upload bounded journey diagnostics", "if: always()", "needs.preflight.outputs.run_dynamic == 'true'"} {
 		if !strings.Contains(string(workflow), required) {
 			t.Errorf("product validation workflow is missing %q", required)
 		}
 	}
-	if strings.Count(string(workflow), "./scripts/validate-dynamic-inventory-e2e.sh") != 2 {
-		t.Error("product validation must prove the dynamic inventory journey is repeatable from cleanup")
+	if strings.Count(string(workflow), "./scripts/validate-dynamic-inventory-e2e.sh") != 1 {
+		t.Error("product validation must run the expensive dynamic inventory journey exactly once")
 	}
 	fixture, err := os.ReadFile(filepath.Join(root, "deployments", "product-validation", "fixture.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"praetor-validation-inventory-provider", "automountServiceAccountToken: false", "Cache-Control \"no-store\""} {
+	for _, required := range []string{"praetor-validation-inventory-provider", "automountServiceAccountToken: false", "Cache-Control \"no-store\"", "limits: {cpu: 50m, memory: 64Mi}"} {
 		if !strings.Contains(string(fixture), required) {
 			t.Errorf("synthetic inventory provider is missing %q", required)
 		}

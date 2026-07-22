@@ -184,7 +184,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 	if strings.Contains(workflow[:triggerEnd], "\n  push:") {
 		t.Fatal("product validation must not rerun after a PR has been merged to main")
 	}
-	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "packages: read", "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0", "fetch-depth: 0", "Classify full lifecycle scope", `if: needs.preflight.outputs.full_lifecycle == 'true'`, `EVENT_NAME: ${{ github.event_name }}`, "classify-product-validation.sh", "needs: preflight", "Reject invalid lifecycle changes before allocating a cluster", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`} {
+	for _, required := range []string{"concurrency:", `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, "packages: read", "docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0", "fetch-depth: 0", "Plan targeted product journeys", `if: needs.preflight.outputs.run_cluster == 'true'`, `EVENT_NAME: ${{ github.event_name }}`, "plan-product-validation.sh", "needs: preflight", "Run local-equivalent fast product gates", "check-product-validation-fast.sh", `PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS: "true"`, "delegated-api-only:", "Product journey to validate"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
 		}
@@ -285,6 +285,43 @@ func TestProductValidationScopeClassifier(t *testing.T) {
 			}
 			if got := strings.TrimSpace(string(out)); got != tc.want {
 				t.Fatalf("classifier returned %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProductValidationJourneyPlanner(t *testing.T) {
+	root := repositoryRoot(t)
+	script := filepath.Join(root, "scripts", "plan-product-validation.sh")
+	tests := []struct {
+		name, event, journey, paths string
+		want                         map[string]string
+	}{
+		{"dynamic PR is focused", "pull_request", "all", "scripts/validate-dynamic-inventory-e2e.sh\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "false", "run_readiness": "false"}},
+		{"generic fixture PR is complete", "pull_request", "all", "deployments/product-validation/fixture.yaml\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "true", "run_readiness": "true"}},
+		{"delegated manual avoids cluster", "workflow_dispatch", "delegated-api", "", map[string]string{"run_cluster": "false", "run_delegated": "true", "run_readiness": "false"}},
+		{"release manual is complete", "workflow_dispatch", "all", "", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_delegated": "true", "run_readiness": "true"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", script)
+			cmd.Env = append(os.Environ(), "EVENT_NAME="+tc.event, "JOURNEY="+tc.journey)
+			cmd.Stdin = strings.NewReader(tc.paths)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("planner failed: %v: %s", err, out)
+			}
+			got := map[string]string{}
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				key, value, ok := strings.Cut(line, "=")
+				if ok {
+					got[key] = value
+				}
+			}
+			for key, want := range tc.want {
+				if got[key] != want {
+					t.Errorf("%s = %q, want %q; full plan: %s", key, got[key], want, out)
+				}
 			}
 		})
 	}

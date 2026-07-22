@@ -13,12 +13,13 @@ PASSWORD="${PRAETOR_VALIDATION_LDAP_PASSWORD:-praetor123}"
 PREFIX="Dynamic Inventory E2E"
 SECRET="praetor-dynamic-inventory-fixture"
 EVIDENCE_FILE="${PRAETOR_DYNAMIC_INVENTORY_EVIDENCE_FILE:-}"
+DB_OBSERVER_POD="${PRAETOR_DYNAMIC_INVENTORY_DB_OBSERVER_POD:-}"
 PORT_FORWARD_PID=""
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/praetor-dynamic-inventory.XXXXXX")"
 PHASE="bootstrap"
 INVENTORY_ID=""; SOURCE_ID=""; CREDENTIAL_ID=""; SCHEDULE_ID=""
 
-die() { echo "error: $*" >&2; exit 1; }
+die() { echo "error: $*" >&2; record_failure; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"; }
 for command in curl jq kubectl; do need "$command"; done
 record_failure() {
@@ -103,6 +104,16 @@ grant_team_role() {
   request "$ADMIN_TOKEN" POST access "$(jq -nc --arg type "$content_type" --argjson object "$object_id" --argjson role "$role_id" --argjson team "$team_id" '{content_type:$type,object_id:$object,role_definition_id:$role,team_id:$team}')"
   [[ "$STATUS" == 201 || "$STATUS" == 204 || "$STATUS" == 409 ]] || die "grant $role_name returned $STATUS: $RESPONSE"
 }
+job_state() {
+  local job_id="$1"
+  [[ "$job_id" =~ ^[0-9]+$ ]] || die "invalid unified job id"
+  if [[ -n "$DB_OBSERVER_POD" ]]; then
+    kubectl exec -n "$NAMESPACE" "$DB_OBSERVER_POD" -- \
+      psql -U postgres -d praetor -Atc "SELECT status FROM unified_jobs WHERE id=$job_id"
+    return
+  fi
+  get "$ADMIN_TOKEN" jobs | jq -r --argjson id "$job_id" '.[] | select(.id == $id) | .status' | head -n1
+}
 wait_job() {
   local job_id="$1" expected="$2" state=""
   for _ in $(seq 1 180); do
@@ -110,7 +121,7 @@ wait_job() {
     # absent from a regular user's /jobs collection. Observe their state through
     # the supported administrator collection while all mutations remain scoped
     # to the operator token.
-    state="$(get "$ADMIN_TOKEN" jobs | jq -r --argjson id "$job_id" '.[] | select(.id == $id) | .status' | head -n1)"
+    state="$(job_state "$job_id")"
     [[ "$state" =~ ^(successful|failed|error|canceled)$ ]] && break
     sleep 1
   done
@@ -119,8 +130,16 @@ wait_job() {
 history() { get "$1" "inventories/$2/sources/$3/history?limit=20"; }
 wait_history_total() {
   local token="$1" inventory="$2" source="$3" minimum="$4" result
-  for _ in $(seq 1 180); do result="$(history "$token" "$inventory" "$source")"; [[ "$(jq -r .total <<<"$result")" -ge "$minimum" ]] && { printf '%s' "$result"; return; }; sleep 1; done
-  die "inventory source history did not reach $minimum entries"
+  for _ in $(seq 1 180); do
+    result="$(history "$token" "$inventory" "$source")"
+    if jq -e --argjson minimum "$minimum" \
+      '.total >= $minimum and (.results[0].status | IN("successful", "failed", "error", "canceled"))' <<<"$result" >/dev/null; then
+      printf '%s' "$result"
+      return
+    fi
+    sleep 1
+  done
+  die "inventory source history did not reach $minimum terminal entries"
 }
 set_provider_payload() {
   local payload="$1" expected="$2"
@@ -128,6 +147,12 @@ set_provider_payload() {
     --from-literal="inventory.json=$payload" \
     --from-literal="default.conf=$(kubectl get configmap praetor-validation-inventory-provider -n "$NAMESPACE" -o jsonpath='{.data.default\.conf}')" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  # A projected ConfigMap may take up to a kubelet sync period to refresh in an
+  # existing pod. Restart the tiny synthetic provider so each reconciliation
+  # phase observes exactly the payload that phase just published.
+  kubectl rollout restart -n "$NAMESPACE" deployment/praetor-validation-inventory-provider >/dev/null
+  kubectl rollout status -n "$NAMESPACE" deployment/praetor-validation-inventory-provider --timeout=60s >/dev/null
   for _ in $(seq 1 30); do
     kubectl exec -n "$NAMESPACE" deployment/praetor-validation-inventory-provider -- \
       wget -qO- --header="Authorization: Bearer $SECRET" http://127.0.0.1:8080/inventory 2>/dev/null | grep -Fq "$expected" && return
@@ -191,7 +216,10 @@ PHASE="initial-sync"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
 [[ "$STATUS" == 201 ]] || die "initial sync returned $STATUS: $RESPONSE"; INITIAL_JOB="$(jq -er .job_id <<<"$RESPONSE")"; wait_job "$INITIAL_JOB" successful
 INITIAL_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 1)"
-jq -e '.results[0] | .status == "successful" and .hosts_added == 2 and .hosts_disabled == 0' <<<"$INITIAL_HISTORY" >/dev/null || die "initial sync delta is incorrect"
+if ! jq -e '.results[0] | .status == "successful" and .hosts_added == 2 and .hosts_disabled == 0' <<<"$INITIAL_HISTORY" >/dev/null; then
+  INITIAL_DELTA="$(jq -c '.results[0] | {status,phase,hosts_added,hosts_updated,hosts_disabled,hosts_unchanged,groups_added,groups_updated,groups_unchanged,diagnostic_code}' <<<"$INITIAL_HISTORY")"
+  die "initial sync delta is incorrect: $INITIAL_DELTA"
+fi
 
 PHASE="changed-reconciliation"
 # Provider change updates alpha, adds gamma and safely disables missing beta.
