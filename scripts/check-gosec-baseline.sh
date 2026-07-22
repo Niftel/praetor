@@ -17,6 +17,10 @@ jq -e '.version == 1 and (.findings | type == "array")' "$BASELINE" >/dev/null |
   echo "error: unsupported gosec baseline schema" >&2
   exit 1
 }
+jq -e 'all(.findings[]; (.tracking_issue | type) == "number" and .tracking_issue > 0)' "$BASELINE" >/dev/null || {
+  echo "error: every accepted gosec finding must reference a positive tracking_issue" >&2
+  exit 1
+}
 jq -e '.runs[0].tool.driver.rules and .runs[0].results' "$REPORT" >/dev/null || {
   echo "error: malformed gosec SARIF report" >&2
   exit 1
@@ -25,7 +29,7 @@ jq -e '.runs[0].tool.driver.rules and .runs[0].results' "$REPORT" >/dev/null || 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-jq -S -c '.findings[]' "$BASELINE" | LC_ALL=C sort -u > "$tmp/baseline"
+jq -S -c '.findings[] | {rule, file, message, snippet}' "$BASELINE" | LC_ALL=C sort -u > "$tmp/baseline"
 jq -S -c '
   (.runs[0].tool.driver.rules
     | map(select((.properties.tags // []) | index("HIGH")))

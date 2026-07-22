@@ -64,11 +64,12 @@ func TestDevelopmentFlowIsRepositoryDriven(t *testing.T) {
 	}
 	script := string(raw)
 	for _, required := range []string{
-		"bootstrap|validate-issue|sync-issue|sync-pr|verify-main|repair-project",
+		"bootstrap|validate-issue|sync-issue|sync-pr|verify-main|repair-project|audit-completion|close-milestone",
 		`select(.name == "Status")`,
 		"canonical_project_status",
 		"repair_project",
 		"set_project_status",
+		`.repository == $repository`,
 		"PROJECT_AUTOMATION_TOKEN",
 		"PROJECT_GH_TOKEN",
 		"GH_TOKEN: ${{ github.token }}",
@@ -127,11 +128,178 @@ func TestDevelopmentFlowExposesCanonicalStatusRepair(t *testing.T) {
 	for _, required := range []string{
 		"repair_project:",
 		"./scripts/development-flow.sh repair-project",
+		"audit_completion:",
+		"./scripts/development-flow.sh audit-completion",
+		`cron: "29 5 * * *"`,
 		"PROJECT_GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("development workflow must contain %q", required)
 		}
+	}
+}
+
+func TestDevelopmentFlowRejectsClosedMilestoneWithUnverifiedIssue(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	writeFakeGH(t, temp, `#!/usr/bin/env bash
+if [[ "$1 $2" == "issue list" ]]; then
+  printf '%s\n' '[{"number":157,"state":"CLOSED","labels":[{"name":"flow:verification"}],"url":"https://github.com/Niftel/praetor/issues/157"}]'
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`)
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; audit_milestone_issues Next`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+temp+":"+os.Getenv("PATH"))
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("closed milestone with a Verification issue passed completion audit")
+	}
+	if !strings.Contains(string(output), "#157 state=CLOSED flow=flow:verification") {
+		t.Fatalf("audit did not identify the inconsistent issue; output:\n%s", output)
+	}
+}
+
+func TestDevelopmentFlowRefusesUnsafeMilestoneClosure(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	marker := filepath.Join(temp, "patched")
+	writeFakeGH(t, temp, `#!/usr/bin/env bash
+if [[ "$1" == "api" && "$*" == *"milestones?state=all"* ]]; then
+  printf '%s\n' '[{"number":2,"title":"Next","state":"open"}]'
+elif [[ "$1 $2" == "issue list" ]]; then
+  printf '%s\n' '[{"number":157,"state":"CLOSED","labels":[{"name":"flow:verification"}],"url":"https://github.com/Niftel/praetor/issues/157"}]'
+elif [[ "$1" == "api" && "$2" == "--method" ]]; then
+  touch "$FAKE_PATCH_MARKER"
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`)
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; close_milestone Next`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+temp+":"+os.Getenv("PATH"), "FAKE_PATCH_MARKER="+marker)
+	if output, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("unsafe milestone closure succeeded:\n%s", output)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("milestone PATCH was attempted after completion audit failed")
+	}
+}
+
+func TestDevelopmentFlowRejectsProjectStatusMismatch(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	writeFakeGH(t, temp, `#!/usr/bin/env bash
+if [[ "$1 $2" == "project item-list" ]]; then
+  printf '%s\n' '{"items":[{"content":{"type":"Issue","number":157},"repository":"https://github.com/Niftel/praetor","labels":["flow:verification"],"status":"Done"}]}'
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`)
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; audit_project_statuses`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+temp+":"+os.Getenv("PATH"), "PROJECT_GH_TOKEN=test-token")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("project status mismatch passed completion audit")
+	}
+	if !strings.Contains(string(output), "#157 project=Done flow=flow:verification expected=In Progress") {
+		t.Fatalf("audit did not describe the project mismatch; output:\n%s", output)
+	}
+}
+
+func TestDevelopmentFlowRepairScopesAndSelectsOnlyMismatchedPraetorIssues(t *testing.T) {
+	root := repositoryRoot(t)
+	project := `{"items":[
+		{"id":"other-repo","content":{"type":"Issue","number":21},"repository":"https://github.com/Niftel/eventbus","labels":["flow:done"],"status":"In Progress"},
+		{"id":"pull-request","content":{"type":"PullRequest","number":21},"repository":"https://github.com/Niftel/praetor","labels":["flow:done"],"status":"In Progress"},
+		{"id":"already-correct","content":{"type":"Issue","number":301},"repository":"https://github.com/Niftel/praetor","labels":["flow:done"],"status":"Done"},
+		{"id":"needs-repair","content":{"type":"Issue","number":302},"repository":"https://github.com/Niftel/praetor","labels":["flow:done"],"status":"In Progress"}
+	]}`
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; project_issue_repairs`)
+	cmd.Dir = root
+	cmd.Stdin = strings.NewReader(project)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("project issue filtering failed: %v\n%s", err, output)
+	}
+	if got, want := strings.TrimSpace(string(output)), "needs-repair\tDone\t302"; got != want {
+		t.Fatalf("project repairs = %q, want %q", got, want)
+	}
+}
+
+func TestDevelopmentFlowRepairRejectsAmbiguousFlowLabels(t *testing.T) {
+	root := repositoryRoot(t)
+	project := `{"items":[{"id":"ambiguous","content":{"type":"Issue","number":302},"repository":"https://github.com/Niftel/praetor","labels":["flow:done","flow:verification"],"status":"In Progress"}]}`
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; project_issue_repairs`)
+	cmd.Dir = root
+	cmd.Stdin = strings.NewReader(project)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("ambiguous flow labels were silently repaired:\n%s", output)
+	}
+	if !strings.Contains(string(output), "must have exactly one flow label") {
+		t.Fatalf("repair did not explain ambiguous labels:\n%s", output)
+	}
+}
+
+func TestDevelopmentFlowRepairValidatesSnapshotBeforeEditing(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	marker := filepath.Join(temp, "edited")
+	writeFakeGH(t, temp, `#!/usr/bin/env bash
+if [[ "$1 $2" == "project item-list" ]]; then
+  printf '%s\n' '{"items":[{"id":"valid","content":{"type":"Issue","number":301},"repository":"https://github.com/Niftel/praetor","labels":["flow:done"],"status":"In Progress"},{"id":"ambiguous","content":{"type":"Issue","number":302},"repository":"https://github.com/Niftel/praetor","labels":["flow:done","flow:verification"],"status":"In Progress"}]}'
+elif [[ "$1 $2" == "project item-edit" ]]; then
+  touch "$FAKE_EDIT_MARKER"
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`)
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; repair_project`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+temp+":"+os.Getenv("PATH"), "PROJECT_GH_TOKEN=test-token", "FAKE_EDIT_MARKER="+marker)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("repair accepted an invalid snapshot:\n%s", output)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("project item was edited before the full snapshot passed validation")
+	}
+}
+
+func TestDevelopmentFlowRejectsStaleClosedVerification(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	writeFakeGH(t, temp, `#!/usr/bin/env bash
+if [[ "$1 $2" == "issue list" ]]; then
+  printf '%s\n' '[{"number":267,"closedAt":"2026-07-20T00:00:00Z","labels":[{"name":"flow:verification"}],"url":"https://github.com/Niftel/praetor/issues/267"}]'
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`)
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; audit_stale_closed_issues`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+temp+":"+os.Getenv("PATH"), "AUDIT_NOW_EPOCH=1784764800")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("stale closed Verification issue passed completion audit")
+	}
+	if !strings.Contains(string(output), "#267 closedAt=2026-07-20T00:00:00Z flow=flow:verification") {
+		t.Fatalf("audit did not identify stale Verification; output:\n%s", output)
+	}
+}
+
+func writeFakeGH(t *testing.T, directory, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(directory, "gh"), []byte(body), 0o700); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -218,6 +386,39 @@ fi
 	}
 	if got := run(`[{"body":"Closes #201"}]`); got != "In Review" {
 		t.Fatalf("delayed issue-open status = %q, want In Review", got)
+	}
+}
+
+func TestDevelopmentFlowPreservesCurrentStateOnIssueEdit(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	writeFakeGH(t, temp, `#!/usr/bin/env bash
+if [[ "$1 $2" == "issue view" ]]; then
+  printf '%s\n' '{"state":"OPEN","labels":[{"name":"flow:in-progress"}]}'
+elif [[ "$1 $2" == "pr list" ]]; then
+  printf '%s\n' '[]'
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`)
+	cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; authoritative_issue_status 302 Backlog`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+temp+":"+os.Getenv("PATH"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("status resolution failed: %v\n%s", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != "In Progress" {
+		t.Fatalf("edited issue status = %q, want In Progress", got)
+	}
+
+	scriptRaw, err := os.ReadFile(filepath.Join(root, "scripts", "development-flow.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(scriptRaw), `[[ "$action" == opened || "$action" == edited ]]`) {
+		t.Fatal("corrected edited issues must be synchronized after validation")
 	}
 }
 

@@ -1,6 +1,8 @@
 name: Development flow
 
 on:
+  schedule:
+    - cron: "29 5 * * *"
   issues:
     types: [opened, edited, reopened, closed, labeled]
   pull_request_target:
@@ -17,6 +19,11 @@ on:
         type: boolean
       repair_project:
         description: Reconcile canonical project Status from flow labels
+        required: false
+        default: false
+        type: boolean
+      audit_completion:
+        description: Audit milestone, project, and accepted security-debt state
         required: false
         default: false
         type: boolean
@@ -92,3 +99,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PROJECT_GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
         run: ./scripts/development-flow.sh repair-project
+
+  audit-completion:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.audit_completion)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Audit authoritative completion state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_GH_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+        run: ./scripts/development-flow.sh audit-completion
