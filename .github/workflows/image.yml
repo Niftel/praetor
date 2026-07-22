@@ -18,8 +18,8 @@ on:
         type: string
 
 concurrency:
-  group: image-${{ github.ref }}-${{ github.workflow }}
-  cancel-in-progress: true
+  group: image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   attestations: write
@@ -29,21 +29,32 @@ permissions:
   security-events: write
 
 jobs:
+  classify:
+    name: Classify image inputs
+    runs-on: ubuntu-latest
+    outputs:
+      run_images: ${{ steps.plan.outputs.run_images }}
+      image_matrix: ${{ steps.plan.outputs.image_matrix }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Plan affected images
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: ./scripts/github-ci-plan.sh >> "$GITHUB_OUTPUT"
+
   image:
+    needs: classify
+    if: needs.classify.outputs.run_images == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: api
-            context: .
-            dockerfile: build/package/Dockerfile.api
-          - name: migrator
-            context: .
-            dockerfile: build/package/Dockerfile.migrator
-          - name: ui
-            context: web
-            dockerfile: Dockerfile
+      matrix: ${{ fromJSON(needs.classify.outputs.image_matrix) }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -125,3 +136,20 @@ jobs:
           subject-name: ghcr.io/niftel/praetor-${{ matrix.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  image-gate:
+    name: image-gate
+    if: always()
+    needs: [classify, image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected image
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+        run: |
+          test "$CLASSIFY_RESULT" = success
+          case "$IMAGE_RESULT" in
+            success|skipped) ;;
+            *) echo "selected image build finished with $IMAGE_RESULT" >&2; exit 1 ;;
+          esac

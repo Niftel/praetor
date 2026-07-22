@@ -1,12 +1,8 @@
 name: Go security scan
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: "11 4 * * 3"
   workflow_dispatch:
 
 permissions:
@@ -14,29 +10,44 @@ permissions:
   security-events: write
 
 concurrency:
-  group: gosec-${{ github.ref }}
-  cancel-in-progress: true
+  group: gosec-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  gosec:
-    name: gosec
+  classify:
+    name: Classify Go security inputs
+    runs-on: ubuntu-latest
+    outputs:
+      run_security: ${{ steps.plan.outputs.run_security }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Plan security scan
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: ./scripts/github-ci-plan.sh >> "$GITHUB_OUTPUT"
+
+  scan:
+    name: gosec scan
+    needs: classify
+    if: needs.classify.outputs.run_security == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
-
-      # Keep the scan outcome available long enough to upload SARIF even when
-      # the incremental high-severity gate rejects a new finding.
       - name: Scan Go code
         id: scan
         continue-on-error: true
         run: make gosec GOSEC_REPORT=gosec.sarif
-
       - name: Upload gosec results
         if: >-
           always() &&
@@ -47,9 +58,25 @@ jobs:
         with:
           sarif_file: gosec.sarif
           category: gosec
-
-      - name: Require gosec gate
+      - name: Require gosec scan
         if: always()
         env:
           SCAN_OUTCOME: ${{ steps.scan.outcome }}
         run: test "$SCAN_OUTCOME" = success
+
+  gosec:
+    name: gosec
+    if: always()
+    needs: [classify, scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require selected gosec scan
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          SCAN_RESULT: ${{ needs.scan.result }}
+        run: |
+          test "$CLASSIFY_RESULT" = success
+          case "$SCAN_RESULT" in
+            success|skipped) ;;
+            *) echo "selected gosec scan finished with $SCAN_RESULT" >&2; exit 1 ;;
+          esac

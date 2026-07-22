@@ -351,7 +351,7 @@ func TestCIExecutesIsolatedGatesInParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
-	for _, required := range []string{"  go:\n", "  deployment-contracts:\n", "  ui:\n", "needs: [go, deployment-contracts, ui]", "Require every isolated service gate", `${{ needs.go.result }}`, `${{ needs.deployment-contracts.result }}`, `${{ needs.ui.result }}`} {
+	for _, required := range []string{"  classify:\n", "  go:\n", "  deployment-contracts:\n", "  ui:\n", "  database-compatibility:\n", "needs: [classify, go, deployment-contracts, ui, database-compatibility]", "Require every selected gate", `${{ needs.classify.result }}`, `${{ needs.go.result }}`, `${{ needs.deployment-contracts.result }}`, `${{ needs.ui.result }}`, `${{ needs.database-compatibility.result }}`} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("CI isolation contract must contain %q", required)
 		}

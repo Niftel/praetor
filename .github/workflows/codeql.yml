@@ -1,8 +1,6 @@
 name: CodeQL
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -14,33 +12,64 @@ permissions:
   security-events: write
   packages: read
 
-jobs:
-  analyze:
-    name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    concurrency:
-      group: codeql-${{ github.ref }}-${{ matrix.language }}
-      cancel-in-progress: true
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - language: go
-            build-mode: autobuild
-          - language: javascript-typescript
-            build-mode: none
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+jobs:
+  classify:
+    name: Classify CodeQL languages
+    runs-on: ubuntu-latest
+    outputs:
+      run_codeql: ${{ steps.plan.outputs.run_codeql }}
+      codeql_matrix: ${{ steps.plan.outputs.codeql_matrix }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Plan affected languages
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: ./scripts/github-ci-plan.sh >> "$GITHUB_OUTPUT"
 
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    needs: classify
+    if: needs.classify.outputs.run_codeql == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.classify.outputs.codeql_matrix) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Initialize CodeQL
         uses: github/codeql-action/init@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
         with:
           languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
-
+          build-mode: ${{ matrix.build_mode }}
       - name: Analyze
         uses: github/codeql-action/analyze@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
         with:
           category: "/language:${{ matrix.language }}"
+
+  codeql-gate:
+    name: codeql-gate
+    if: always()
+    needs: [classify, analyze]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require selected language analysis
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+        run: |
+          test "$CLASSIFY_RESULT" = success
+          case "$ANALYZE_RESULT" in
+            success|skipped) ;;
+            *) echo "selected CodeQL analysis finished with $ANALYZE_RESULT" >&2; exit 1 ;;
+          esac
