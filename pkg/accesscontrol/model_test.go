@@ -17,6 +17,28 @@ func TestCatalogIsClosedAndUnique(t *testing.T) {
 	}
 }
 
+func TestCredentialAccessIdentifiersArePublicCatalogVocabulary(t *testing.T) {
+	var capability *CapabilityDefinition
+	catalog := Catalog()
+	for index := range catalog {
+		definition := catalog[index]
+		if definition.Codename == ManageCredentialType {
+			capability = &definition
+			break
+		}
+	}
+	if capability == nil {
+		t.Fatal("credential-type management capability missing")
+	}
+	if capability.Codename != "manage_credentialtype" || capability.ResourceKind != "credential_type" || capability.Verb != Manage {
+		t.Fatalf("unexpected credential-type capability: %+v", capability)
+	}
+	name, ok := BuiltinRoleName(Organization, CredentialAdminRole)
+	if !ok || CredentialAdminRole != "credential_admin_role" || name != "Organization Credential Admin" {
+		t.Fatalf("unexpected public credential-admin role: kind=%q name=%q present=%v", CredentialAdminRole, name, ok)
+	}
+}
+
 func TestBuiltinRolesUseCatalogCapabilities(t *testing.T) {
 	known := make(map[string]struct{})
 	for _, definition := range Catalog() {

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -81,5 +82,42 @@ func TestServiceCredentialAuthentication(t *testing.T) {
 	}
 	if rec := request(); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("revoked service credential: want 401, got %d", rec.Code)
+	}
+}
+
+func TestServiceTokenPrefixAloneCannotAuthenticate(t *testing.T) {
+	for _, token := range []string{
+		ServiceTokenPrefix,
+		ServiceTokenPrefix + "not-base64!",
+		ServiceTokenPrefix + strings.Repeat("a", 42),
+		ServiceTokenPrefix + strings.Repeat("a", 44),
+	} {
+		if isServiceTokenFormat(token) {
+			t.Fatalf("malformed service token accepted: %q", token)
+		}
+		if _, ok := authenticateServiceCredential(nil, context.Background(), token); ok {
+			t.Fatalf("malformed service token authenticated: %q", token)
+		}
+	}
+
+	called := false
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+ServiceTokenPrefix)
+	recorder := httptest.NewRecorder()
+	AuthMiddleware(nil)(next).ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusUnauthorized || called {
+		t.Fatalf("prefix-only credential result: status=%d next_called=%v", recorder.Code, called)
+	}
+}
+
+func TestServiceTokenFormatRequiresFullRandomPayload(t *testing.T) {
+	token := ServiceTokenPrefix + strings.Repeat("a", 43)
+	if !isServiceTokenFormat(token) {
+		t.Fatalf("valid service-token format rejected: %q", token)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(token, ServiceTokenPrefix))
+	if err != nil || len(payload) != ServiceTokenEntropyBytes {
+		t.Fatalf("service-token payload: bytes=%d error=%v", len(payload), err)
 	}
 }

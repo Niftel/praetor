@@ -1,27 +1,5 @@
 {
   "version": 1,
   "description": "Existing high-severity gosec findings. New findings fail CI; every accepted finding references open remediation work; remove entries as findings are resolved.",
-  "findings": [
-    {
-      "rule": "G101",
-      "file": "pkg/accesscontrol/catalog.go",
-      "message": "Potential hardcoded credentials",
-      "snippet": "ManageCredentialType = \"manage_credentialtype\"",
-      "tracking_issue": 306
-    },
-    {
-      "rule": "G101",
-      "file": "pkg/accesscontrol/roles.go",
-      "message": "Potential hardcoded credentials",
-      "snippet": "CredentialAdminRole   RoleKind = \"credential_admin_role\"",
-      "tracking_issue": 306
-    },
-    {
-      "rule": "G101",
-      "file": "services/api/middleware/auth.go",
-      "message": "Potential hardcoded credentials",
-      "snippet": "const ServiceTokenPrefix = \"prtr_sp_\"",
-      "tracking_issue": 306
-    }
-  ]
+  "findings": []
 }
