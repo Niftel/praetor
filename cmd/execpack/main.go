@@ -11,11 +11,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/praetordev/packspec"
+	"github.com/praetordev/praetor/internal/executionboundary"
 )
 
 func envOr(key, def string) string {
@@ -55,8 +55,15 @@ func main() {
 	if err := spec.Validate(); err != nil {
 		log.Fatalf("invalid spec %s: %v", *specPath, err)
 	}
-
-	if err := os.MkdirAll(*out, 0o755); err != nil {
+	if err := executionboundary.ValidatePackName(spec.Name); err != nil {
+		log.Fatalf("invalid spec %s: %v", *specPath, err)
+	}
+	workspace, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("resolve workspace: %v", err)
+	}
+	outputDir, err := executionboundary.PrepareOutputDirectory(workspace, *out)
+	if err != nil {
 		log.Fatalf("create out dir: %v", err)
 	}
 
@@ -69,7 +76,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("temp build context: %v", err)
 		}
-		if werr := os.WriteFile(filepath.Join(ctx, "requirements.txt"), []byte(requirements), 0o644); werr != nil {
+		if werr := executionboundary.WriteFile(ctx, "requirements.txt", []byte(requirements), 0o644); werr != nil {
 			os.RemoveAll(ctx)
 			log.Fatalf("write requirements.txt: %v", werr)
 		}
@@ -78,7 +85,7 @@ func main() {
 			os.RemoveAll(ctx)
 			log.Fatalf("read host-runner callback: %v", rerr)
 		}
-		if werr := os.WriteFile(filepath.Join(ctx, "praetor_checkpoint.py"), callback, 0o644); werr != nil {
+		if werr := executionboundary.WriteFile(ctx, "praetor_checkpoint.py", callback, 0o644); werr != nil {
 			os.RemoveAll(ctx)
 			log.Fatalf("write host-runner callback: %v", werr)
 		}
@@ -106,18 +113,28 @@ func main() {
 		}
 		args = append(args,
 			"--target", "export",
-			"-o", "type=local,dest="+*out,
+			"-o", "type=local,dest="+outputDir,
 			ctx,
 		)
-		cmd := exec.Command("docker", args...)
+		cmd, err := executionboundary.Command("docker", args...)
+		if err != nil {
+			removeBuildDirectory(ctx)
+			log.Fatalf("prepare docker build for %s: %v", arch, err)
+		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
-		os.RemoveAll(ctx)
+		removeBuildDirectory(ctx)
 		if err != nil {
 			log.Fatalf("docker build for %s failed: %v", arch, err)
 		}
-		fmt.Printf("  -> %s/%s-linux-%s.tar.gz\n", *out, spec.Name, arch)
+		fmt.Printf("  -> %s/%s-linux-%s.tar.gz\n", outputDir, spec.Name, arch)
 	}
 	log.Printf("Execution Pack %q built.", spec.Name)
+}
+
+func removeBuildDirectory(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		log.Printf("warning: remove temporary build directory %s: %v", path, err)
+	}
 }

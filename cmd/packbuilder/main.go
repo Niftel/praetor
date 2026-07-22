@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/praetordev/db"
 	"github.com/praetordev/metrics"
 	"github.com/praetordev/packspec"
+	"github.com/praetordev/praetor/internal/executionboundary"
 )
 
 func main() {
@@ -87,6 +87,9 @@ func main() {
 // buildPack builds every arch of a pack from its YAML spec and extracts the
 // tarball(s) into /build/runtime (shared with the executor).
 func buildPack(name, specYAML string) (string, error) {
+	if err := executionboundary.ValidatePackName(name); err != nil {
+		return "", err
+	}
 	spec, err := packspec.Parse(specYAML)
 	if err != nil {
 		return "", err
@@ -181,7 +184,7 @@ func buildPack(name, specYAML string) (string, error) {
 		if err != nil {
 			return out.String(), fmt.Errorf("temp build context: %w", err)
 		}
-		if werr := os.WriteFile(filepath.Join(ctx, "requirements.txt"), []byte(requirements), 0644); werr != nil {
+		if werr := executionboundary.WriteFile(ctx, "requirements.txt", []byte(requirements), 0o644); werr != nil {
 			os.RemoveAll(ctx)
 			return out.String(), fmt.Errorf("write requirements.txt: %w", werr)
 		}
@@ -214,9 +217,14 @@ func buildPack(name, specYAML string) (string, error) {
 			args = append(args, "--opt", "add-hosts="+addHostsOpt)
 		}
 		// BUILDKIT_HOST (env, e.g. tcp://buildkitd:1234) points buildctl at the daemon.
-		build := exec.Command("buildctl", args...)
+		build, err := executionboundary.Command("buildctl", args...)
+		if err != nil {
+			removeBuildDirectory(ctx)
+			removeBuildDirectory(outDir)
+			return out.String(), fmt.Errorf("prepare buildctl command: %w", err)
+		}
 		b, err := build.CombinedOutput()
-		os.RemoveAll(ctx)
+		removeBuildDirectory(ctx)
 		out.Write(b)
 		if err != nil {
 			os.RemoveAll(outDir)
@@ -310,19 +318,31 @@ func fetchSpecFromGit(url, branch, specPath string) (string, string, error) {
 
 	var lg strings.Builder
 	fmt.Fprintf(&lg, "git clone --depth=1 --branch %s %s\n", branch, url)
-	b, err := exec.Command("git", "clone", "--depth=1", "--branch", branch, url, dir).CombinedOutput()
+	b, err := runGit("clone", "--depth=1", "--branch", branch, "--", url, dir)
 	lg.Write(b)
 	if err != nil {
 		return "", lg.String(), fmt.Errorf("git clone: %w", err)
 	}
-	// filepath.Clean("/"+specPath) prevents ../ escaping the checkout.
-	full := filepath.Join(dir, filepath.Clean("/"+specPath))
-	data, err := os.ReadFile(full)
+	data, err := executionboundary.ReadFile(dir, specPath)
 	if err != nil {
 		return "", lg.String(), fmt.Errorf("read %s: %w", specPath, err)
 	}
 	fmt.Fprintf(&lg, "read spec %s (%d bytes)\n", specPath, len(data))
 	return string(data), lg.String(), nil
+}
+
+func runGit(args ...string) ([]byte, error) {
+	command, err := executionboundary.Command("git", args...)
+	if err != nil {
+		return nil, err
+	}
+	return command.CombinedOutput()
+}
+
+func removeBuildDirectory(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		log.Printf("warning: remove temporary build directory %s: %v", path, err)
+	}
 }
 
 // envOr returns the env var k, or d when it is unset/empty.

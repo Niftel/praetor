@@ -41,7 +41,28 @@ func TestResumeArgs(t *testing.T) {
 		if !strings.Contains(string(data), `"greeting"`) || !strings.Contains(string(data), `"hi"`) {
 			t.Fatalf("restored vars missing registered value: %s", data)
 		}
+		info, err := os.Stat(filepath.Join(dir, "restored-vars.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("restored vars mode = %o, want 600", info.Mode().Perm())
+		}
 	})
+}
+
+func TestFileExistsRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "praetor_checkpoint.py")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "praetor_checkpoint.py")); err != nil {
+		t.Fatal(err)
+	}
+	if fileExists(filepath.Join(root, "praetor_checkpoint.py")) {
+		t.Fatal("fileExists followed a symlink outside its directory root")
+	}
 }
 
 func TestCheckpointEnv(t *testing.T) {
