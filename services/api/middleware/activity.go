@@ -2,12 +2,123 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
+
+const defaultActivityWriteTimeout = 2 * time.Second
+
+type activityExecutor interface {
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
+
+// ActivityRecorder owns the detached, bounded writes performed by
+// ActivityCapture. Close prevents new work, cancels active writes, and waits for
+// them to finish so API shutdown cannot leave audit goroutines behind.
+type ActivityRecorder struct {
+	executor activityExecutor
+	timeout  time.Duration
+	ctx      context.Context
+	cancel   context.CancelFunc
+	logf     func(string, ...interface{})
+
+	mu     sync.Mutex
+	closed bool
+	wg     sync.WaitGroup
+}
+
+// NewActivityRecorder creates a service-owned recorder. Its context is detached
+// from individual requests so a successful mutation can still be audited after
+// the response completes, but every write has timeout as an upper bound.
+func NewActivityRecorder(parent context.Context, db *sqlx.DB, timeout time.Duration) *ActivityRecorder {
+	return newActivityRecorder(parent, db, timeout, log.Printf)
+}
+
+func newActivityRecorder(parent context.Context, executor activityExecutor, timeout time.Duration, logf func(string, ...interface{})) *ActivityRecorder {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if timeout <= 0 {
+		timeout = defaultActivityWriteTimeout
+	}
+	ctx, cancel := context.WithCancel(parent)
+	return &ActivityRecorder{executor: executor, timeout: timeout, ctx: ctx, cancel: cancel, logf: logf}
+}
+
+// Close stops and drains asynchronous audit writes until ctx expires.
+func (a *ActivityRecorder) Close(ctx context.Context) error {
+	a.mu.Lock()
+	if !a.closed {
+		a.closed = true
+		a.cancel()
+	}
+	a.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("drain activity recorder: %w", ctx.Err())
+	}
+}
+
+type activityRecord struct {
+	userID       int64
+	username     string
+	action       string
+	resourceType string
+	resourceID   *int64
+	method       string
+	path         string
+	statusCode   int
+}
+
+func (a *ActivityRecorder) record(record activityRecord) {
+	if a.executor == nil {
+		a.logf("activity audit unavailable: method=%s path=%s", record.method, record.path)
+		return
+	}
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		a.logf("activity audit dropped after recorder shutdown: method=%s path=%s", record.method, record.path)
+		return
+	}
+	a.wg.Add(1)
+	a.mu.Unlock()
+
+	go func() {
+		defer a.wg.Done()
+		ctx, cancel := context.WithTimeout(a.ctx, a.timeout)
+		defer cancel()
+		_, err := a.executor.ExecContext(ctx, `
+			INSERT INTO activity_stream (user_id, username, action, resource_type, resource_id, method, path, status_code)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			nullableInt(record.userID), record.username, record.action, record.resourceType,
+			record.resourceID, record.method, record.path, record.statusCode)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				a.logf("activity audit write timed out: method=%s path=%s", record.method, record.path)
+				return
+			}
+			a.logf("activity audit write failed: method=%s path=%s error=%v", record.method, record.path, err)
+		}
+	}()
+}
 
 // statusWriter captures the response status code so the activity recorder can
 // log only successful mutations.
@@ -73,36 +184,31 @@ func classify(method, path string) (action, resourceType string, resourceID *int
 	return action, resourceType, resourceID
 }
 
-// ActivityCapture records every successful mutating request (who, what, when)
-// into activity_stream. Reads/queries and machine endpoints are ignored. The
-// insert is async so it never adds latency to the request.
-func ActivityCapture(db *sqlx.DB) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			mutating := r.Method == http.MethodPost || r.Method == http.MethodPut ||
-				r.Method == http.MethodPatch || r.Method == http.MethodDelete
-			if !mutating || skipActivity(r.URL.Path) {
-				next.ServeHTTP(w, r)
-				return
-			}
+// Middleware records every successful mutating request (who, what, when) into
+// activity_stream. Reads/queries and machine endpoints are ignored.
+func (a *ActivityRecorder) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mutating := r.Method == http.MethodPost || r.Method == http.MethodPut ||
+			r.Method == http.MethodPatch || r.Method == http.MethodDelete
+		if !mutating || skipActivity(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
 
-			sw := &statusWriter{ResponseWriter: w}
-			next.ServeHTTP(sw, r)
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
 
-			if sw.status < 200 || sw.status >= 300 {
-				return // only successful mutations are audited
-			}
-			uc, _ := r.Context().Value(UserContextKey).(UserContext)
-			action, resourceType, resourceID := classify(r.Method, r.URL.Path)
-
-			go func(uid int64, uname, act, rtype string, rid *int64, method, path string, code int) {
-				_, _ = db.ExecContext(context.Background(), `
-					INSERT INTO activity_stream (user_id, username, action, resource_type, resource_id, method, path, status_code)
-					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-					nullableInt(uid), uname, act, rtype, rid, method, path, code)
-			}(uc.UserID, uc.Username, action, resourceType, resourceID, r.Method, r.URL.Path, sw.status)
+		if sw.status < 200 || sw.status >= 300 {
+			return
+		}
+		uc, _ := r.Context().Value(UserContextKey).(UserContext)
+		action, resourceType, resourceID := classify(r.Method, r.URL.Path)
+		a.record(activityRecord{
+			userID: uc.UserID, username: uc.Username, action: action,
+			resourceType: resourceType, resourceID: resourceID,
+			method: r.Method, path: r.URL.Path, statusCode: sw.status,
 		})
-	}
+	})
 }
 
 func nullableInt(v int64) interface{} {

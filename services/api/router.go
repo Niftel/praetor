@@ -39,11 +39,18 @@ type Config struct {
 	RBACPolicyRefreshInterval time.Duration
 	// RBACDecisionAudit emits one structured event for every v4 evaluation.
 	RBACDecisionAudit bool
+	// ActivityRecorder is service-owned so cmd/api can drain audit writes during
+	// shutdown. Nil creates a bounded default recorder for tests and embedders.
+	ActivityRecorder *modelAuth.ActivityRecorder
 }
 
 // NewRouter instantiates the chi Router and wires middleware.
 func NewRouter(db *sqlx.DB, cfg Config) (*chi.Mux, error) {
 	r := chi.NewRouter()
+	activityRecorder := cfg.ActivityRecorder
+	if activityRecorder == nil {
+		activityRecorder = modelAuth.NewActivityRecorder(context.Background(), db, 2*time.Second)
+	}
 
 	// The authorization enforcement helper (PEP) is built once and injected into
 	// every resource that enforces access. It wraps the capability store (PDP)
@@ -138,7 +145,7 @@ func NewRouter(db *sqlx.DB, cfg Config) (*chi.Mux, error) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(modelAuth.AuthMiddleware(db))
 		r.Use(modelAuth.RequireHuman)
-		r.Use(modelAuth.ActivityCapture(db)) // audit log: record successful mutations
+		r.Use(activityRecorder.Middleware) // audit log: record successful mutations
 
 		// Active RBAC v4 policy provenance and an operator-triggered refresh.
 		r.Get("/rbac/policy", authz.PolicyStatus)
