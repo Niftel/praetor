@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/praetordev/notify"
 	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
+	modelAuth "github.com/praetordev/praetor/services/api/middleware"
 	"github.com/praetordev/render"
 	"github.com/praetordev/store"
 )
@@ -45,6 +46,54 @@ type NotificationsResource struct {
 
 func NewNotificationsResource(db *sqlx.DB, authz *Authorizer) *NotificationsResource {
 	return &NotificationsResource{DB: db, Authorizer: authz, store: store.NewNotificationStore(db)}
+}
+
+func auditNotification(r *http.Request, organizationID, resourceID int64, resourceType, action, failureCode string) {
+	modelAuth.SetActivityMetadata(r, modelAuth.ActivityMetadata{
+		OrganizationID: organizationID,
+		ResourceID:     resourceID,
+		ResourceType:   resourceType,
+		Action:         action,
+		FailureCode:    failureCode,
+	})
+}
+
+func auditNotificationAttachment(db *sqlx.DB, r *http.Request, automationType string, automationID int64, action string) {
+	var organizationID int64
+	var err error
+	switch automationType {
+	case "job_template":
+		err = db.GetContext(r.Context(), &organizationID,
+			`SELECT organization_id FROM job_templates WHERE id=$1`, automationID)
+	case "workflow_template":
+		err = db.GetContext(r.Context(), &organizationID,
+			`SELECT organization_id FROM workflow_templates WHERE id=$1`, automationID)
+	default:
+		return
+	}
+	if err != nil {
+		return
+	}
+	auditNotification(r, organizationID, automationID, "notification_policy", action, "")
+}
+
+func (h *NotificationsResource) authorizeNotificationAdmin(w http.ResponseWriter, r *http.Request, organizationID int64) bool {
+	auditNotification(r, organizationID, 0, "", "", "")
+	allowed, err := h.canAuthorize(r, rbac.Organization, organizationID, actAdmin)
+	if err != nil {
+		auditNotification(r, organizationID, 0, "", "", "authorization_error")
+		renderNotificationError(w, r, render.ErrInternal(err))
+		return false
+	}
+	if !allowed {
+		auditNotification(r, organizationID, 0, "", "", "notification_admin_required")
+		renderNotificationError(w, r, &render.ErrorResponse{
+			HTTPStatusCode: http.StatusForbidden,
+			ErrorText:      "Notification administration denied (notification_admin_required)",
+		})
+		return false
+	}
+	return true
 }
 
 // ListNotificationTemplates GET /api/v1/notification-templates?organization_id=N
@@ -82,6 +131,7 @@ func (h *NotificationsResource) ListNotificationTypes(w http.ResponseWriter, r *
 // a typed `config` map or, for backward compatibility with the current UI, a
 // bare `url` (mapped to {"url": ...}).
 func (h *NotificationsResource) CreateNotificationTemplate(w http.ResponseWriter, r *http.Request) {
+	auditNotification(r, 0, 0, "notification_template", "create", "")
 	var body struct {
 		OrganizationID   int64             `json:"organization_id"`
 		Name             string            `json:"name"`
@@ -102,7 +152,7 @@ func (h *NotificationsResource) CreateNotificationTemplate(w http.ResponseWriter
 	if body.URL != "" {
 		body.Config["url"] = body.URL // back-compat
 	}
-	if !h.authorizeOrgRole(w, r, body.OrganizationID, rbac.NotificationAdminRole) {
+	if !h.authorizeNotificationAdmin(w, r, body.OrganizationID) {
 		return
 	}
 
@@ -131,6 +181,7 @@ func (h *NotificationsResource) CreateNotificationTemplate(w http.ResponseWriter
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
+	auditNotification(r, body.OrganizationID, id, "notification_template", "create", "")
 	render.Created(w, r, map[string]interface{}{"id": id})
 }
 
@@ -388,6 +439,7 @@ func (h *NotificationsResource) ListNotificationPolicies(w http.ResponseWriter, 
 // route requires both administration of the automation resource and explicit
 // notification administration for its organization.
 func (h *NotificationsResource) CreateNotificationPolicy(w http.ResponseWriter, r *http.Request) {
+	auditNotification(r, 0, 0, "notification_policy", "create", "")
 	var body struct {
 		NotificationTemplateID int64  `json:"notification_template_id"`
 		ResourceType           string `json:"resource_type"`
@@ -405,9 +457,10 @@ func (h *NotificationsResource) CreateNotificationPolicy(w http.ResponseWriter, 
 		return
 	}
 	if !h.authorize(w, r, resource.ContentType, resource.ObjectID, actAdmin) ||
-		!h.authorizeOrgRole(w, r, resource.OrganizationID, rbac.NotificationAdminRole) {
+		!h.authorizeNotificationAdmin(w, r, resource.OrganizationID) {
 		return
 	}
+	auditNotification(r, resource.OrganizationID, 0, "notification_policy", "create", "")
 
 	var id int64
 	err = h.DB.GetContext(r.Context(), &id, `
@@ -427,14 +480,21 @@ func (h *NotificationsResource) CreateNotificationPolicy(w http.ResponseWriter, 
 			resource.OrganizationID, body.TeamID, body.NotificationTemplateID, body.ResourceType, body.ResourceID, body.Event)
 	}
 	if err != nil {
-		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("invalid notification policy: %w", err)))
+		auditNotification(r, resource.OrganizationID, 0, "notification_policy", "create", "notification_scope_invalid")
+		renderNotificationError(w, r, &render.ErrorResponse{
+			Err:            err,
+			HTTPStatusCode: http.StatusBadRequest,
+			ErrorText:      "Invalid notification policy (notification_scope_invalid)",
+		})
 		return
 	}
+	auditNotification(r, resource.OrganizationID, id, "notification_policy", "create", "")
 	render.Created(w, r, map[string]int64{"id": id})
 }
 
 // DeleteNotificationPolicy DELETE /api/v1/notification-policies/{id}.
 func (h *NotificationsResource) DeleteNotificationPolicy(w http.ResponseWriter, r *http.Request) {
+	auditNotification(r, 0, 0, "notification_policy", "delete", "")
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("invalid notification policy id")))
@@ -461,11 +521,13 @@ func (h *NotificationsResource) DeleteNotificationPolicy(w http.ResponseWriter, 
 		return
 	}
 	if resource.OrganizationID != policy.OrganizationID {
+		auditNotification(r, policy.OrganizationID, id, "notification_policy", "delete", "notification_scope_mismatch")
 		renderNotificationError(w, r, render.ErrForbidden(fmt.Errorf("notification policy organization mismatch")))
 		return
 	}
+	auditNotification(r, policy.OrganizationID, id, "notification_policy", "delete", "")
 	if !h.authorize(w, r, resource.ContentType, resource.ObjectID, actAdmin) ||
-		!h.authorizeOrgRole(w, r, policy.OrganizationID, rbac.NotificationAdminRole) {
+		!h.authorizeNotificationAdmin(w, r, policy.OrganizationID) {
 		return
 	}
 	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM notification_policies WHERE id=$1`, id); err != nil {
@@ -480,6 +542,7 @@ func (h *NotificationsResource) DeleteNotificationPolicy(w http.ResponseWriter, 
 // used by lifecycle notifications. Stored config remains server-side and is
 // never serialized into the response.
 func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, r *http.Request) {
+	auditNotification(r, 0, 0, "notification_template", "test", "")
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("invalid notification template id")))
@@ -496,7 +559,8 @@ func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, 
 		renderNotificationError(w, r, render.ErrInternal(err))
 		return
 	}
-	if !h.authorizeOrgRole(w, r, target.OrganizationID, rbac.NotificationAdminRole) {
+	auditNotification(r, target.OrganizationID, target.ID, "notification_template", "test", "")
+	if !h.authorizeNotificationAdmin(w, r, target.OrganizationID) {
 		return
 	}
 
@@ -514,6 +578,7 @@ func (h *NotificationsResource) TestNotificationTemplate(w http.ResponseWriter, 
 		if ctx.Err() != nil {
 			failureCode = "delivery_timeout"
 		}
+		auditNotification(r, target.OrganizationID, target.ID, "notification_template", "test", failureCode)
 		// Delivery errors can contain a webhook URL whose path embeds a secret.
 		// Record only bounded identifiers and a stable failure code.
 		logger.Warn("notification test delivery failed", "notification_template_id", target.ID, "organization_id", target.OrganizationID, "notification_type", target.NotificationType, "failure_code", failureCode)
@@ -539,6 +604,7 @@ func renderNotificationError(w http.ResponseWriter, r *http.Request, response no
 
 // DeleteNotificationTemplate DELETE /api/v1/notification-templates/{id}
 func (h *NotificationsResource) DeleteNotificationTemplate(w http.ResponseWriter, r *http.Request) {
+	auditNotification(r, 0, 0, "notification_template", "delete", "")
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		render.ErrInvalidRequest(err).Render(w, r)
@@ -549,7 +615,8 @@ func (h *NotificationsResource) DeleteNotificationTemplate(w http.ResponseWriter
 		render.ErrInvalidRequest(fmt.Errorf("unknown notification template")).Render(w, r)
 		return
 	}
-	if !h.authorizeOrgRole(w, r, orgID, rbac.NotificationAdminRole) {
+	auditNotification(r, orgID, id, "notification_template", "delete", "")
+	if !h.authorizeNotificationAdmin(w, r, orgID) {
 		return
 	}
 	if err := h.store.DeleteTemplate(r.Context(), id); err != nil {
@@ -576,6 +643,7 @@ func (rs *TemplatesResource) ListJobTemplateNotifications(w http.ResponseWriter,
 // AttachJobTemplateNotification POST /api/v1/job-templates/{id}/notifications
 func (rs *TemplatesResource) AttachJobTemplateNotification(w http.ResponseWriter, r *http.Request) {
 	jtID := render.GetIDParam(r)
+	auditNotificationAttachment(rs.DB, r, "job_template", jtID, "create")
 	if !rs.authorize(w, r, rbac.JobTemplate, jtID, actAdmin) {
 		return
 	}
@@ -603,6 +671,7 @@ func (rs *TemplatesResource) AttachJobTemplateNotification(w http.ResponseWriter
 // DetachJobTemplateNotification DELETE /api/v1/job-templates/{id}/notifications/{ntId}/{event}
 func (rs *TemplatesResource) DetachJobTemplateNotification(w http.ResponseWriter, r *http.Request) {
 	jtID := render.GetIDParam(r)
+	auditNotificationAttachment(rs.DB, r, "job_template", jtID, "delete")
 	if !rs.authorize(w, r, rbac.JobTemplate, jtID, actAdmin) {
 		return
 	}
@@ -639,6 +708,7 @@ func (rs *WorkflowsResource) ListWorkflowNotifications(w http.ResponseWriter, r 
 // on a human outcome, and 'timeout' when the scheduler expires a gate.
 func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
 	wtID := render.GetIDParam(r)
+	auditNotificationAttachment(rs.DB, r, "workflow_template", wtID, "create")
 	if !rs.authorize(w, r, rbac.WorkflowTemplate, wtID, actAdmin) {
 		return
 	}
@@ -666,6 +736,7 @@ func (rs *WorkflowsResource) AttachWorkflowNotification(w http.ResponseWriter, r
 // DetachWorkflowNotification DELETE /api/v1/workflow-templates/{id}/notifications/{ntId}/{event}
 func (rs *WorkflowsResource) DetachWorkflowNotification(w http.ResponseWriter, r *http.Request) {
 	wtID := render.GetIDParam(r)
+	auditNotificationAttachment(rs.DB, r, "workflow_template", wtID, "delete")
 	if !rs.authorize(w, r, rbac.WorkflowTemplate, wtID, actAdmin) {
 		return
 	}

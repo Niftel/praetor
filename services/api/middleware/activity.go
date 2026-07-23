@@ -77,14 +77,57 @@ func (a *ActivityRecorder) Close(ctx context.Context) error {
 }
 
 type activityRecord struct {
-	userID       int64
-	username     string
-	action       string
-	resourceType string
-	resourceID   *int64
-	method       string
-	path         string
-	statusCode   int
+	userID              int64
+	username            string
+	principalKind       PrincipalKind
+	servicePrincipalID  int64
+	serviceCredentialID int64
+	action              string
+	resourceType        string
+	resourceID          *int64
+	organizationID      *int64
+	method              string
+	path                string
+	statusCode          int
+	outcome             string
+	failureCode         string
+}
+
+type activityMetadataKey struct{}
+
+// ActivityMetadata lets a handler enrich the request audit record without
+// exposing request bodies or secret-bearing configuration. The recorder owns
+// the value and handlers may only supply bounded identifiers and reason codes.
+type ActivityMetadata struct {
+	OrganizationID int64
+	ResourceID     int64
+	ResourceType   string
+	Action         string
+	FailureCode    string
+}
+
+// SetActivityMetadata enriches the current mutation's audit record. It is a
+// no-op outside ActivityRecorder middleware.
+func SetActivityMetadata(r *http.Request, metadata ActivityMetadata) {
+	current, _ := r.Context().Value(activityMetadataKey{}).(*ActivityMetadata)
+	if current == nil {
+		return
+	}
+	if metadata.OrganizationID > 0 {
+		current.OrganizationID = metadata.OrganizationID
+	}
+	if metadata.ResourceID > 0 {
+		current.ResourceID = metadata.ResourceID
+	}
+	if metadata.ResourceType != "" {
+		current.ResourceType = metadata.ResourceType
+	}
+	if metadata.Action != "" {
+		current.Action = metadata.Action
+	}
+	if metadata.FailureCode != "" {
+		current.FailureCode = metadata.FailureCode
+	}
 }
 
 func (a *ActivityRecorder) record(record activityRecord) {
@@ -106,10 +149,16 @@ func (a *ActivityRecorder) record(record activityRecord) {
 		ctx, cancel := context.WithTimeout(a.ctx, a.timeout)
 		defer cancel()
 		_, err := a.executor.ExecContext(ctx, `
-			INSERT INTO activity_stream (user_id, username, action, resource_type, resource_id, method, path, status_code)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			nullableInt(record.userID), record.username, record.action, record.resourceType,
-			record.resourceID, record.method, record.path, record.statusCode)
+			INSERT INTO activity_stream (
+			    user_id, username, principal_kind, service_principal_id,
+			    service_credential_id, action, resource_type, resource_id,
+			    organization_id, method, path, status_code, outcome, failure_code
+			)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''))`,
+			nullableInt(record.userID), record.username, record.principalKind,
+			nullableInt(record.servicePrincipalID), nullableInt(record.serviceCredentialID),
+			record.action, record.resourceType, record.resourceID, record.organizationID,
+			record.method, record.path, record.statusCode, record.outcome, record.failureCode)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				a.logf("activity audit write timed out: method=%s path=%s", record.method, record.path)
@@ -121,7 +170,7 @@ func (a *ActivityRecorder) record(record activityRecord) {
 }
 
 // statusWriter captures the response status code so the activity recorder can
-// log only successful mutations.
+// distinguish successful, denied, and failed mutations.
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -184,8 +233,16 @@ func classify(method, path string) (action, resourceType string, resourceID *int
 	return action, resourceType, resourceID
 }
 
+func isNotificationMutationPath(path string) bool {
+	return strings.Contains(path, "/notification-templates") ||
+		strings.Contains(path, "/notification-policies") ||
+		strings.Contains(path, "/notifications")
+}
+
 // Middleware records every successful mutating request (who, what, when) into
-// activity_stream. Reads/queries and machine endpoints are ignored.
+// activity_stream. Notification mutations additionally retain denied and failed
+// outcomes because those security boundaries are operator-visible evidence.
+// Reads/queries and high-volume machine endpoints are ignored.
 func (a *ActivityRecorder) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mutating := r.Method == http.MethodPost || r.Method == http.MethodPut ||
@@ -195,20 +252,72 @@ func (a *ActivityRecorder) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		metadata := &ActivityMetadata{}
+		r = r.WithContext(context.WithValue(r.Context(), activityMetadataKey{}, metadata))
 		sw := &statusWriter{ResponseWriter: w}
 		next.ServeHTTP(sw, r)
 
-		if sw.status < 200 || sw.status >= 300 {
+		success := sw.status >= 200 && sw.status < 300
+		notificationMutation := isNotificationMutationPath(r.URL.Path)
+		if !success && !notificationMutation {
 			return
 		}
 		uc, _ := r.Context().Value(UserContextKey).(UserContext)
+		if uc.Kind == "" {
+			uc.Kind = HumanPrincipal
+		}
 		action, resourceType, resourceID := classify(r.Method, r.URL.Path)
+		if metadata.Action != "" {
+			action = metadata.Action
+		}
+		if metadata.ResourceType != "" {
+			resourceType = metadata.ResourceType
+		}
+		if metadata.ResourceID > 0 {
+			id := metadata.ResourceID
+			resourceID = &id
+		}
+		var organizationID *int64
+		if metadata.OrganizationID > 0 {
+			id := metadata.OrganizationID
+			organizationID = &id
+		}
+		outcome := "success"
+		if !success {
+			outcome = "failed"
+			if sw.status == http.StatusUnauthorized || sw.status == http.StatusForbidden {
+				outcome = "denied"
+			}
+		}
+		failureCode := metadata.FailureCode
+		if !success && failureCode == "" {
+			failureCode = activityFailureCode(sw.status)
+		}
 		a.record(activityRecord{
-			userID: uc.UserID, username: uc.Username, action: action,
-			resourceType: resourceType, resourceID: resourceID,
-			method: r.Method, path: r.URL.Path, statusCode: sw.status,
+			userID: uc.UserID, username: uc.Username, principalKind: uc.Kind,
+			servicePrincipalID: uc.ServicePrincipalID, serviceCredentialID: uc.ServiceCredentialID,
+			action: action, resourceType: resourceType, resourceID: resourceID,
+			organizationID: organizationID, method: r.Method, path: r.URL.Path,
+			statusCode: sw.status, outcome: outcome, failureCode: failureCode,
 		})
 	})
+}
+
+func activityFailureCode(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "invalid_request"
+	case http.StatusUnauthorized:
+		return "authentication_required"
+	case http.StatusForbidden:
+		return "permission_denied"
+	case http.StatusNotFound:
+		return "resource_not_found"
+	case http.StatusBadGateway:
+		return "delivery_failed"
+	default:
+		return "request_failed"
+	}
 }
 
 func nullableInt(v int64) interface{} {
