@@ -155,6 +155,85 @@ type notificationPolicy struct {
 	Event                  string  `db:"event" json:"event"`
 }
 
+type notificationDeliveryAttempt struct {
+	AttemptNumber int16     `json:"attempt_number"`
+	Outcome       string    `json:"outcome"`
+	FailureCode   *string   `json:"failure_code,omitempty"`
+	FailureReason *string   `json:"failure_reason,omitempty"`
+	StartedAt     time.Time `json:"started_at"`
+	FinishedAt    time.Time `json:"finished_at"`
+}
+
+type notificationDeliveryHistory struct {
+	ID                     int64                         `db:"id" json:"id"`
+	OrganizationID         int64                         `db:"organization_id" json:"organization_id"`
+	TeamID                 *int64                        `db:"team_id" json:"team_id,omitempty"`
+	TeamName               *string                       `db:"team_name" json:"team_name,omitempty"`
+	NotificationTemplateID *int64                        `db:"notification_template_id" json:"notification_template_id,omitempty"`
+	TargetName             string                        `db:"target_name" json:"target_name"`
+	TargetType             string                        `db:"target_type" json:"target_type"`
+	ResourceType           string                        `db:"resource_type" json:"resource_type"`
+	ResourceID             int64                         `db:"resource_id" json:"resource_id"`
+	Event                  string                        `db:"event" json:"event"`
+	OccurrenceType         string                        `db:"occurrence_type" json:"occurrence_type"`
+	OccurrenceID           string                        `db:"occurrence_id" json:"occurrence_id"`
+	SubjectID              int64                         `db:"subject_id" json:"subject_id"`
+	SubjectName            string                        `db:"subject_name" json:"subject_name"`
+	SubjectKind            string                        `db:"subject_kind" json:"subject_kind"`
+	Status                 string                        `db:"status" json:"status"`
+	AttemptCount           int16                         `db:"attempt_count" json:"attempt_count"`
+	MaxAttempts            int16                         `db:"max_attempts" json:"max_attempts"`
+	NextAttemptAt          time.Time                     `db:"next_attempt_at" json:"next_attempt_at"`
+	FirstAttemptAt         *time.Time                    `db:"first_attempt_at" json:"first_attempt_at,omitempty"`
+	LastAttemptAt          *time.Time                    `db:"last_attempt_at" json:"last_attempt_at,omitempty"`
+	DeliveredAt            *time.Time                    `db:"delivered_at" json:"delivered_at,omitempty"`
+	FailedAt               *time.Time                    `db:"failed_at" json:"failed_at,omitempty"`
+	FailureCode            *string                       `db:"failure_code" json:"failure_code,omitempty"`
+	FailureReason          *string                       `db:"failure_reason" json:"failure_reason,omitempty"`
+	CreatedAt              time.Time                     `db:"created_at" json:"created_at"`
+	UpdatedAt              time.Time                     `db:"updated_at" json:"updated_at"`
+	AttemptsJSON           json.RawMessage               `db:"attempts" json:"-"`
+	Attempts               []notificationDeliveryAttempt `db:"-" json:"attempts"`
+}
+
+type notificationDeliveryHistoryResponse struct {
+	Results    []notificationDeliveryHistory `json:"results"`
+	NextCursor *int64                        `json:"next_cursor,omitempty"`
+}
+
+type notificationDeliveryHistoryFilter struct {
+	OrganizationID int64
+	Cursor         int64
+	Limit          int
+	Status         string
+}
+
+func parseNotificationDeliveryHistoryFilter(r *http.Request) (notificationDeliveryHistoryFilter, error) {
+	filter := notificationDeliveryHistoryFilter{Limit: 25, Status: strings.TrimSpace(r.URL.Query().Get("status"))}
+	var err error
+	filter.OrganizationID, err = strconv.ParseInt(r.URL.Query().Get("organization_id"), 10, 64)
+	if err != nil || filter.OrganizationID <= 0 {
+		return filter, fmt.Errorf("organization_id is required")
+	}
+	if filter.Status != "" && filter.Status != "pending" && filter.Status != "retrying" && filter.Status != "sending" &&
+		filter.Status != "delivered" && filter.Status != "failed" {
+		return filter, fmt.Errorf("unsupported notification delivery status %q", filter.Status)
+	}
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		filter.Cursor, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || filter.Cursor <= 0 {
+			return filter, fmt.Errorf("cursor must be a positive delivery id")
+		}
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		filter.Limit, err = strconv.Atoi(raw)
+		if err != nil || filter.Limit <= 0 || filter.Limit > 100 {
+			return filter, fmt.Errorf("limit must be between 1 and 100")
+		}
+	}
+	return filter, nil
+}
+
 type notificationPolicyResource struct {
 	OrganizationID int64
 	ContentType    rbac.ResourceKind
@@ -189,6 +268,84 @@ func (h *NotificationsResource) resolvePolicyResource(ctx context.Context, resou
 		return resource, fmt.Errorf("unsupported notification policy resource type %q", resourceType)
 	}
 	return resource, nil
+}
+
+// ListNotificationDeliveryHistory GET /api/v1/notification-deliveries.
+//
+// Organization administrators can inspect every delivery in the organization.
+// Other organization readers see only deliveries explicitly scoped to teams
+// they belong to. Target configuration and idempotency keys are intentionally
+// absent from both the SELECT and response.
+func (h *NotificationsResource) ListNotificationDeliveryHistory(w http.ResponseWriter, r *http.Request) {
+	filter, err := parseNotificationDeliveryHistoryFilter(r)
+	if err != nil {
+		renderNotificationError(w, r, render.ErrInvalidRequest(err))
+		return
+	}
+	if !h.authorize(w, r, rbac.Organization, filter.OrganizationID, actRead) {
+		return
+	}
+	canViewAll, err := h.canAuthorize(r, rbac.Organization, filter.OrganizationID, actAdmin)
+	if err != nil {
+		renderNotificationError(w, r, render.ErrInternal(err))
+		return
+	}
+
+	rows := []notificationDeliveryHistory{}
+	if err := h.DB.SelectContext(r.Context(), &rows, `
+		SELECT d.id, d.organization_id, d.team_id, team.name AS team_name,
+		       d.notification_template_id, d.target_name, d.target_type,
+		       d.resource_type, d.resource_id, d.event,
+		       d.occurrence_type, d.occurrence_id,
+		       d.subject_id, d.subject_name, d.subject_kind,
+		       d.status, d.attempt_count, d.max_attempts, d.next_attempt_at,
+		       d.first_attempt_at, d.last_attempt_at, d.delivered_at, d.failed_at,
+		       d.failure_code, d.failure_reason, d.created_at, d.updated_at,
+		       COALESCE((
+		           SELECT jsonb_agg(jsonb_build_object(
+		               'attempt_number', a.attempt_number,
+		               'outcome', a.outcome,
+		               'failure_code', a.failure_code,
+		               'failure_reason', a.failure_reason,
+		               'started_at', a.started_at,
+		               'finished_at', a.finished_at
+		           ) ORDER BY a.attempt_number)
+		             FROM notification_delivery_attempts a
+		            WHERE a.delivery_id=d.id
+		       ), '[]'::jsonb) AS attempts
+		  FROM notification_deliveries d
+		  LEFT JOIN teams team ON team.id=d.team_id
+		 WHERE d.organization_id=$1
+		   AND ($2 OR (
+		       d.team_id IS NOT NULL
+		       AND EXISTS (
+		           SELECT 1 FROM team_members tm
+		            WHERE tm.team_id=d.team_id AND tm.user_id=$3
+		       )
+		   ))
+		   AND ($4::bigint = 0 OR d.id < $4)
+		   AND ($5 = '' OR d.status=$5)
+		 ORDER BY d.id DESC
+		 LIMIT $6`,
+		filter.OrganizationID, canViewAll, currentUser(r).UserID,
+		filter.Cursor, filter.Status, filter.Limit+1); err != nil {
+		renderNotificationError(w, r, render.ErrInternal(err))
+		return
+	}
+
+	response := notificationDeliveryHistoryResponse{Results: rows}
+	if len(rows) > filter.Limit {
+		response.Results = rows[:filter.Limit]
+		next := response.Results[len(response.Results)-1].ID
+		response.NextCursor = &next
+	}
+	for i := range response.Results {
+		if err := json.Unmarshal(response.Results[i].AttemptsJSON, &response.Results[i].Attempts); err != nil {
+			renderNotificationError(w, r, render.ErrInternal(fmt.Errorf("decode notification delivery attempts: %w", err)))
+			return
+		}
+	}
+	render.JSON(w, r, response)
 }
 
 // ListNotificationPolicies GET /api/v1/notification-policies?resource_type=...&resource_id=N

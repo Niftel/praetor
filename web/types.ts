@@ -334,6 +334,53 @@ export interface NotificationTestResult {
   tested_at: string;
 }
 
+export type NotificationDeliveryStatus = 'pending' | 'retrying' | 'sending' | 'delivered' | 'failed';
+
+export interface NotificationDeliveryAttempt {
+  attempt_number: number;
+  outcome: 'delivered' | 'transient_failure' | 'permanent_failure';
+  failure_code?: string;
+  failure_reason?: string;
+  started_at: string;
+  finished_at: string;
+}
+
+export interface NotificationDelivery {
+  id: number;
+  organization_id: number;
+  team_id?: number;
+  team_name?: string;
+  notification_template_id?: number;
+  target_name: string;
+  target_type: string;
+  resource_type: 'job_template' | 'workflow_template' | 'inventory_source';
+  resource_id: number;
+  event: string;
+  occurrence_type: 'job_event' | 'workflow_job' | 'workflow_node';
+  occurrence_id: string;
+  subject_id: number;
+  subject_name: string;
+  subject_kind: string;
+  status: NotificationDeliveryStatus;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  first_attempt_at?: string;
+  last_attempt_at?: string;
+  delivered_at?: string;
+  failed_at?: string;
+  failure_code?: string;
+  failure_reason?: string;
+  created_at: string;
+  updated_at: string;
+  attempts: NotificationDeliveryAttempt[];
+}
+
+export interface NotificationDeliveryPage {
+  results: NotificationDelivery[];
+  next_cursor?: number;
+}
+
 // Workflows
 export type WorkflowNodeType = 'job' | 'approval' | 'webhook_in' | 'webhook_out';
 export type WorkflowEdgeType = 'success' | 'failure' | 'always';

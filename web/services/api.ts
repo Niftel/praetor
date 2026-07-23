@@ -260,6 +260,13 @@ export const api = {
     createNotificationTemplate: (data: any) => fetchWithAuth('/notification-templates', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     deleteNotificationTemplate: (id: number) => fetchWithAuth(`/notification-templates/${id}`, { method: 'DELETE' }),
     testNotificationTemplate: (id: number) => fetchWithAuth(`/notification-templates/${id}/test`, { method: 'POST' }).then(r => r.json()),
+    getNotificationDeliveries: (orgId: number, filters: { status?: string; cursor?: number; limit?: number } = {}) => {
+        const query = new URLSearchParams({ organization_id: String(orgId) });
+        if (filters.status) query.set('status', filters.status);
+        if (filters.cursor) query.set('cursor', String(filters.cursor));
+        if (filters.limit) query.set('limit', String(filters.limit));
+        return fetchWithAuth(`/notification-deliveries?${query}`).then(r => r.json());
+    },
     getNotificationPolicies: (resourceType: string, resourceId: number) => {
         const query = new URLSearchParams({ resource_type: resourceType, resource_id: String(resourceId) });
         return fetchWithAuth(`/notification-policies?${query}`).then(r => r.json());
