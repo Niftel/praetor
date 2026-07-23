@@ -24,7 +24,7 @@ require (
 	github.com/praetordev/plog v0.1.0
 	github.com/praetordev/rbac/v4 v4.0.0
 	github.com/praetordev/render v0.1.0
-	github.com/praetordev/scheduler v0.1.4
+	github.com/praetordev/scheduler v0.1.5
 	github.com/praetordev/store v0.1.5
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2

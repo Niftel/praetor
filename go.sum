@@ -197,6 +197,8 @@ github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93 h1:M6PdskEq
 github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93/go.mod h1:8zaEKfKoUADXdNovZORlE1WznHh/Mhery/KzEhYE2Xo=
 github.com/praetordev/scheduler v0.1.4 h1:hl54Ma3Ewoyawl3IBeu8JSEqGH9EfBLpQjW6JYDAZDI=
 github.com/praetordev/scheduler v0.1.4/go.mod h1:3sSlTYw1u70BTCNG/u1KUgTYCxM8NJVMxcHi2AgYr8Q=
+github.com/praetordev/scheduler v0.1.5 h1:zT7bImBVdoNYk2UflyoxkkqlwR6azVgr1U49UB3Xsbs=
+github.com/praetordev/scheduler v0.1.5/go.mod h1:oetbtYMNxyaba740kwWITa6MQWg5ZHm7yxUJtmAKL2U=
 github.com/praetordev/store v0.1.2 h1:uH5ICkUFML1ymItKJk0MdpQfp0BgA3zKF4jbbGtiirk=
 github.com/praetordev/store v0.1.2/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
 github.com/praetordev/store v0.1.3-0.20260720203755-1785f165f30a h1:W5BfMaNwUGrpSMUNRGhKEUTTmwZwlLCplvgNVJxwmr4=
