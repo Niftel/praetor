@@ -164,6 +164,8 @@ func TestProductValidationFixtureIsScopedAndIdempotent(t *testing.T) {
 		`app.kubernetes.io/part-of=praetor-validation-fixture`,
 		`--reuse-values`,
 		`DELETE FROM workflow_templates WHERE name = 'Praetor Validation Workflow'`,
+		`notification-policies?resource_type=`,
+		`ensure_policy workflow_template`,
 		`persistent platform data and secrets were preserved`,
 	} {
 		if !strings.Contains(script, required) {
@@ -224,7 +226,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery := string(recoveryRaw)
-	for _, required := range []string{"RESUMED_FROM_CHECKPOINT", "recovery-side-effects.log", "deployment/praetor-ingestion --replicas=0", "sh -c 'kill -STOP -1; kill -STOP 1'", "state='reconciling'", "activity-stream?limit=500", "resolution_count", "notification_count", "env PGPASSWORD=validation-only psql -U postgres -d postgres -Atc \"$RESOLUTION_QUERY\"", "PRAETOR_RECOVERY_EVIDENCE_FILE"} {
+	for _, required := range []string{"RESUMED_FROM_CHECKPOINT", "recovery-side-effects.log", "deployment/praetor-ingestion --replicas=0", "sh -c 'kill -STOP -1; kill -STOP 1'", "state='reconciling'", "activity-stream?limit=500", "resolution_count", "notification_count", "notification-policies", "resource_type:\"workflow_template\"", "resource_type:\"job_template\"", "notification-kind-isolation", "job-template-notification-exact-once", "team_id:$team", "env PGPASSWORD=validation-only psql -U postgres -d postgres -Atc \"$RESOLUTION_QUERY\"", "PRAETOR_RECOVERY_EVIDENCE_FILE"} {
 		if !strings.Contains(recovery, required) {
 			t.Fatalf("execution recovery journey must contain %q", required)
 		}
@@ -247,7 +249,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	journey := string(journeyRaw)
-	for _, required := range []string{"demo-operator", "mwebb", "fwalsh", "demo-auditor", "expected 403", "requested_by", "activity-stream", "workflow finished with status", "PRAETOR_LDAP_EVIDENCE_FILE"} {
+	for _, required := range []string{"demo-operator", "mwebb", "fwalsh", "demo-auditor", "expected 403", "requested_by", "activity-stream", "workflow finished with status", "PRAETOR_LDAP_EVIDENCE_FILE", "wait_notification", "approval-notification-exact-once", "approved-notification-exact-once", "notification-resource-identity"} {
 		if !strings.Contains(journey, required) {
 			t.Fatalf("LDAP operator journey must contain %q", required)
 		}
@@ -705,6 +707,8 @@ func TestStagingAcceptanceIsScopedRepeatableAndNonDestructive(t *testing.T) {
 		"delete pod/praetor-staging-delegated-db service/praetor-staging-delegated-db",
 		"validate-delegated-api-e2e.sh",
 		"notification-delivery",
+		"notification-policies?resource_type=workflow_template",
+		"team_id:$team",
 		"chmod 0600",
 	} {
 		if !strings.Contains(script, required) {

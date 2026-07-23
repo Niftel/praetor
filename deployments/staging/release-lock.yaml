@@ -8,12 +8,12 @@ components:
     digest: sha256:90d7f9d53b87ee22cfb83e1f7faa16fb70d5b3520a23c05569c99b4ccbaf544f
   consumer:
     image: praetor-consumer
-    version: 0.1.1
-    digest: sha256:d91d79fd5982577160c880cd7e7ff9f6954102fa19e2528a2f27295d86959d86
+    version: 0.1.2
+    digest: sha256:2ab2a5a771d08cbfad0d0d183345c9e26fe6b913c6c9534ad42a404e18167e3d
   executor:
     image: praetor-executor
-    version: 0.1.3
-    digest: sha256:131ad85a4322615b6911bc535cee38fc499e261ed2bde086212f5943cdbc1e12
+    version: 0.1.4
+    digest: sha256:46baefdaaa8bb057e540596573b036c73bf6015d1aeb0007996146f72afcd719
   ingestion:
     image: praetor-ingestion
     version: 0.1.2
@@ -28,8 +28,8 @@ components:
     digest: sha256:6f926f3f8b9614b6ca78913334a120bbb650b50d3f4ec4f8c23bd77ab459d620
   scheduler:
     image: praetor-scheduler
-    version: 0.1.4
-    digest: sha256:7b18776b102a94abe52f74e52c684d59a0ab8b962d0bbd75f7c5e58b78e752ad
+    version: 0.1.5
+    digest: sha256:4762b2bee1e00d26dde9613153b7fe6015c10e7b897131e50f47e480a514f9e3
   ui:
     image: praetor-ui
     version: 0.1.4

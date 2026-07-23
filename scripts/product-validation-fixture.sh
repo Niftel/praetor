@@ -61,6 +61,20 @@ ensure_named() {
   if [[ -z "$id" ]]; then id="$(api_post "$path" "$body" | jq -er .id)"; fi
   printf '%s' "$id"
 }
+ensure_policy() {
+  local resource_type="$1" resource_id="$2" event="$3" target_id="$4" team_id="${5:-}" policies body id
+  policies="$(api_get "notification-policies?resource_type=$resource_type&resource_id=$resource_id")"
+  id="$(jq -r --arg event "$event" --argjson target "$target_id" --arg team "$team_id" '
+    .[] | select(.event == $event and .notification_template_id == $target)
+    | select(($team == "" and (.team_id == null)) or ($team != "" and (.team_id | tostring) == $team))
+    | .id' <<<"$policies" | head -n1)"
+  if [[ -z "$id" ]]; then
+    body="$(jq -nc --arg type "$resource_type" --argjson resource "$resource_id" --arg event "$event" --argjson target "$target_id" --arg team "$team_id" \
+      '{resource_type:$type,resource_id:$resource,event:$event,notification_template_id:$target} + if $team == "" then {} else {team_id:($team|tonumber)} end')"
+    id="$(api_post notification-policies "$body" | jq -er .id)"
+  fi
+  printf '%s' "$id"
+}
 
 seed_api_resources() {
   start_api_tunnel
@@ -68,7 +82,7 @@ seed_api_resources() {
   # Login-time mapping creates/refreshes Engineering and backend-team first.
   login demo-operator praetor123 >/dev/null
   ADMIN_TOKEN="$(login "${PRAETOR_VALIDATION_ADMIN_USERNAME:-admin}" "${PRAETOR_VALIDATION_ADMIN_PASSWORD:-admin}")"
-  local org_id inventory_id host_id project_id template_id workflow_id ldap_workflow_id team_id
+  local org_id inventory_id host_id project_id template_id workflow_id ldap_workflow_id team_id notification_id
   org_id="$(find_named_id organizations/ Engineering)"; [[ -n "$org_id" ]] || die "LDAP mapping did not create Engineering"
   team_id="$(find_named_id teams/ backend-team)"; [[ -n "$team_id" ]] || die "LDAP mapping did not create backend-team"
   inventory_id="$(ensure_named inventories inventories/ "$FIXTURE_PREFIX Inventory" "$(jq -nc --argjson org "$org_id" --arg name "$FIXTURE_PREFIX Inventory" '{organization_id:$org,name:$name,kind:"static"}')")"
@@ -84,7 +98,13 @@ seed_api_resources() {
   grant_team_role inventory "$inventory_id" "Inventory Use" "$team_id"
   grant_team_role workflow_template "$ldap_workflow_id" "Workflow Template Execute" "$team_id"
   grant_team_role workflow_template "$ldap_workflow_id" "Workflow Template Approve" "$team_id"
-  ensure_named notification-templates "notification-templates?organization_id=$org_id" "$FIXTURE_PREFIX Notifications" "$(jq -nc --argjson org "$org_id" --arg name "$FIXTURE_PREFIX Notifications" '{organization_id:$org,name:$name,notification_type:"webhook",config:{url:"http://praetor-validation-notification-sink:8080/echo"}}')" >/dev/null
+  notification_id="$(ensure_named notification-templates "notification-templates?organization_id=$org_id" "$FIXTURE_PREFIX Notifications" "$(jq -nc --argjson org "$org_id" --arg name "$FIXTURE_PREFIX Notifications" '{organization_id:$org,name:$name,notification_type:"webhook",config:{url:"http://praetor-validation-notification-sink:8080/echo"}}')")"
+  for event in success error; do ensure_policy job_template "$template_id" "$event" "$notification_id" >/dev/null; done
+  for event in started success error; do ensure_policy workflow_template "$workflow_id" "$event" "$notification_id" >/dev/null; done
+  for event in approval approved denied timeout; do
+    ensure_policy workflow_template "$workflow_id" "$event" "$notification_id" "$team_id" >/dev/null
+    ensure_policy workflow_template "$ldap_workflow_id" "$event" "$notification_id" "$team_id" >/dev/null
+  done
   ensure_named "organizations/$org_id/service-principals/" "organizations/$org_id/service-principals/" "$FIXTURE_PREFIX API" "$(jq -nc --arg name "$FIXTURE_PREFIX API" '{name:$name,description:"Synthetic delegated validation principal"}')" >/dev/null
   jq -n --argjson organization_id "$org_id" --argjson team_id "$team_id" --argjson inventory_id "$inventory_id" --argjson host_id "$host_id" --argjson project_id "$project_id" --argjson job_template_id "$template_id" --argjson workflow_id "$workflow_id" --argjson ldap_workflow_id "$ldap_workflow_id" '{organization_id:$organization_id,team_id:$team_id,inventory_id:$inventory_id,host_id:$host_id,project_id:$project_id,job_template_id:$job_template_id,workflow_id:$workflow_id,ldap_workflow_id:$ldap_workflow_id}'
   stop_api_tunnel

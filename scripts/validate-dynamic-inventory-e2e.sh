@@ -114,6 +114,21 @@ job_state() {
   fi
   get "$ADMIN_TOKEN" jobs | jq -r --argjson id "$job_id" '.[] | select(.id == $id) | .status' | head -n1
 }
+wait_notification() {
+  local job_id="$1" event="$2" messages count
+  for _ in $(seq 1 30); do
+    messages="$(kubectl logs -n "$NAMESPACE" deployment/praetor-validation-notification-sink --since=15m 2>/dev/null |
+      jq -Rsc --argjson job "$job_id" --arg event "$event" '[split("\n")[] | fromjson? | select(.job_id == $job and .event == $event)]')"
+    count="$(jq 'length' <<<"$messages")"
+    (( count > 1 )) && die "inventory notification $event for job $job_id was delivered $count times"
+    if [[ "$count" == 1 ]]; then
+      jq -c '.[0]' <<<"$messages"
+      return
+    fi
+    sleep 1
+  done
+  die "inventory notification $event for job $job_id was not delivered"
+}
 wait_job() {
   local job_id="$1" expected="$2" state=""
   for _ in $(seq 1 180); do
@@ -164,6 +179,7 @@ set_provider_payload() {
 PHASE="resource-discovery"
 ORG_ID="$(find_id organizations Engineering)"; [[ -n "$ORG_ID" ]] || die "Engineering organization is missing"
 TEAM_ID="$(find_id teams backend-team)"; [[ -n "$TEAM_ID" ]] || die "backend-team is missing"
+NOTIFICATION_ID="$(find_id 'notification-templates?organization_id='"$ORG_ID" 'Praetor Validation Notifications')"; [[ -n "$NOTIFICATION_ID" ]] || die "validation notification target is missing"
 INVENTORY_ID="$(find_id inventories "$PREFIX Inventory")"
 if [[ -z "$INVENTORY_ID" ]]; then
   request "$ADMIN_TOKEN" POST inventories "$(jq -nc --argjson org "$ORG_ID" --arg name "$PREFIX Inventory" '{organization_id:$org,name:$name,kind:"dynamic"}')"
@@ -189,6 +205,10 @@ if [[ -z "$SOURCE_ID" ]]; then
   request "$ADMIN_TOKEN" POST "inventories/$INVENTORY_ID/sources" "$(jq -nc --arg name "$PREFIX Source" --arg source "$SOURCE_SCRIPT" --argjson credential "$CREDENTIAL_ID" '{name:$name,source_type:"custom",source_kind:"script",source:$source,credential_id:$credential,reconciliation_policy:"disable_missing"}')"
   [[ "$STATUS" == 201 ]] || die "create source returned $STATUS: $RESPONSE"; SOURCE_ID="$(jq -er .id <<<"$RESPONSE")"
 fi
+for event in success error; do
+  request "$ADMIN_TOKEN" POST notification-policies "$(jq -nc --argjson target "$NOTIFICATION_ID" --argjson source "$SOURCE_ID" --arg event "$event" '{notification_template_id:$target,resource_type:"inventory_source",resource_id:$source,event:$event}')"
+  [[ "$STATUS" == 201 ]] || die "create inventory $event notification policy returned $STATUS: $RESPONSE"
+done
 grant_team_role inventory "$INVENTORY_ID" "Inventory Use" "$TEAM_ID"
 grant_team_role inventory "$INVENTORY_ID" "Inventory Update" "$TEAM_ID"
 grant_team_role credential "$CREDENTIAL_ID" "Credential Use" "$TEAM_ID"
@@ -220,6 +240,8 @@ if ! jq -e '.results[0] | .status == "successful" and .hosts_added == 2 and .hos
   INITIAL_DELTA="$(jq -c '.results[0] | {status,phase,hosts_added,hosts_updated,hosts_disabled,hosts_unchanged,groups_added,groups_updated,groups_unchanged,diagnostic_code}' <<<"$INITIAL_HISTORY")"
   die "initial sync delta is incorrect: $INITIAL_DELTA"
 fi
+INITIAL_NOTIFICATION="$(wait_notification "$INITIAL_JOB" success)"
+jq -e --arg name "Engineering / $PREFIX Source" '.kind == "inventory sync" and .job_name == $name' <<<"$INITIAL_NOTIFICATION" >/dev/null || die "initial inventory notification identity is incorrect"
 
 PHASE="changed-reconciliation"
 # Provider change updates alpha, adds gamma and safely disables missing beta.
@@ -240,6 +262,11 @@ request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/syn
 INVALID_HISTORY="$(wait_history_total "$OPERATOR_TOKEN" "$INVENTORY_ID" "$SOURCE_ID" 3)"
 jq -e '.results[0] | .status == "failed" and .diagnostic_code == "provider_acquisition_failed" and (.diagnostic_details == {})' <<<"$INVALID_HISTORY" >/dev/null || die "invalid credential did not fail safely"
 ! grep -Fq 'invalid-fixture-token' <<<"$INVALID_HISTORY" || die "invalid credential leaked into history"
+INVALID_NOTIFICATION="$(wait_notification "$INVALID_JOB" error)"
+jq -e --arg name "Engineering / $PREFIX Source" '.kind == "inventory sync" and .job_name == $name' <<<"$INVALID_NOTIFICATION" >/dev/null || die "failed inventory notification identity is incorrect"
+if grep -Eq "$SECRET|invalid-fixture-token|source_kind|credential|job_args" <<<"$INITIAL_NOTIFICATION$INVALID_NOTIFICATION"; then
+  die "inventory notification exposed source configuration or credentials"
+fi
 request "$ADMIN_TOKEN" PUT "credentials/$CREDENTIAL_ID" "$(jq -nc --argjson org "$ORG_ID" --argjson type "$CREDENTIAL_TYPE_ID" --arg name "$PREFIX Credential" --arg secret "$SECRET" '{organization_id:$org,credential_type_id:$type,name:$name,inputs:{username:"dynamic-inventory",password:$secret}}')"
 [[ "$STATUS" == 200 ]] || die "restore credential returned $STATUS: $RESPONSE"
 request "$OPERATOR_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
@@ -281,7 +308,7 @@ request "$OPERATOR_TOKEN" POST schedules "$(jq -nc --arg name "$PREFIX Schedule"
 get "$OUTSIDER_TOKEN" schedules | jq -e --argjson id "$SCHEDULE_ID" 'all(.[]; .id != $id)' >/dev/null || die "unauthorized team can list source schedule"
 
 PHASE="evidence"
-EVIDENCE="$(jq -n --argjson inventory_id "$INVENTORY_ID" --argjson source_id "$SOURCE_ID" --argjson schedule_id "$SCHEDULE_ID" --argjson initial_job "$INITIAL_JOB" --argjson changed_job "$CHANGED_JOB" --argjson invalid_job "$INVALID_JOB" --argjson timeout_job "$TIMEOUT_JOB" --argjson fault_job "$FAULT_JOB" --argjson recovery_job "$RECOVERY_JOB" '{schema_version:1,journey:"dynamic-inventory",result:"pass",inventory_id:$inventory_id,source_id:$source_id,schedule_id:$schedule_id,jobs:{initial:$initial_job,changed:$changed_job,invalid_credential:$invalid_job,timeout:$timeout_job,fault:$fault_job,recovery:$recovery_job},checks:["sealed-credential","preview-no-mutation","initial-sync","changed-reconciliation","invalid-credential","provider-timeout","safe-failure","recovery","source-schedule","cross-team-denial","secret-redaction"]}')"
+EVIDENCE="$(jq -n --argjson inventory_id "$INVENTORY_ID" --argjson source_id "$SOURCE_ID" --argjson schedule_id "$SCHEDULE_ID" --argjson initial_job "$INITIAL_JOB" --argjson changed_job "$CHANGED_JOB" --argjson invalid_job "$INVALID_JOB" --argjson timeout_job "$TIMEOUT_JOB" --argjson fault_job "$FAULT_JOB" --argjson recovery_job "$RECOVERY_JOB" '{schema_version:1,journey:"dynamic-inventory",result:"pass",inventory_id:$inventory_id,source_id:$source_id,schedule_id:$schedule_id,jobs:{initial:$initial_job,changed:$changed_job,invalid_credential:$invalid_job,timeout:$timeout_job,fault:$fault_job,recovery:$recovery_job},checks:["sealed-credential","preview-no-mutation","initial-sync","changed-reconciliation","invalid-credential","provider-timeout","safe-failure","recovery","source-schedule","cross-team-denial","notification-exact-once","notification-resource-identity","notification-secret-redaction","secret-redaction"]}')"
 if [[ -n "$EVIDENCE_FILE" ]]; then umask 077; printf '%s\n' "$EVIDENCE" >"$EVIDENCE_FILE"; fi
 printf '%s\n' "$EVIDENCE"
 

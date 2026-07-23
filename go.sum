@@ -145,6 +145,8 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/praetordev/consumer v0.1.1 h1:pgIR8y2Nqqr8dDcJwI+C/K09iGUX8zd42IOTK3de5QM=
 github.com/praetordev/consumer v0.1.1/go.mod h1:dKEO0/o7dqAfHI3nsDvbWqyifCQBoqLkeOR36r7C8TY=
+github.com/praetordev/consumer v0.1.2 h1:MDqka0H9XMMkcz8Oc5/nM21imMg4A2H7Ia6auPbB8aQ=
+github.com/praetordev/consumer v0.1.2/go.mod h1:doG+TZZX18x2ewmAzXL+2LF/injJTTosuMyR+YSyDi8=
 github.com/praetordev/credentials v0.1.0 h1:TysS1rxN0ChiwaIqNI8MLD7EZGk7+OHFcH5N5OLsTog=
 github.com/praetordev/credentials v0.1.0/go.mod h1:2RySwG3UxsPA1CNi3TndSgaWJISu993lEQLhPE5y4JQ=
 github.com/praetordev/crypto v0.1.0 h1:7BMcnoSCPGILknroqhSFrQFjvJb6OnpoaEdFwL2VNvE=
@@ -197,6 +199,8 @@ github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93 h1:M6PdskEq
 github.com/praetordev/scheduler v0.1.4-0.20260721152705-7959b4551c93/go.mod h1:8zaEKfKoUADXdNovZORlE1WznHh/Mhery/KzEhYE2Xo=
 github.com/praetordev/scheduler v0.1.4 h1:hl54Ma3Ewoyawl3IBeu8JSEqGH9EfBLpQjW6JYDAZDI=
 github.com/praetordev/scheduler v0.1.4/go.mod h1:3sSlTYw1u70BTCNG/u1KUgTYCxM8NJVMxcHi2AgYr8Q=
+github.com/praetordev/scheduler v0.1.5 h1:zT7bImBVdoNYk2UflyoxkkqlwR6azVgr1U49UB3Xsbs=
+github.com/praetordev/scheduler v0.1.5/go.mod h1:oetbtYMNxyaba740kwWITa6MQWg5ZHm7yxUJtmAKL2U=
 github.com/praetordev/store v0.1.2 h1:uH5ICkUFML1ymItKJk0MdpQfp0BgA3zKF4jbbGtiirk=
 github.com/praetordev/store v0.1.2/go.mod h1:71VFkhVgRYRIwPU8X+gmv9c7Eqha6+KNgFJXRbuxeXg=
 github.com/praetordev/store v0.1.3-0.20260720203755-1785f165f30a h1:W5BfMaNwUGrpSMUNRGhKEUTTmwZwlLCplvgNVJxwmr4=

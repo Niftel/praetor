@@ -73,21 +73,21 @@ executor_pod() {
     -o jsonpath='{.items[0].metadata.name}'
 }
 notification_count() {
-  local workflow_job_id="$1" event="$2"
+  local job_id="$1" event="$2" kind="$3"
   kubectl logs -n "$NAMESPACE" deployment/praetor-validation-notification-sink --since=30m 2>/dev/null |
-    awk -v job="\"job_id\":$workflow_job_id" -v event="\"event\":\"$event\"" \
-      'index($0, job) && index($0, event) { count++ } END { print count + 0 }'
+    jq -Rsc --argjson job "$job_id" --arg event "$event" --arg kind "$kind" \
+      '[split("\n")[] | fromjson? | select(.job_id == $job and .event == $event and (.kind // "") == $kind)] | length'
 }
 wait_notification_count() {
-  local workflow_job_id="$1" event="$2" expected="$3" deadline=$((SECONDS + 60)) count=0
+  local job_id="$1" event="$2" kind="$3" expected="$4" deadline=$((SECONDS + 60)) count=0
   while (( SECONDS < deadline )); do
-    count="$(notification_count "$workflow_job_id" "$event")"
+    count="$(notification_count "$job_id" "$event" "$kind")"
     [[ "$count" == "$expected" ]] && return
-    (( count > expected )) && die "notification $event for workflow $workflow_job_id was delivered $count times"
+    (( count > expected )) && die "$kind notification $event for job $job_id was delivered $count times"
     sleep 1
   done
   kubectl logs -n "$NAMESPACE" deployment/praetor-validation-notification-sink --since=30m --tail=100 >&2 || true
-  die "notification $event for workflow $workflow_job_id was delivered $count times, expected $expected"
+  die "$kind notification $event for job $job_id was delivered $count times, expected $expected"
 }
 
 echo "==> Verifying the deterministic validation stack"
@@ -169,9 +169,16 @@ grant_team_role() {
 grant_team_role "Workflow Template Execute"
 grant_team_role "Workflow Template Approve"
 for event in approval approved success error; do
-  post_status "$ADMIN_TOKEN" "workflow-templates/$WORKFLOW_ID/notifications" \
-    "$(jq -nc --argjson id "$NOTIFICATION_ID" --arg event "$event" '{notification_template_id:$id,event:$event}')"
-  [[ "$RESPONSE_STATUS" == 204 ]] || die "attach $event notification returned $RESPONSE_STATUS: $RESPONSE"
+  policy_body="$(jq -nc --argjson target "$NOTIFICATION_ID" --argjson workflow "$WORKFLOW_ID" --argjson team "$TEAM_ID" --arg event "$event" \
+    '{notification_template_id:$target,resource_type:"workflow_template",resource_id:$workflow,event:$event}
+     + if ($event | IN("approval","approved","denied","timeout")) then {team_id:$team} else {} end')"
+  post_status "$ADMIN_TOKEN" notification-policies "$policy_body"
+  [[ "$RESPONSE_STATUS" == 201 ]] || die "create $event notification policy returned $RESPONSE_STATUS: $RESPONSE"
+done
+for event in success error; do
+  post_status "$ADMIN_TOKEN" notification-policies "$(jq -nc --argjson target "$NOTIFICATION_ID" --argjson template "$JOB_TEMPLATE_ID" --arg event "$event" \
+    '{notification_template_id:$target,resource_type:"job_template",resource_id:$template,event:$event}')"
+  [[ "$RESPONSE_STATUS" == 201 ]] || die "create job template $event notification policy returned $RESPONSE_STATUS: $RESPONSE"
 done
 
 launch_and_approve() {
@@ -275,12 +282,15 @@ assert_terminal_once "$RELAUNCH_RUN_ID" successful
 
 echo "==> Verifying notification deduplication and audit evidence"
 for workflow_job_id in "$RECOVERABLE_WORKFLOW_JOB_ID" "$LOST_WORKFLOW_JOB_ID" "$RELAUNCH_WORKFLOW_JOB_ID"; do
-  wait_notification_count "$workflow_job_id" approval 1
-  wait_notification_count "$workflow_job_id" approved 1
+  wait_notification_count "$workflow_job_id" approval "workflow approval" 1
+  wait_notification_count "$workflow_job_id" approved "workflow approval" 1
 done
-wait_notification_count "$RECOVERABLE_WORKFLOW_JOB_ID" success 1
-wait_notification_count "$LOST_WORKFLOW_JOB_ID" error 1
-wait_notification_count "$RELAUNCH_WORKFLOW_JOB_ID" success 1
+wait_notification_count "$RECOVERABLE_WORKFLOW_JOB_ID" success workflow 1
+wait_notification_count "$LOST_WORKFLOW_JOB_ID" error workflow 1
+wait_notification_count "$RELAUNCH_WORKFLOW_JOB_ID" success workflow 1
+wait_notification_count "$RECOVERABLE_JOB_ID" success "" 1
+wait_notification_count "$LOST_JOB_ID" error "" 1
+wait_notification_count "$RELAUNCH_JOB_ID" success "" 1
 
 AUDIT="$(get "$AUDITOR_TOKEN" 'activity-stream?limit=500')"
 for pair in \
@@ -305,7 +315,7 @@ EVIDENCE="$(jq -n \
   --argjson recoverable_workflow_job_id "$RECOVERABLE_WORKFLOW_JOB_ID" --arg recoverable_run_id "$RECOVERABLE_RUN_ID" \
   --argjson lost_workflow_job_id "$LOST_WORKFLOW_JOB_ID" --arg lost_run_id "$LOST_RUN_ID" \
   --argjson relaunch_workflow_job_id "$RELAUNCH_WORKFLOW_JOB_ID" --arg relaunch_run_id "$RELAUNCH_RUN_ID" \
-  '{schema_version:1,journey:"execution-recovery",result:"pass",recoverable:{workflow_job_id:$recoverable_workflow_job_id,run_id:$recoverable_run_id},unrecoverable:{workflow_job_id:$lost_workflow_job_id,run_id:$lost_run_id},relaunch:{workflow_job_id:$relaunch_workflow_job_id,run_id:$relaunch_run_id}}')"
+  '{schema_version:1,journey:"execution-recovery",result:"pass",recoverable:{workflow_job_id:$recoverable_workflow_job_id,run_id:$recoverable_run_id},unrecoverable:{workflow_job_id:$lost_workflow_job_id,run_id:$lost_run_id},relaunch:{workflow_job_id:$relaunch_workflow_job_id,run_id:$relaunch_run_id},checks:["workflow-notification-exact-once","job-template-notification-exact-once","notification-kind-isolation","approval-team-scope","credential-resolution-exact-once"]}')"
 if [[ -n "${PRAETOR_RECOVERY_EVIDENCE_FILE:-}" ]]; then
   umask 077
   printf '%s\n' "$EVIDENCE" >"$PRAETOR_RECOVERY_EVIDENCE_FILE"
