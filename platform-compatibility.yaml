@@ -31,7 +31,7 @@ components:
     repository: Niftel/scheduler
     module: github.com/praetordev/scheduler
     image: praetor-scheduler
-    version: 0.1.5
+    version: 0.1.6
   reconciler:
     repository: Niftel/reconciler
     module: github.com/praetordev/reconciler
@@ -51,7 +51,7 @@ components:
     repository: Niftel/consumer
     module: github.com/praetordev/consumer
     image: praetor-consumer
-    version: 0.1.2
+    version: 0.1.3
 
 # Versions here are compatibility commitments and must match this repository's
 # go.mod when it imports the module directly.
@@ -130,7 +130,7 @@ sharedModules:
   notify:
     module: github.com/praetordev/notify
     repository: Niftel/notify
-    version: v0.1.0
+    version: v0.1.1
     owner: integrations
     securitySensitive: true
   objectstore:

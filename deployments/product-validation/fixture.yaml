@@ -148,6 +148,9 @@ data:
     server {
       listen 8080;
       location = /healthz { access_log off; return 204; }
+      # Deterministic permanent notification failure. The delivery worker must
+      # classify this 4xx response as terminal and must not retry it.
+      location = /permanent { return 400; }
       # Proxying forces nginx to consume the request body before access_log
       # evaluates $request_body. The internal endpoint is not logged, keeping
       # exactly one JSON log record per notification delivery.

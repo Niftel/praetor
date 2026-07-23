@@ -208,7 +208,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
 		}
 	}
-	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "validate-notification-delivery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
@@ -279,7 +279,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := string(fixtureRaw)
-	for _, required := range []string{"log_format notification escape=none '$request_body'", "rewrite ^ /capture break", "proxy_pass http://127.0.0.1:8080", "location = /capture { access_log off; return 204; }", "praetor-validation-notification-sink"} {
+	for _, required := range []string{"log_format notification escape=none '$request_body'", "rewrite ^ /capture break", "proxy_pass http://127.0.0.1:8080", "location = /capture { access_log off; return 204; }", "location = /permanent { return 400; }", "praetor-validation-notification-sink"} {
 		if !strings.Contains(fixture, required) {
 			t.Fatalf("notification recorder must contain %q", required)
 		}
@@ -299,6 +299,7 @@ func TestProductValidationScopeClassifier(t *testing.T) {
 		{"validation workflow", "pull_request", ".github/workflows/product-validation-fixture.yml\n", "true"},
 		{"LDAP journey", "pull_request", "scripts/validate-ldap-operator-journey.sh\n", "true"},
 		{"recovery implementation", "pull_request", "internal/readiness/report.go\n", "true"},
+		{"notification delivery journey", "pull_request", "scripts/validate-notification-delivery-e2e.sh\n", "true"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -324,6 +325,7 @@ func TestProductValidationJourneyPlanner(t *testing.T) {
 		want                        map[string]string
 	}{
 		{"dynamic PR is focused", "pull_request", "all", "scripts/validate-dynamic-inventory-e2e.sh\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "false", "run_readiness": "false"}},
+		{"notification PR is focused", "pull_request", "all", "scripts/validate-notification-delivery-e2e.sh\n", map[string]string{"run_cluster": "true", "run_notification": "true", "run_dynamic": "false", "run_readiness": "false"}},
 		{"generic fixture PR is complete", "pull_request", "all", "deployments/product-validation/fixture.yaml\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "true", "run_readiness": "true"}},
 		{"delegated manual avoids cluster", "workflow_dispatch", "delegated-api", "", map[string]string{"run_cluster": "false", "run_delegated": "true", "run_readiness": "false"}},
 		{"release manual is complete", "workflow_dispatch", "all", "", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_delegated": "true", "run_readiness": "true"}},

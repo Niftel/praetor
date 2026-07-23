@@ -66,6 +66,50 @@ describe('notification delivery history', () => {
     expect(screen.queryByText(/config/i)).toBeNull();
   });
 
+  it('renders persisted retry completion and permanent failure attempts', async () => {
+    const delivered = {
+      ...delivery,
+      id: 43,
+      status: 'delivered' as const,
+      attempt_count: 2,
+      failure_code: undefined,
+      failure_reason: undefined,
+      attempts: [
+        delivery.attempts[0],
+        {
+          attempt_number: 2,
+          outcome: 'delivered' as const,
+          started_at: '2026-07-23T10:00:05Z',
+          finished_at: '2026-07-23T10:00:06Z',
+        },
+      ],
+    };
+    const failed = {
+      ...delivery,
+      id: 44,
+      subject_name: 'Permanent workflow',
+      status: 'failed' as const,
+      failure_code: 'http_status',
+      failure_reason: 'Destination rejected the notification',
+      attempts: [{
+        ...delivery.attempts[0],
+        outcome: 'permanent_failure' as const,
+        failure_code: 'http_status',
+        failure_reason: 'Destination rejected the notification',
+      }],
+    };
+    vi.mocked(api.getNotificationDeliveries).mockResolvedValueOnce({ results: [delivered, failed] });
+    render(<NotificationDeliveryHistory organizationId={5} />);
+
+    expect(await screen.findByText('Permanent workflow')).toBeTruthy();
+    expect(screen.getAllByText('Delivered')).toHaveLength(2);
+    expect(screen.getAllByText('Failed')).toHaveLength(2);
+    fireEvent.click(screen.getByText('Release workflow'));
+    expect(screen.getByText('Attempt 2')).toBeTruthy();
+    fireEvent.click(screen.getByText('Permanent workflow'));
+    expect(screen.getAllByText('Destination rejected the notification')).toHaveLength(2);
+  });
+
   it('filters status and loads older pages with the returned cursor', async () => {
     vi.mocked(api.getNotificationDeliveries)
       .mockResolvedValueOnce({ results: [delivery], next_cursor: 42 })

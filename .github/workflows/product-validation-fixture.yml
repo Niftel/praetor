@@ -18,11 +18,13 @@ on:
       - 'scripts/validate-ldap-operator-journey.sh'
       - 'scripts/validate-execution-recovery-e2e.sh'
       - 'scripts/validate-dynamic-inventory-e2e.sh'
+      - 'scripts/validate-notification-delivery-e2e.sh'
       - 'cmd/readiness-report/**'
       - 'internal/readiness/**'
       - 'playbooks/validate-execution-recovery.yml'
       - 'tests/dynamic_inventory_staging_contract_test.go'
       - 'tests/inventory_sync_history_contract_test.go'
+      - 'tests/notification_delivery_staging_contract_test.go'
   workflow_dispatch:
     inputs:
       journey:
@@ -36,6 +38,7 @@ on:
           - ldap
           - dynamic-inventory
           - execution-recovery
+          - notification-delivery
           - secrets
           - delegated-api
 
@@ -59,6 +62,7 @@ jobs:
       run_ldap: ${{ steps.scope.outputs.run_ldap }}
       run_dynamic: ${{ steps.scope.outputs.run_dynamic }}
       run_recovery: ${{ steps.scope.outputs.run_recovery }}
+      run_notification: ${{ steps.scope.outputs.run_notification }}
       run_secrets: ${{ steps.scope.outputs.run_secrets }}
       run_delegated: ${{ steps.scope.outputs.run_delegated }}
       run_readiness: ${{ steps.scope.outputs.run_readiness }}
@@ -156,6 +160,11 @@ jobs:
           PRAETOR_RECOVERY_PROJECT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
           PRAETOR_RECOVERY_EVIDENCE_FILE: build/readiness-evidence/execution-recovery.json
         run: ./scripts/validate-execution-recovery-e2e.sh
+      - name: Validate durable notification delivery journey
+        if: needs.preflight.outputs.run_notification == 'true'
+        env:
+          PRAETOR_NOTIFICATION_EVIDENCE_FILE: build/readiness-evidence/notification-delivery.json
+        run: ./scripts/validate-notification-delivery-e2e.sh
       - name: Prove fixture cleanup and recreation
         if: needs.preflight.outputs.run_fixture == 'true'
         run: |
