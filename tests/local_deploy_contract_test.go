@@ -396,6 +396,8 @@ func TestPersistentStagingEnvironmentIsIsolatedAndIdempotent(t *testing.T) {
 		`storage_probe`,
 		`persistentVolumeClaim:`,
 		`exec "$probe" -- test -s /probe/health`,
+		`cpu: 10m`,
+		`memory: 16Mi`,
 		`runAsNonRoot: true`,
 		`allowPrivilegeEscalation: false`,
 		`drop: [ALL]`,

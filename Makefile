@@ -278,7 +278,7 @@ staging-recovery-restore:
 staging-recovery-exercise:
 	./scripts/staging-recovery.sh exercise
 
-.PHONY: staging-acceptance-plan staging-acceptance-seed staging-acceptance-status staging-acceptance-run staging-execution-diagnostics-plan staging-execution-diagnostics-preflight staging-execution-diagnostics-measure staging-execution-diagnostics-verify
+.PHONY: staging-acceptance-plan staging-acceptance-seed staging-acceptance-status staging-acceptance-run staging-notification-readiness-plan staging-notification-readiness-status staging-notification-readiness-run staging-execution-diagnostics-plan staging-execution-diagnostics-preflight staging-execution-diagnostics-measure staging-execution-diagnostics-verify
 staging-acceptance-plan:
 	./scripts/staging-acceptance.sh plan
 
@@ -290,6 +290,15 @@ staging-acceptance-status:
 
 staging-acceptance-run:
 	./scripts/staging-acceptance.sh run
+
+staging-notification-readiness-plan:
+	./scripts/validate-staging-notification-operations.sh plan
+
+staging-notification-readiness-status:
+	./scripts/validate-staging-notification-operations.sh status
+
+staging-notification-readiness-run:
+	./scripts/validate-staging-notification-operations.sh run
 
 staging-execution-diagnostics-plan:
 	./scripts/validate-staging-execution-diagnostics.sh plan

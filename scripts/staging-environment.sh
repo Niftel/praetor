@@ -134,6 +134,13 @@ spec:
         allowPrivilegeEscalation: false
         capabilities:
           drop: [ALL]
+      resources:
+        requests:
+          cpu: 5m
+          memory: 4Mi
+        limits:
+          cpu: 10m
+          memory: 16Mi
       volumeMounts:
         - name: probe
           mountPath: /probe
