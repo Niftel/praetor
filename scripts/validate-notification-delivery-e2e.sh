@@ -27,6 +27,7 @@ INVENTORY_ID=""
 JOB_TEMPLATE_ID=""
 OTHER_ORG_ID=""
 OTHER_ORG_CREATED=false
+FAILURE_DETAIL=""
 
 die() { echo "error: $*" >&2; record_failure; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"; }
@@ -38,8 +39,9 @@ record_failure() {
   [[ -z "$EVIDENCE_FILE" ]] || {
     umask 077
     mkdir -p "$(dirname "$EVIDENCE_FILE")"
-    jq -n --arg phase "$PHASE" \
-      '{schema_version:1,journey:"notification-delivery",result:"fail",phase:$phase}' >"$EVIDENCE_FILE"
+    jq -n --arg phase "$PHASE" --arg detail "$FAILURE_DETAIL" \
+      '{schema_version:1,journey:"notification-delivery",result:"fail",phase:$phase}
+       + if $detail == "" then {} else {failure_detail:$detail} end' >"$EVIDENCE_FILE"
   }
 }
 
@@ -131,13 +133,43 @@ wait_history_state() {
   die "$target_name $event delivery for subject $subject_id did not reach $state"
 }
 wait_job() {
-  local job_id="$1" expected="$2" state=""
+  local job_id="$1" expected="$2" state="" job="" run_id="" diagnostics="" logs=""
   for _ in $(seq 1 180); do
-    state="$(get "$ADMIN_TOKEN" jobs | jq -r --argjson id "$job_id" '.[] | select(.id == $id) | .status' | head -n1)"
+    job="$(get "$ADMIN_TOKEN" jobs | jq -c --argjson id "$job_id" '.[] | select(.id == $id)' | head -n1)"
+    state="$(jq -r '.status // empty' <<<"$job")"
     [[ "$state" =~ ^(successful|failed|error|canceled)$ ]] && break
     sleep 1
   done
-  [[ "$state" == "$expected" ]] || die "job $job_id finished '$state', expected '$expected'"
+  if [[ "$state" != "$expected" ]]; then
+    run_id="$(jq -r '.current_run_id // empty' <<<"$job")"
+    FAILURE_DETAIL="job=$job_id status=${state:-missing} run=${run_id:-missing}"
+    echo "job failure context: $FAILURE_DETAIL" >&2
+    if [[ -n "$run_id" ]]; then
+      request "$ADMIN_TOKEN" GET "jobs/runs/$run_id/diagnostics"
+      if [[ "$STATUS" == 200 ]]; then
+        diagnostics="$RESPONSE"
+        echo "job diagnostics:" >&2
+        jq '{summary,failures:[.events[] | select(.failure_code != null or .outcome == "failed" or .outcome == "unreachable")]}' \
+          <<<"$diagnostics" >&2
+        FAILURE_DETAIL="$FAILURE_DETAIL failure_code=$(jq -r '.summary.failure_code // "unknown"' <<<"$diagnostics")"
+      else
+        echo "job diagnostics unavailable: HTTP $STATUS" >&2
+      fi
+      request "$ADMIN_TOKEN" GET "jobs/runs/$run_id/logs"
+      if [[ "$STATUS" == 200 && -n "$RESPONSE" ]]; then
+        logs="$RESPONSE"
+        echo "job output (last 80 lines):" >&2
+        tail -n 80 <<<"$logs" >&2
+      else
+        echo "job output unavailable: HTTP $STATUS" >&2
+      fi
+    fi
+    for workload in "statefulset/$RELEASE-executor" "deployment/$RELEASE-scheduler"; do
+      echo "$workload logs (last 80 lines):" >&2
+      "${KUBECTL[@]}" logs -n "$NAMESPACE" "$workload" --all-containers --tail=80 >&2 || true
+    done
+    die "job $job_id finished '${state:-missing}', expected '$expected'"
+  fi
 }
 create_target() {
   local name="$1" url="$2"
@@ -320,7 +352,8 @@ PHASE="history-rbac"
 OPERATOR_HISTORY="$(history "$OPERATOR_TOKEN" "$ORG_ID")"
 jq -e --argjson id "$(jq -r .id <<<"$DELIVERED_RETRY")" '.results | any(.id == $id)' \
   <<<"$OPERATOR_HISTORY" >/dev/null || die "assigned-team operator cannot inspect approval history"
-jq -e --argjson job "$JOB_ID" '.results | all(.subject_id != $job)' \
+jq -e --argjson job "$JOB_ID" \
+  '.results | all(.subject_kind != "job" or .subject_id != $job)' \
   <<<"$OPERATOR_HISTORY" >/dev/null || die "ordinary operator can inspect organization-scoped job history"
 OUTSIDER_HISTORY="$(history "$OUTSIDER_TOKEN" "$ORG_ID")"
 jq -e --argjson first "$WORKFLOW_JOB_ID" --argjson second "$PERMANENT_WORKFLOW_JOB_ID" \

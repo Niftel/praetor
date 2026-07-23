@@ -208,7 +208,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
 		}
 	}
-	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "validate-notification-delivery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status"} {
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "validate-notification-delivery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status", "statefulset/praetor-executor", "deployment/praetor-scheduler"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
@@ -259,7 +259,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bootstrap := string(bootstrapRaw)
-	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker buildx imagetools inspect --raw "$released_ref"`, `.platform.architecture == $arch`, `docker pull "$platform_ref"`, `docker tag "$platform_ref"`, `released_pids+=("$!")`, "released_pull_failed"} {
+	for _, required := range []string{"PRAETOR_VALIDATION_USE_RELEASED_COMPONENTS", "released_component_ref", "deployments/staging/release-lock.yaml", `docker buildx imagetools inspect --raw "$released_ref"`, `.platform.architecture == $arch`, `docker pull "$platform_ref"`, `docker tag "$platform_ref"`, `released_pids+=("$!")`, "released_pull_failed", "stage-validation-execution-pack.sh"} {
 		if !strings.Contains(bootstrap, required) {
 			t.Fatalf("clean fixture bootstrap acceleration contract must contain %q", required)
 		}
