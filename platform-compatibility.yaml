@@ -41,7 +41,7 @@ components:
     repository: Niftel/executor
     module: github.com/praetordev/executor
     image: praetor-executor
-    version: 0.1.3
+    version: 0.1.4
   ingestion:
     repository: Niftel/ingestion
     module: github.com/praetordev/ingestion
@@ -51,7 +51,7 @@ components:
     repository: Niftel/consumer
     module: github.com/praetordev/consumer
     image: praetor-consumer
-    version: 0.1.1
+    version: 0.1.2
 
 # Versions here are compatibility commitments and must match this repository's
 # go.mod when it imports the module directly.

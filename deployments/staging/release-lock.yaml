@@ -8,12 +8,12 @@ components:
     digest: sha256:90d7f9d53b87ee22cfb83e1f7faa16fb70d5b3520a23c05569c99b4ccbaf544f
   consumer:
     image: praetor-consumer
-    version: 0.1.1
-    digest: sha256:d91d79fd5982577160c880cd7e7ff9f6954102fa19e2528a2f27295d86959d86
+    version: 0.1.2
+    digest: sha256:2ab2a5a771d08cbfad0d0d183345c9e26fe6b913c6c9534ad42a404e18167e3d
   executor:
     image: praetor-executor
-    version: 0.1.3
-    digest: sha256:131ad85a4322615b6911bc535cee38fc499e261ed2bde086212f5943cdbc1e12
+    version: 0.1.4
+    digest: sha256:46baefdaaa8bb057e540596573b036c73bf6015d1aeb0007996146f72afcd719
   ingestion:
     image: praetor-ingestion
     version: 0.1.2
