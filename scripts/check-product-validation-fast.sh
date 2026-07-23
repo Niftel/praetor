@@ -14,5 +14,5 @@ helm lint deployments/helm/praetor-v2 \
 # These are the contracts that otherwise fail only after the disposable cluster
 # has been allocated. Keep this command identical locally and in GitHub Actions.
 GOWORK=off go test ./tests -count=1 \
-  -run 'Test(ProductValidation|DynamicInventory|InventorySyncHistory|ReleaseMigration)'
+  -run 'Test(ProductValidation|DynamicInventory|InventorySyncHistory|NotificationDelivery|ReleaseMigration)'
 GOWORK=off go test ./tests/contracts -count=1

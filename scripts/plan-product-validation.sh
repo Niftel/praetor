@@ -9,6 +9,7 @@ run_fixture=false
 run_ldap=false
 run_dynamic=false
 run_recovery=false
+run_notification=false
 run_secrets=false
 run_delegated=false
 run_readiness=false
@@ -18,6 +19,7 @@ select_all() {
   run_ldap=true
   run_dynamic=true
   run_recovery=true
+  run_notification=true
   run_secrets=true
   run_delegated=true
   run_readiness=true
@@ -30,6 +32,7 @@ select_journey() {
     ldap) run_fixture=true; run_ldap=true ;;
     dynamic-inventory) run_fixture=true; run_dynamic=true ;;
     execution-recovery) run_fixture=true; run_recovery=true ;;
+    notification-delivery) run_fixture=true; run_notification=true ;;
     secrets) run_fixture=true; run_secrets=true ;;
     delegated-api) run_delegated=true ;;
     *) echo "error: unsupported product-validation journey '$1'" >&2; exit 2 ;;
@@ -47,13 +50,14 @@ else
     grep -Eq '^scripts/validate-ldap-operator-journey\.sh$' <<<"$paths" && { run_fixture=true; run_ldap=true; }
     grep -Eq '^(scripts/validate-dynamic-inventory-e2e\.sh|tests/(dynamic_inventory_staging_contract|inventory_sync_history_contract)_test\.go)$' <<<"$paths" && { run_fixture=true; run_dynamic=true; }
     grep -Eq '^(scripts/validate-execution-recovery-e2e\.sh|playbooks/validate-execution-recovery\.yml)$' <<<"$paths" && { run_fixture=true; run_recovery=true; }
+    grep -Eq '^(scripts/validate-notification-delivery-e2e\.sh|tests/notification_delivery_staging_contract_test\.go|web/components/NotificationDeliveryHistory\.test\.tsx)$' <<<"$paths" && { run_fixture=true; run_notification=true; }
     grep -Eq '^scripts/test-secrets-execution-e2e\.sh$' <<<"$paths" && { run_fixture=true; run_secrets=true; }
     grep -Eq '^scripts/validate-delegated-api-e2e\.sh$' <<<"$paths" && run_delegated=true
   fi
 fi
 
 run_cluster=false
-if [[ "$run_fixture" == true || "$run_ldap" == true || "$run_dynamic" == true || "$run_recovery" == true || "$run_secrets" == true ]]; then
+if [[ "$run_fixture" == true || "$run_ldap" == true || "$run_dynamic" == true || "$run_recovery" == true || "$run_notification" == true || "$run_secrets" == true ]]; then
   run_cluster=true
 fi
 
@@ -62,6 +66,7 @@ printf 'run_fixture=%s\n' "$run_fixture"
 printf 'run_ldap=%s\n' "$run_ldap"
 printf 'run_dynamic=%s\n' "$run_dynamic"
 printf 'run_recovery=%s\n' "$run_recovery"
+printf 'run_notification=%s\n' "$run_notification"
 printf 'run_secrets=%s\n' "$run_secrets"
 printf 'run_delegated=%s\n' "$run_delegated"
 printf 'run_readiness=%s\n' "$run_readiness"
