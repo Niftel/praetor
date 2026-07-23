@@ -272,3 +272,58 @@ func TestLegacyNotificationAttachmentsSyncToCommonPolicies(t *testing.T) {
 		t.Fatalf("common lifecycle policy delete left %d legacy attachments", legacyCount)
 	}
 }
+
+func TestNotificationPoliciesAreDeletedWithTheirResources(t *testing.T) {
+	db := rbacTestDB(t)
+	defer db.Close()
+
+	uniq := time.Now().UnixNano()
+	orgID := createOrg(t, db, fmt.Sprintf("policy-cleanup-org-%d", uniq))
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM organizations WHERE id=$1`, orgID) })
+
+	var targetID, inventoryID, sourceID, unifiedTemplateID, jobTemplateID, workflowID int64
+	if err := db.Get(&targetID, `INSERT INTO notification_templates (organization_id,name,notification_type) VALUES ($1,$2,'webhook') RETURNING id`, orgID, fmt.Sprintf("policy-cleanup-target-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&inventoryID, `INSERT INTO inventories (organization_id,name) VALUES ($1,$2) RETURNING id`, orgID, fmt.Sprintf("policy-cleanup-inventory-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&sourceID, `INSERT INTO inventory_sources (inventory_id,name) VALUES ($1,$2) RETURNING id`, inventoryID, fmt.Sprintf("policy-cleanup-source-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&unifiedTemplateID, `INSERT INTO unified_job_templates (name) VALUES ($1) RETURNING id`, fmt.Sprintf("policy-cleanup-unified-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&jobTemplateID, `INSERT INTO job_templates (organization_id,name,playbook,unified_job_template_id) VALUES ($1,$2,'site.yml',$3) RETURNING id`, orgID, fmt.Sprintf("policy-cleanup-job-%d", uniq), unifiedTemplateID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&workflowID, `INSERT INTO workflow_templates (organization_id,name) VALUES ($1,$2) RETURNING id`, orgID, fmt.Sprintf("policy-cleanup-workflow-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Exec(`INSERT INTO notification_policies (organization_id,notification_template_id,resource_type,resource_id,event) VALUES
+		($1,$2,'job_template',$3,'success'),
+		($1,$2,'workflow_template',$4,'success'),
+		($1,$2,'inventory_source',$5,'success')`, orgID, targetID, jobTemplateID, workflowID, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	for _, deletion := range []struct {
+		query string
+		id    int64
+	}{
+		{`DELETE FROM job_templates WHERE id=$1`, jobTemplateID},
+		{`DELETE FROM workflow_templates WHERE id=$1`, workflowID},
+		{`DELETE FROM inventory_sources WHERE id=$1`, sourceID},
+	} {
+		if _, err := db.Exec(deletion.query, deletion.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var remaining int
+	if err := db.Get(&remaining, `SELECT count(*) FROM notification_policies WHERE organization_id=$1`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("resource deletion left %d orphan notification policies", remaining)
+	}
+}

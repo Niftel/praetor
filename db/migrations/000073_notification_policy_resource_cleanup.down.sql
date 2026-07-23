@@ -1,0 +1,4 @@
+DROP TRIGGER IF EXISTS inventory_sources_notification_policy_cleanup ON inventory_sources;
+DROP TRIGGER IF EXISTS workflow_templates_notification_policy_cleanup ON workflow_templates;
+DROP TRIGGER IF EXISTS job_templates_notification_policy_cleanup ON job_templates;
+DROP FUNCTION IF EXISTS delete_notification_policies_for_resource();
