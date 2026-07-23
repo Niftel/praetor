@@ -142,6 +142,182 @@ type notificationDeliveryTarget struct {
 	Config           json.RawMessage `db:"config"`
 }
 
+type notificationPolicy struct {
+	ID                     int64   `db:"id" json:"id"`
+	OrganizationID         int64   `db:"organization_id" json:"organization_id"`
+	TeamID                 *int64  `db:"team_id" json:"team_id,omitempty"`
+	TeamName               *string `db:"team_name" json:"team_name,omitempty"`
+	NotificationTemplateID int64   `db:"notification_template_id" json:"notification_template_id"`
+	NotificationName       string  `db:"notification_name" json:"notification_name"`
+	NotificationType       string  `db:"notification_type" json:"notification_type"`
+	ResourceType           string  `db:"resource_type" json:"resource_type"`
+	ResourceID             int64   `db:"resource_id" json:"resource_id"`
+	Event                  string  `db:"event" json:"event"`
+}
+
+type notificationPolicyResource struct {
+	OrganizationID int64
+	ContentType    rbac.ResourceKind
+	ObjectID       int64
+}
+
+func (h *NotificationsResource) resolvePolicyResource(ctx context.Context, resourceType string, resourceID int64) (notificationPolicyResource, error) {
+	var resource notificationPolicyResource
+	switch resourceType {
+	case "job_template":
+		resource.ContentType = rbac.JobTemplate
+		resource.ObjectID = resourceID
+		if err := h.DB.GetContext(ctx, &resource.OrganizationID, `SELECT organization_id FROM job_templates WHERE id=$1`, resourceID); err != nil {
+			return resource, err
+		}
+	case "workflow_template":
+		resource.ContentType = rbac.WorkflowTemplate
+		resource.ObjectID = resourceID
+		if err := h.DB.GetContext(ctx, &resource.OrganizationID, `SELECT organization_id FROM workflow_templates WHERE id=$1`, resourceID); err != nil {
+			return resource, err
+		}
+	case "inventory_source":
+		resource.ContentType = rbac.Inventory
+		if err := h.DB.QueryRowxContext(ctx, `
+			SELECT i.organization_id, i.id
+			  FROM inventory_sources src
+			  JOIN inventories i ON i.id=src.inventory_id
+			 WHERE src.id=$1`, resourceID).Scan(&resource.OrganizationID, &resource.ObjectID); err != nil {
+			return resource, err
+		}
+	default:
+		return resource, fmt.Errorf("unsupported notification policy resource type %q", resourceType)
+	}
+	return resource, nil
+}
+
+// ListNotificationPolicies GET /api/v1/notification-policies?resource_type=...&resource_id=N
+// requires visibility of both the automation resource and its organization.
+// Target configuration is never selected by this endpoint.
+func (h *NotificationsResource) ListNotificationPolicies(w http.ResponseWriter, r *http.Request) {
+	resourceID, err := strconv.ParseInt(r.URL.Query().Get("resource_id"), 10, 64)
+	if err != nil || resourceID <= 0 {
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("resource_id is required")))
+		return
+	}
+	resourceType := r.URL.Query().Get("resource_type")
+	resource, err := h.resolvePolicyResource(r.Context(), resourceType, resourceID)
+	if err != nil {
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("unknown notification policy resource")))
+		return
+	}
+	if !h.authorize(w, r, resource.ContentType, resource.ObjectID, actRead) ||
+		!h.authorize(w, r, rbac.Organization, resource.OrganizationID, actRead) {
+		return
+	}
+
+	policies := []notificationPolicy{}
+	if err := h.DB.SelectContext(r.Context(), &policies, `
+		SELECT p.id, p.organization_id, p.team_id, team.name AS team_name,
+		       p.notification_template_id, nt.name AS notification_name,
+		       nt.notification_type, p.resource_type, p.resource_id, p.event
+		  FROM notification_policies p
+		  JOIN notification_templates nt ON nt.id=p.notification_template_id
+		  LEFT JOIN teams team ON team.id=p.team_id
+		 WHERE p.resource_type=$1 AND p.resource_id=$2
+		 ORDER BY p.event, team.name NULLS FIRST, nt.name, p.id`, resourceType, resourceID); err != nil {
+		renderNotificationError(w, r, render.ErrInternal(err))
+		return
+	}
+	render.JSON(w, r, policies)
+}
+
+// CreateNotificationPolicy POST /api/v1/notification-policies. Managing a
+// route requires both administration of the automation resource and explicit
+// notification administration for its organization.
+func (h *NotificationsResource) CreateNotificationPolicy(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		NotificationTemplateID int64  `json:"notification_template_id"`
+		ResourceType           string `json:"resource_type"`
+		ResourceID             int64  `json:"resource_id"`
+		TeamID                 *int64 `json:"team_id"`
+		Event                  string `json:"event"`
+	}
+	if err := decodeStrictJSON(r, &body); err != nil || body.NotificationTemplateID <= 0 || body.ResourceID <= 0 || strings.TrimSpace(body.Event) == "" {
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("notification_template_id, resource_type, resource_id, and event are required")))
+		return
+	}
+	resource, err := h.resolvePolicyResource(r.Context(), body.ResourceType, body.ResourceID)
+	if err != nil {
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("unknown notification policy resource")))
+		return
+	}
+	if !h.authorize(w, r, resource.ContentType, resource.ObjectID, actAdmin) ||
+		!h.authorizeOrgRole(w, r, resource.OrganizationID, rbac.NotificationAdminRole) {
+		return
+	}
+
+	var id int64
+	err = h.DB.GetContext(r.Context(), &id, `
+		INSERT INTO notification_policies (
+			organization_id, team_id, notification_template_id,
+			resource_type, resource_id, event
+		) VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT DO NOTHING
+		RETURNING id`, resource.OrganizationID, body.TeamID, body.NotificationTemplateID, body.ResourceType, body.ResourceID, body.Event)
+	if err == sql.ErrNoRows {
+		err = h.DB.GetContext(r.Context(), &id, `
+			SELECT id FROM notification_policies
+			 WHERE organization_id=$1
+			   AND team_id IS NOT DISTINCT FROM $2
+			   AND notification_template_id=$3
+			   AND resource_type=$4 AND resource_id=$5 AND event=$6`,
+			resource.OrganizationID, body.TeamID, body.NotificationTemplateID, body.ResourceType, body.ResourceID, body.Event)
+	}
+	if err != nil {
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("invalid notification policy: %w", err)))
+		return
+	}
+	render.Created(w, r, map[string]int64{"id": id})
+}
+
+// DeleteNotificationPolicy DELETE /api/v1/notification-policies/{id}.
+func (h *NotificationsResource) DeleteNotificationPolicy(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("invalid notification policy id")))
+		return
+	}
+	var policy struct {
+		OrganizationID int64  `db:"organization_id"`
+		ResourceType   string `db:"resource_type"`
+		ResourceID     int64  `db:"resource_id"`
+	}
+	if err := h.DB.GetContext(r.Context(), &policy, `
+			SELECT organization_id, resource_type, resource_id
+			  FROM notification_policies WHERE id=$1`, id); err != nil {
+		if err == sql.ErrNoRows {
+			renderNotificationError(w, r, render.ErrNotFound(err))
+			return
+		}
+		renderNotificationError(w, r, render.ErrInternal(err))
+		return
+	}
+	resource, err := h.resolvePolicyResource(r.Context(), policy.ResourceType, policy.ResourceID)
+	if err != nil {
+		renderNotificationError(w, r, render.ErrInvalidRequest(fmt.Errorf("unknown notification policy resource")))
+		return
+	}
+	if resource.OrganizationID != policy.OrganizationID {
+		renderNotificationError(w, r, render.ErrForbidden(fmt.Errorf("notification policy organization mismatch")))
+		return
+	}
+	if !h.authorize(w, r, resource.ContentType, resource.ObjectID, actAdmin) ||
+		!h.authorizeOrgRole(w, r, policy.OrganizationID, rbac.NotificationAdminRole) {
+		return
+	}
+	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM notification_policies WHERE id=$1`, id); err != nil {
+		renderNotificationError(w, r, render.ErrInternal(err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // TestNotificationTemplate POST /api/v1/notification-templates/{id}/test
 // sends a bounded synthetic message through the same decrypt-and-deliver path
 // used by lifecycle notifications. Stored config remains server-side and is

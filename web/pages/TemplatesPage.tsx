@@ -9,8 +9,15 @@ import { Plus, Search, Check, Trash2, Play, ArrowLeft, GitFork, FileText, Pencil
 import { toast, confirmDialog } from '../components/ui/toast';
 import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
 import { DataTable, type DataColumn, FormErrorSummary, FormSection, LoadingState, Page, PageHeader, PageToolbar, StatusValue, TimestampValue } from '../components/ui';
+import NotificationPolicyManager, { NotificationPolicyEvent } from '../components/NotificationPolicyManager';
 
 type Editing = number | 'new' | null;
+
+const JOB_NOTIFICATION_EVENTS: NotificationPolicyEvent[] = [
+  { id: 'started', label: 'Started', description: 'Sent once when execution begins.' },
+  { id: 'success', label: 'Successful', description: 'Sent when execution reaches a successful terminal state.' },
+  { id: 'error', label: 'Failed', description: 'Sent when execution reaches a failed terminal state.' },
+];
 
 const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void }> = ({ on, onChange }) => (
   <button type="button" onClick={() => onChange(!on)}
@@ -63,12 +70,6 @@ const TemplatesPage = () => {
   const [formMsg, setFormMsg] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Notifications
-  const [notifTargets, setNotifTargets] = useState<any[]>([]);
-  const [notifAttached, setNotifAttached] = useState<any[]>([]);
-  const [notifTypes, setNotifTypes] = useState<any[]>([]);
-  const [newNotif, setNewNotif] = useState<{ name: string; notification_type: string; config: Record<string, string> }>({ name: '', notification_type: 'webhook', config: {} });
-
   // Launch dialog
   const [launchTpl, setLaunchTpl] = useState<Template | null>(null);
   const [launchVars, setLaunchVars] = useState('');
@@ -110,29 +111,6 @@ const TemplatesPage = () => {
     setVarsText(t.extra_vars && Object.keys(t.extra_vars).length ? JSON.stringify(t.extra_vars, null, 2) : '');
     setSurvey(t.survey_spec?.spec || []);
     setFormMsg('');
-    setNewNotif({ name: '', notification_type: 'webhook', config: {} });
-    api.getNotificationTypes().then(d => setNotifTypes(d || [])).catch(() => setNotifTypes([]));
-    if (t.organization_id) {
-      api.getNotificationTemplates(t.organization_id).then(d => setNotifTargets(d || [])).catch(() => setNotifTargets([]));
-      api.getTemplateNotifications(t.id).then(d => setNotifAttached(d || [])).catch(() => setNotifAttached([]));
-    }
-  };
-
-  const isAttached = (ntId: number, event: string) => notifAttached.some(a => a.notification_template_id === ntId && a.event === event);
-  const toggleNotif = async (ntId: number, event: string) => {
-    if (typeof editing !== 'number') return;
-    if (isAttached(ntId, event)) await api.detachTemplateNotification(editing, ntId, event);
-    else await api.attachTemplateNotification(editing, { notification_template_id: ntId, event });
-    api.getTemplateNotifications(editing).then(d => setNotifAttached(d || [])).catch(() => { });
-  };
-  const notifFields = (): { id: string; label: string; type: string }[] =>
-    notifTypes.find(t => t.type === newNotif.notification_type)?.fields || [{ id: 'url', label: 'URL', type: 'text' }];
-  const addNotifTarget = async () => {
-    if (typeof editing !== 'number' || !newNotif.name.trim() || !formData.organization_id) return;
-    if (notifFields().some(f => !(newNotif.config[f.id] || '').trim())) return;
-    await api.createNotificationTemplate({ organization_id: formData.organization_id, name: newNotif.name, notification_type: newNotif.notification_type, config: newNotif.config });
-    setNewNotif({ name: '', notification_type: 'webhook', config: {} });
-    api.getNotificationTemplates(formData.organization_id).then(d => setNotifTargets(d || [])).catch(() => { });
   };
 
   const save = async () => {
@@ -416,28 +394,7 @@ const TemplatesPage = () => {
                 {/* Notifications (edit only) */}
                 {typeof editing === 'number' && (
                   <FormSection title="Notifications" className="mt-8">
-                    {notifTargets.length === 0 && <p className="font-mono text-[11px] text-dim mb-2">No notification targets in this org yet — add one below.</p>}
-                    {notifTargets.map(nt => (
-                      <div key={nt.id} className="flex items-center gap-3 py-1.5 text-[13px]">
-                        <span className="flex-1 truncate">{nt.name} <span className="font-mono text-[11px] text-dim">({nt.notification_type})</span></span>
-                        {['success', 'error', 'started'].map(ev => (
-                          <label key={ev} className="flex items-center gap-1.5 font-mono text-[11px] text-mut cursor-pointer">
-                            <input type="checkbox" className="accent-acc" checked={isAttached(nt.id, ev)} onChange={() => toggleNotif(nt.id, ev)} /> {ev}
-                          </label>
-                        ))}
-                      </div>
-                    ))}
-                    <div className="flex flex-wrap gap-2 mt-3 items-center">
-                      <input placeholder="name" className={`${uinp} max-w-[140px]`} value={newNotif.name} onChange={e => setNewNotif({ ...newNotif, name: e.target.value })} />
-                      <select className={`${usel} min-w-0 max-w-[130px]`} value={newNotif.notification_type} onChange={e => setNewNotif({ ...newNotif, notification_type: e.target.value, config: {} })}>
-                        {(notifTypes.length ? notifTypes.map(t => t.type) : ['webhook', 'slack']).map((tp: string) => <option key={tp} value={tp} className="bg-panel">{tp}</option>)}
-                      </select>
-                      {notifFields().map(f => (
-                        <input key={f.id} placeholder={f.label} type={f.type === 'password' ? 'password' : 'text'} className={`${uinp} flex-1 min-w-[120px] max-w-none`}
-                          value={newNotif.config[f.id] || ''} onChange={e => setNewNotif({ ...newNotif, config: { ...newNotif.config, [f.id]: e.target.value } })} />
-                      ))}
-                      <Button size="sm" variant="secondary" type="button" onClick={addNotifTarget}>Add</Button>
-                    </div>
+                    <NotificationPolicyManager organizationId={formData.organization_id ?? orgId} resourceType="job_template" resourceId={editing} events={JOB_NOTIFICATION_EVENTS} canManage />
                   </FormSection>
                 )}
 
