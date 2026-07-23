@@ -111,10 +111,10 @@ seed() {
   grant_team_role workflow_template "$workflow_id" "Workflow Template Execute" "$team_id"
   grant_team_role workflow_template "$workflow_id" "Workflow Template Approve" "$team_id"
   notification_id="$(ensure notification-templates "notification-templates?organization_id=$org_id" "$PREFIX Notifications" "$(jq -nc --argjson org "$org_id" --arg name "$PREFIX Notifications" '{organization_id:$org,name:$name,notification_type:"webhook",config:{url:"http://praetor-staging-acceptance-sink:8080/echo"}}')")"
-  attachments="$(get "workflow-templates/$workflow_id/notifications")"
-  if ! jq -e --argjson id "$notification_id" '.[] | select(.notification_template_id == $id and .event == "approval")' <<<"$attachments" >/dev/null; then
-    post_status "workflow-templates/$workflow_id/notifications" "$(jq -nc --argjson id "$notification_id" '{notification_template_id:$id,event:"approval"}')"
-    [[ "$STATUS" == 204 ]] || die "could not attach approval notification: HTTP $STATUS"
+  policies="$(get "notification-policies?resource_type=workflow_template&resource_id=$workflow_id")"
+  if ! jq -e --argjson target "$notification_id" --argjson team "$team_id" '.[] | select(.notification_template_id == $target and .event == "approval" and .team_id == $team)' <<<"$policies" >/dev/null; then
+    post_status notification-policies "$(jq -nc --argjson target "$notification_id" --argjson workflow "$workflow_id" --argjson team "$team_id" '{notification_template_id:$target,resource_type:"workflow_template",resource_id:$workflow,team_id:$team,event:"approval"}')"
+    [[ "$STATUS" == 201 ]] || die "could not create team-scoped approval notification policy: HTTP $STATUS $RESPONSE"
   fi
   echo "seeded synthetic staging acceptance resources in Engineering (inventory $inventory_id, host $host_id, job $job_id, workflow $workflow_id)"
 }

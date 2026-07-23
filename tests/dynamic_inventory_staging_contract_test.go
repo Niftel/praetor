@@ -29,6 +29,9 @@ func TestDynamicInventoryStagingJourneyContract(t *testing.T) {
 		`.results[0].status | IN("successful", "failed", "error", "canceled")`, "terminal entries",
 		"kubectl rollout restart", "deployment/praetor-validation-inventory-provider", "--timeout=60s",
 		`"$STATUS" == 204`,
+		"notification-policies", "resource_type:\"inventory_source\"", "wait_notification",
+		"notification-exact-once", "notification-resource-identity", "notification-secret-redaction",
+		"praetor-validation-notification-sink", `.kind == "inventory sync"`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("dynamic inventory journey is missing %q", required)

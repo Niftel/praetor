@@ -47,6 +47,21 @@ post_status() {
   REQUEST_STATUS="$(curl -sS -o "$output" -w '%{http_code}' -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$body" "$API/$path")"
   RESPONSE="$(cat "$output")"; rm -f "$output"
 }
+wait_notification() {
+  local job_id="$1" event="$2" messages count
+  for _ in $(seq 1 60); do
+    messages="$(kubectl logs -n "$NAMESPACE" deployment/praetor-validation-notification-sink --since=15m 2>/dev/null |
+      jq -Rsc --argjson job "$job_id" --arg event "$event" '[split("\n")[] | fromjson? | select(.job_id == $job and .event == $event)]')"
+    count="$(jq 'length' <<<"$messages")"
+    (( count > 1 )) && die "workflow notification $event for job $job_id was delivered $count times"
+    if (( count == 1 )); then
+      jq -c '.[0]' <<<"$messages"
+      return
+    fi
+    sleep 1
+  done
+  die "workflow notification $event for job $job_id was not delivered"
+}
 assert_user() {
   local json="$1" username="$2" auditor="$3"
   jq -e --arg username "$username" --argjson auditor "$auditor" \
@@ -86,6 +101,8 @@ post_status "$operator_token" "workflow-templates/$workflow_id/launch" "$(jq -nc
 status="$REQUEST_STATUS"
 [[ "$status" == 201 ]] || die "authorized workflow launch returned $status: $RESPONSE"
 workflow_job_id="$(jq -er .workflow_job_id <<<"$RESPONSE")"
+approval_notification="$(wait_notification "$workflow_job_id" approval)"
+jq -e '.kind == "workflow approval" and .job_name == "Praetor Validation LDAP Workflow"' <<<"$approval_notification" >/dev/null || die "approval notification identity is incorrect"
 
 approval_id=""
 for _ in $(seq 1 60); do
@@ -105,6 +122,8 @@ post_status "$operator_token" "workflow-job-nodes/$approval_id/approve"; status=
 [[ "$status" == 403 ]] || die "requester self-approval returned $status, expected 403"
 post_status "$approver_token" "workflow-job-nodes/$approval_id/approve"; status="$REQUEST_STATUS"
 [[ "$status" == 204 ]] || die "assigned-team approval returned $status: $RESPONSE"
+approved_notification="$(wait_notification "$workflow_job_id" approved)"
+jq -e '.kind == "workflow approval" and .job_name == "Praetor Validation LDAP Workflow"' <<<"$approved_notification" >/dev/null || die "approved notification identity is incorrect"
 
 terminal=""
 for _ in $(seq 1 180); do
@@ -120,7 +139,7 @@ jq -e --arg path "/api/v1/workflow-templates/$workflow_id/launch" '.[] | select(
 jq -e --arg path "/api/v1/workflow-job-nodes/$approval_id/approve" '.[] | select(.username == "mwebb" and .method == "POST" and .path == $path and .status_code == 204)' <<<"$audit" >/dev/null || die "approval actor is missing from audit evidence"
 
 EVIDENCE="$(jq -n --argjson workflow_job_id "$workflow_job_id" --arg status "$terminal" --arg requester demo-operator --arg approver mwebb --arg approval_team backend-team \
-  '{schema_version:1,journey:"ldap-operator",result:"pass",workflow_job_id:$workflow_job_id,status:$status,requester:$requester,approver:$approver,approval_team:$approval_team}')"
+  '{schema_version:1,journey:"ldap-operator",result:"pass",workflow_job_id:$workflow_job_id,status:$status,requester:$requester,approver:$approver,approval_team:$approval_team,checks:["team-scoped-approval","requester-self-approval-denied","cross-team-approval-denied","approval-notification-exact-once","approved-notification-exact-once","notification-resource-identity"]}')"
 if [[ -n "${PRAETOR_LDAP_EVIDENCE_FILE:-}" ]]; then
   umask 077
   printf '%s\n' "$EVIDENCE" >"$PRAETOR_LDAP_EVIDENCE_FILE"
