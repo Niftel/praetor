@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
 )
@@ -125,6 +126,202 @@ func TestCreateNotificationTargetRejectsUnsafeDestination(t *testing.T) {
 	rec := callJSON(t, resource.CreateNotificationTemplate, http.MethodPost, body, middleware.UserContext{UserID: adminID, IsSuperuser: true}, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe target: status %d (%s), want 400", rec.Code, rec.Body)
+	}
+}
+
+func TestNotificationDeliveryHistoryPaginationRBACAndRetention(t *testing.T) {
+	db := rbacTestDB(t)
+	defer db.Close()
+
+	uniq := time.Now().UnixNano()
+	orgID := createOrg(t, db, fmt.Sprintf("delivery-history-org-%d", uniq))
+	otherOrgID := createOrg(t, db, fmt.Sprintf("delivery-history-other-org-%d", uniq))
+	adminID := createUser(t, db, fmt.Sprintf("delivery-history-admin-%d", uniq))
+	teamReaderID := createUser(t, db, fmt.Sprintf("delivery-history-team-reader-%d", uniq))
+	orgReaderID := createUser(t, db, fmt.Sprintf("delivery-history-org-reader-%d", uniq))
+	otherReaderID := createUser(t, db, fmt.Sprintf("delivery-history-other-reader-%d", uniq))
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4)`, adminID, teamReaderID, orgReaderID, otherReaderID)
+		_, _ = db.Exec(`DELETE FROM organizations WHERE id IN ($1,$2)`, orgID, otherOrgID)
+	})
+
+	var teamID, workflowID, targetID, policyID int64
+	if err := db.Get(&teamID, `INSERT INTO teams (organization_id,name) VALUES ($1,$2) RETURNING id`, orgID, fmt.Sprintf("delivery-team-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&workflowID, `INSERT INTO workflow_templates (organization_id,name) VALUES ($1,$2) RETURNING id`, orgID, fmt.Sprintf("delivery-workflow-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&targetID, `
+		INSERT INTO notification_templates (organization_id,name,notification_type,config)
+		VALUES ($1,$2,'webhook','{"url":"encrypted-secret-path"}') RETURNING id`,
+		orgID, fmt.Sprintf("delivery-target-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&policyID, `
+		INSERT INTO notification_policies (
+			organization_id,team_id,notification_template_id,resource_type,resource_id,event
+		) VALUES ($1,$2,$3,'workflow_template',$4,'approval') RETURNING id`,
+		orgID, teamID, targetID, workflowID); err != nil {
+		t.Fatal(err)
+	}
+
+	insertDelivery := func(key, occurrence, status string) int64 {
+		t.Helper()
+		var id int64
+		deliveredAt := "NULL"
+		if status == "delivered" {
+			deliveredAt = "now()"
+		}
+		query := fmt.Sprintf(`
+			INSERT INTO notification_deliveries (
+				idempotency_key,organization_id,team_id,notification_policy_id,notification_template_id,
+				target_name,target_type,resource_type,resource_id,event,
+				occurrence_type,occurrence_id,subject_id,subject_name,subject_kind,
+				status,attempt_count,first_attempt_at,last_attempt_at,delivered_at
+			) VALUES ($1,$2,$3,$4,$5,'ignored','ignored','workflow_template',$6,'approval',
+			          'workflow_node',$7,$8,$9,'workflow approval',$10,1,now(),now(),%s)
+			RETURNING id`, deliveredAt)
+		if err := db.Get(&id, query, key, orgID, teamID, policyID, targetID, workflowID,
+			occurrence, workflowID, fmt.Sprintf("Release workflow %s", occurrence), status); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`
+			INSERT INTO notification_delivery_attempts (
+				delivery_id,attempt_number,outcome,failure_code,failure_reason,started_at,finished_at
+			) VALUES ($1,1,$2,$3,$4,now()-interval '1 second',now())`,
+			id,
+			map[bool]string{true: "delivered", false: "transient_failure"}[status == "delivered"],
+			map[bool]any{true: nil, false: "endpoint_unavailable"}[status == "delivered"],
+			map[bool]any{true: nil, false: "Destination temporarily unavailable"}[status == "delivered"]); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	firstID := insertDelivery(fmt.Sprintf("workflow:%d:node:1:approval:policy:%d", workflowID, policyID), "node-1", "retrying")
+	secondID := insertDelivery(fmt.Sprintf("workflow:%d:node:2:approval:policy:%d", workflowID, policyID), "node-2", "delivered")
+
+	cloneDelivery := `
+		INSERT INTO notification_deliveries (
+			idempotency_key,organization_id,team_id,notification_policy_id,notification_template_id,
+			target_name,target_type,resource_type,resource_id,event,
+			occurrence_type,occurrence_id,subject_id,subject_name,subject_kind,
+			status,attempt_count,max_attempts,next_attempt_at,
+			first_attempt_at,last_attempt_at,delivered_at,failed_at,failure_code,failure_reason
+		)
+		SELECT idempotency_key,$2,team_id,notification_policy_id,notification_template_id,
+		       target_name,target_type,resource_type,resource_id,event,
+		       occurrence_type,occurrence_id,subject_id,subject_name,subject_kind,
+		       status,attempt_count,max_attempts,next_attempt_at,
+		       first_attempt_at,last_attempt_at,delivered_at,failed_at,failure_code,failure_reason
+		  FROM notification_deliveries WHERE id=$1
+		ON CONFLICT (idempotency_key) DO NOTHING`
+	result, err := db.Exec(cloneDelivery, firstID, orgID)
+	if err != nil {
+		t.Fatalf("idempotent delivery replay: %v", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 0 {
+		t.Fatalf("idempotent delivery replay inserted %d rows, want 0", changed)
+	}
+	if _, err := db.Exec(cloneDelivery, firstID, otherOrgID); err == nil {
+		t.Fatal("cross-organization delivery scope unexpectedly passed")
+	}
+	if _, err := db.Exec(`UPDATE notification_deliveries SET status='sending' WHERE id=$1`, firstID); err == nil {
+		t.Fatal("sending delivery without a lease unexpectedly passed")
+	}
+	if _, err := db.Exec(`
+		UPDATE notification_deliveries
+		   SET status='sending', lease_owner='consumer-a', lease_expires_at=now()+interval '30 seconds'
+		 WHERE id=$1`, firstID); err != nil {
+		t.Fatalf("valid delivery lease: %v", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE notification_deliveries
+		   SET status='retrying', lease_owner=NULL, lease_expires_at=NULL
+		 WHERE id=$1`, firstID); err != nil {
+		t.Fatalf("release delivery lease: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO notification_delivery_attempts (
+			delivery_id,attempt_number,outcome,failure_code,failure_reason,started_at,finished_at
+		) VALUES ($1,1,'transient_failure','duplicate','duplicate',now(),now())`, firstID); err == nil {
+		t.Fatal("duplicate attempt number unexpectedly passed")
+	}
+
+	access := rbac.NewStore(db, testResourceTables)
+	grantObjectRole(t, access, rbac.Organization, orgID, rbac.ReadRole, teamReaderID)
+	grantObjectRole(t, access, rbac.Team, teamID, rbac.ReadRole, teamReaderID)
+	grantObjectRole(t, access, rbac.Organization, orgID, rbac.ReadRole, orgReaderID)
+	grantObjectRole(t, access, rbac.Organization, otherOrgID, rbac.ReadRole, otherReaderID)
+	if _, err := db.Exec(`INSERT INTO team_members (team_id,user_id) VALUES ($1,$2)`, teamID, teamReaderID); err != nil {
+		t.Fatal(err)
+	}
+
+	resource := handlers.NewNotificationsResource(db, handlers.NewAuthorizer(db))
+	callHistory := func(user middleware.UserContext, query string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/notification-deliveries?"+query, nil)
+		req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey, user))
+		rec := httptest.NewRecorder()
+		resource.ListNotificationDeliveryHistory(rec, req)
+		return rec
+	}
+
+	admin := middleware.UserContext{UserID: adminID, IsSuperuser: true}
+	rec := callHistory(admin, fmt.Sprintf("organization_id=%d&limit=1", orgID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin history: status %d (%s)", rec.Code, rec.Body)
+	}
+	var page struct {
+		Results []struct {
+			ID       int64  `json:"id"`
+			Status   string `json:"status"`
+			Attempts []struct {
+				Outcome string `json:"outcome"`
+			} `json:"attempts"`
+		} `json:"results"`
+		NextCursor *int64 `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Results) != 1 || page.Results[0].ID != secondID || page.NextCursor == nil || *page.NextCursor != secondID {
+		t.Fatalf("first page = %#v body=%s", page, rec.Body)
+	}
+	if len(page.Results[0].Attempts) != 1 || page.Results[0].Attempts[0].Outcome != "delivered" {
+		t.Fatalf("attempt history missing: %s", rec.Body)
+	}
+	for _, forbidden := range []string{"encrypted-secret-path", "idempotency_key", `"config"`} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatalf("history exposed %q: %s", forbidden, rec.Body)
+		}
+	}
+
+	rec = callHistory(admin, fmt.Sprintf("organization_id=%d&limit=1&cursor=%d", orgID, *page.NextCursor))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), fmt.Sprintf(`"id":%d`, firstID)) {
+		t.Fatalf("second page: status=%d body=%s", rec.Code, rec.Body)
+	}
+
+	rec = callHistory(middleware.UserContext{UserID: teamReaderID}, fmt.Sprintf("organization_id=%d", orgID))
+	if rec.Code != http.StatusOK || strings.Count(rec.Body.String(), `"target_name"`) != 2 {
+		t.Fatalf("team reader history: status=%d body=%s", rec.Code, rec.Body)
+	}
+	rec = callHistory(middleware.UserContext{UserID: orgReaderID}, fmt.Sprintf("organization_id=%d", orgID))
+	if rec.Code != http.StatusOK || strings.Count(rec.Body.String(), `"target_name"`) != 0 {
+		t.Fatalf("unscoped org reader must not see team history: status=%d body=%s", rec.Code, rec.Body)
+	}
+	rec = callHistory(middleware.UserContext{UserID: otherReaderID}, fmt.Sprintf("organization_id=%d", orgID))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-org reader: status=%d body=%s", rec.Code, rec.Body)
+	}
+
+	if _, err := db.Exec(`DELETE FROM notification_templates WHERE id=$1`, targetID); err != nil {
+		t.Fatal(err)
+	}
+	rec = callHistory(admin, fmt.Sprintf("organization_id=%d", orgID))
+	if rec.Code != http.StatusOK || strings.Count(rec.Body.String(), `"target_name"`) != 2 ||
+		!strings.Contains(rec.Body.String(), fmt.Sprintf("delivery-target-%d", uniq)) {
+		t.Fatalf("history was not retained after target deletion: status=%d body=%s", rec.Code, rec.Body)
 	}
 }
 

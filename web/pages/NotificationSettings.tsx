@@ -3,6 +3,7 @@ import { Bell, CheckCircle2, Plus, Send, Trash2 } from 'lucide-react';
 import { api, unwrap, type ResourceCapabilities } from '../services/api';
 import type { NotificationField, NotificationTarget, NotificationType, Organization } from '../types';
 import { Button, EmptyState, ErrorState, FormActions, FormErrorSummary, Input, LoadingState, Modal, PageHeader, SecretField, Select, Textarea, confirmDialog, toast } from '../components/ui';
+import NotificationDeliveryHistory from '../components/NotificationDeliveryHistory';
 
 const EMPTY_CAPABILITIES: ResourceCapabilities = {
   view: false, manage: false, use: false, execute: false, update: false, approve: false,
@@ -146,6 +147,7 @@ const NotificationSettings: React.FC = () => {
             ))}
           </section>
         )}
+        {organizationId > 0 && <NotificationDeliveryHistory organizationId={organizationId} />}
       </div>
 
       <CreateTargetModal

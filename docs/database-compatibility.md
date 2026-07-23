@@ -18,7 +18,7 @@ those records existed at the starting version. The final schema must contain the
 latest migration record and delegated-launch structures.
 
 The matrix also executes the latest explicitly reversible boundary by applying
-`000068` down, removing its migration-history record, and proving the production
+`000075` down, removing its migration-history record, and proving the production
 migrator can reapply it. This is not a promise that arbitrary historical
 downgrades are safe. A migration is rollback-supported only when the test names
 that exact boundary and its down migration passes without weakening retained

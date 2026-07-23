@@ -9,7 +9,7 @@ vi.mock('../services/api', () => ({
   api: {
     getOrganizations: vi.fn(), getNotificationTypes: vi.fn(), getNotificationTemplates: vi.fn(),
     getCapabilities: vi.fn(), createNotificationTemplate: vi.fn(), deleteNotificationTemplate: vi.fn(),
-    testNotificationTemplate: vi.fn(),
+    testNotificationTemplate: vi.fn(), getNotificationDeliveries: vi.fn(),
   },
 }));
 
@@ -21,6 +21,7 @@ beforeEach(() => {
   vi.mocked(api.getNotificationTypes).mockResolvedValue(types);
   vi.mocked(api.getCapabilities).mockResolvedValue({ view: true, manage: true, use: false, execute: false, update: false, approve: false });
   vi.mocked(api.getNotificationTemplates).mockResolvedValue([]);
+  vi.mocked(api.getNotificationDeliveries).mockResolvedValue({ results: [] });
   vi.mocked(api.createNotificationTemplate).mockResolvedValue({ id: 8 });
   vi.mocked(api.testNotificationTemplate).mockResolvedValue({ status: 'delivered', notification_template_id: 8, tested_at: '2026-07-22T00:00:00Z' });
 });
