@@ -217,6 +217,33 @@ The scripted run is followed by the desktop and 390 x 844 UI checklist in
 that pass are tracked separately and do not get silently folded into the
 acceptance implementation.
 
+### Notification operations readiness
+
+The notification milestone has a separate repeatable readiness gate. It reuses
+the controlled staging receiver and synthetic LDAP identities, but creates and
+deletes its own timestamped targets, policies, job template, and inventory.
+Inspect the non-mutating plan and prerequisite status before running it:
+
+```sh
+make staging-notification-readiness-plan
+make staging-notification-readiness-status
+make staging-notification-readiness-run
+```
+
+The journey proves target test delivery; job, inventory-sync, and assigned-team
+approval delivery; producer and worker restart recovery; bounded transient
+retry; terminal failure classification; logical deduplication; team and
+organization history isolation; redaction; and fixture cleanup. It restarts the
+staging-only receiver before and after the journey so captured request bodies
+are not retained. Persistent application data, PVCs, shared acceptance
+resources, and real destinations are never deleted or contacted.
+
+The resulting mode-`0600` evidence is
+`~/.local/share/praetor/staging/acceptance/evidence/notification-operations.json`.
+It contains bounded subject identifiers, attempt counts, release metadata, and
+the verified check names; it contains no target configuration or secret
+material.
+
 Execution-diagnostics acceptance is a separate fail-closed decision. After the
 bounded journey, fault, recovery, API-budget, and responsive-UI evidence has
 been recorded, run `make staging-execution-diagnostics-preflight`, then

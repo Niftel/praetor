@@ -211,3 +211,8 @@ for workload in \
   statefulset/praetor-executor; do
   kubectl rollout status "$workload" -n "$NAMESPACE" --timeout=180s
 done
+
+# A clean cluster has no retained pack PVC content. Seed the deterministic,
+# validation-only runtime before any journey launches a real job.
+PRAETOR_EXECUTOR_ROOT="$EXECUTOR_ROOT" \
+  "$ROOT/scripts/stage-validation-execution-pack.sh"

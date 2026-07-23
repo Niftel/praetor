@@ -10,6 +10,9 @@ data:
     server {
       listen 8080;
       location = /healthz { access_log off; return 204; }
+      # Deterministic terminal delivery failure used by the persistent-staging
+      # readiness journey. No outbound or production destination is involved.
+      location = /permanent { return 400; }
       location / { rewrite ^ /capture break; proxy_pass http://127.0.0.1:8080; }
       location = /capture { access_log off; return 204; }
     }
@@ -31,7 +34,7 @@ spec:
           image: nginx:alpine-slim@sha256:dd722b8ee8794f3c273bfaf8b5351b0652a68ccd73c17e5f0d029857a58f25ef
           ports: [{name: http, containerPort: 8080}]
           readinessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 2, periodSeconds: 3}
-          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 64Mi}}
+          resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 50m, memory: 64Mi}}
           volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d}]
       volumes: [{name: config, configMap: {name: praetor-staging-acceptance-sink}}]
 ---

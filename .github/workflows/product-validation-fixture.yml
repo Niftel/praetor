@@ -236,6 +236,14 @@ jobs:
         run: |
           kubectl get pods -A -o wide
           kubectl get events -A --sort-by=.lastTimestamp | tail -n 100
+          for workload in \
+            statefulset/praetor-executor \
+            deployment/praetor-scheduler \
+            deployment/praetor-api \
+            deployment/praetor-consumer; do
+            echo "==> $workload"
+            kubectl logs -n praetor-secrets "$workload" --all-containers --tail=120 || true
+          done
 
   # Delegated API validation needs PostgreSQL but not Kubernetes. A targeted
   # manual rerun therefore avoids paying the cluster bootstrap cost entirely.

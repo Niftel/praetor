@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Proves durable notification enqueue, retry, restart recovery, deduplication,
-# RBAC, and redacted history against the disposable product-validation cluster.
+# Proves target test delivery, durable notification enqueue, retry, restart
+# recovery, deduplication, RBAC, redacted history, and fixture cleanup. The
+# disposable product-validation cluster is the default; persistent staging
+# supplies the same bounded contract through environment overrides.
 
 NAMESPACE="${PRAETOR_VALIDATION_NAMESPACE:-praetor-secrets}"
 RELEASE="${PRAETOR_HELM_RELEASE:-praetor}"
+CONTEXT="${PRAETOR_VALIDATION_CONTEXT:-}"
 API_PORT="${PRAETOR_NOTIFICATION_E2E_API_PORT:-18086}"
 API="http://127.0.0.1:$API_PORT/api/v1"
 PASSWORD="${PRAETOR_VALIDATION_LDAP_PASSWORD:-praetor123}"
 EVIDENCE_FILE="${PRAETOR_NOTIFICATION_EVIDENCE_FILE:-}"
 PREFIX="Notification Delivery E2E $(date +%s)"
 SECRET_CANARY="notification-history-secret-canary"
+SINK_DEPLOYMENT="${PRAETOR_NOTIFICATION_SINK_DEPLOYMENT:-praetor-validation-notification-sink}"
+SINK_SERVICE="${PRAETOR_NOTIFICATION_SINK_SERVICE:-praetor-validation-notification-sink}"
 PORT_FORWARD_PID=""
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/praetor-notification-e2e.XXXXXX")"
 PHASE="bootstrap"
@@ -21,17 +26,22 @@ WORKFLOW_JOB_IDS=()
 INVENTORY_ID=""
 JOB_TEMPLATE_ID=""
 OTHER_ORG_ID=""
+OTHER_ORG_CREATED=false
+FAILURE_DETAIL=""
 
 die() { echo "error: $*" >&2; record_failure; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"; }
 for command in curl jq kubectl; do need "$command"; done
+KUBECTL=(kubectl)
+[[ -z "$CONTEXT" ]] || KUBECTL+=(--context "$CONTEXT")
 
 record_failure() {
   [[ -z "$EVIDENCE_FILE" ]] || {
     umask 077
     mkdir -p "$(dirname "$EVIDENCE_FILE")"
-    jq -n --arg phase "$PHASE" \
-      '{schema_version:1,journey:"notification-delivery",result:"fail",phase:$phase}' >"$EVIDENCE_FILE"
+    jq -n --arg phase "$PHASE" --arg detail "$FAILURE_DETAIL" \
+      '{schema_version:1,journey:"notification-delivery",result:"fail",phase:$phase}
+       + if $detail == "" then {} else {failure_detail:$detail} end' >"$EVIDENCE_FILE"
   }
 }
 
@@ -46,8 +56,8 @@ request() {
 cleanup() {
   local approvals=""
   set +e
-  kubectl scale -n "$NAMESPACE" deployment/praetor-validation-notification-sink --replicas=1 >/dev/null 2>&1
-  kubectl scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=1 >/dev/null 2>&1
+  "${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$SINK_DEPLOYMENT" --replicas=1 >/dev/null 2>&1
+  "${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=1 >/dev/null 2>&1
   if [[ -n "${ADMIN_TOKEN:-}" && -n "$PORT_FORWARD_PID" ]] && kill -0 "$PORT_FORWARD_PID" 2>/dev/null; then
     if [[ -n "${APPROVER_TOKEN:-}" ]]; then
       request "$APPROVER_TOKEN" GET workflow-approvals >/dev/null 2>&1
@@ -72,7 +82,7 @@ cleanup() {
 trap record_failure ERR
 trap cleanup EXIT
 
-kubectl port-forward -n "$NAMESPACE" "svc/$RELEASE-api" "$API_PORT:8080" >"$WORK/port-forward.log" 2>&1 &
+"${KUBECTL[@]}" port-forward -n "$NAMESPACE" "svc/$RELEASE-api" "$API_PORT:8080" >"$WORK/port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!
 for _ in $(seq 1 30); do
   curl -fsS "$API/ping" >/dev/null 2>&1 && break
@@ -98,7 +108,7 @@ find_id() {
   get "$ADMIN_TOKEN" "$1" | items | jq -r --arg name "$2" '.[] | select(.name == $name) | .id' | head -n1
 }
 wait_rollout() {
-  kubectl rollout status -n "$NAMESPACE" "$1" --timeout=180s >/dev/null ||
+  "${KUBECTL[@]}" rollout status -n "$NAMESPACE" "$1" --timeout=180s >/dev/null ||
     die "$1 did not become ready"
 }
 history() { get "$1" "notification-deliveries?organization_id=$2&limit=100"; }
@@ -123,13 +133,43 @@ wait_history_state() {
   die "$target_name $event delivery for subject $subject_id did not reach $state"
 }
 wait_job() {
-  local job_id="$1" expected="$2" state=""
+  local job_id="$1" expected="$2" state="" job="" run_id="" diagnostics="" logs=""
   for _ in $(seq 1 180); do
-    state="$(get "$ADMIN_TOKEN" jobs | jq -r --argjson id "$job_id" '.[] | select(.id == $id) | .status' | head -n1)"
+    job="$(get "$ADMIN_TOKEN" jobs | jq -c --argjson id "$job_id" '.[] | select(.id == $id)' | head -n1)"
+    state="$(jq -r '.status // empty' <<<"$job")"
     [[ "$state" =~ ^(successful|failed|error|canceled)$ ]] && break
     sleep 1
   done
-  [[ "$state" == "$expected" ]] || die "job $job_id finished '$state', expected '$expected'"
+  if [[ "$state" != "$expected" ]]; then
+    run_id="$(jq -r '.current_run_id // empty' <<<"$job")"
+    FAILURE_DETAIL="job=$job_id status=${state:-missing} run=${run_id:-missing}"
+    echo "job failure context: $FAILURE_DETAIL" >&2
+    if [[ -n "$run_id" ]]; then
+      request "$ADMIN_TOKEN" GET "jobs/runs/$run_id/diagnostics"
+      if [[ "$STATUS" == 200 ]]; then
+        diagnostics="$RESPONSE"
+        echo "job diagnostics:" >&2
+        jq '{summary,failures:[.events[] | select(.failure_code != null or .outcome == "failed" or .outcome == "unreachable")]}' \
+          <<<"$diagnostics" >&2
+        FAILURE_DETAIL="$FAILURE_DETAIL failure_code=$(jq -r '.summary.failure_code // "unknown"' <<<"$diagnostics")"
+      else
+        echo "job diagnostics unavailable: HTTP $STATUS" >&2
+      fi
+      request "$ADMIN_TOKEN" GET "jobs/runs/$run_id/logs"
+      if [[ "$STATUS" == 200 && -n "$RESPONSE" ]]; then
+        logs="$RESPONSE"
+        echo "job output (last 80 lines):" >&2
+        tail -n 80 <<<"$logs" >&2
+      else
+        echo "job output unavailable: HTTP $STATUS" >&2
+      fi
+    fi
+    for workload in "statefulset/$RELEASE-executor" "deployment/$RELEASE-scheduler"; do
+      echo "$workload logs (last 80 lines):" >&2
+      "${KUBECTL[@]}" logs -n "$NAMESPACE" "$workload" --all-containers --tail=80 >&2 || true
+    done
+    die "job $job_id finished '${state:-missing}', expected '$expected'"
+  fi
 }
 create_target() {
   local name="$1" url="$2"
@@ -207,15 +247,22 @@ UJT_ID="$(jq -er .unified_job_template_id <<<"$RESPONSE")"
 SUCCESS_NAME="$PREFIX Success"
 TRANSIENT_NAME="$PREFIX Transient"
 PERMANENT_NAME="$PREFIX Permanent"
-SUCCESS_TARGET="$(create_target "$SUCCESS_NAME" "http://praetor-validation-notification-sink:8080/echo?token=$SECRET_CANARY")"
-TRANSIENT_TARGET="$(create_target "$TRANSIENT_NAME" "http://praetor-validation-notification-sink:8080/echo?token=$SECRET_CANARY")"
-PERMANENT_TARGET="$(create_target "$PERMANENT_NAME" "http://praetor-validation-notification-sink:8080/permanent?token=$SECRET_CANARY")"
+SUCCESS_TARGET="$(create_target "$SUCCESS_NAME" "http://$SINK_SERVICE:8080/echo?token=$SECRET_CANARY")"
+TRANSIENT_TARGET="$(create_target "$TRANSIENT_NAME" "http://$SINK_SERVICE:8080/echo?token=$SECRET_CANARY")"
+PERMANENT_TARGET="$(create_target "$PERMANENT_NAME" "http://$SINK_SERVICE:8080/permanent?token=$SECRET_CANARY")"
 TARGET_IDS+=("$SUCCESS_TARGET" "$TRANSIENT_TARGET" "$PERMANENT_TARGET")
+
+PHASE="target-test-delivery"
+request "$ADMIN_TOKEN" POST "notification-templates/$SUCCESS_TARGET/test"
+[[ "$STATUS" == 200 ]] || die "notification target test returned $STATUS: $RESPONSE"
+jq -e --argjson target "$SUCCESS_TARGET" \
+  '.status == "delivered" and .notification_template_id == $target and (.tested_at | length > 0)' \
+  <<<"$RESPONSE" >/dev/null || die "notification target test response is incomplete"
 
 PHASE="workflow-pending-and-transient-retry"
 TRANSIENT_POLICY="$(create_policy "$TRANSIENT_TARGET" workflow_template "$WORKFLOW_ID" approval "$TEAM_ID")"
 POLICY_IDS+=("$TRANSIENT_POLICY")
-kubectl scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=0 >/dev/null
+"${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=0 >/dev/null
 WORKFLOW_JOB_ID="$(launch_approval_workflow)"
 WORKFLOW_JOB_IDS+=("$WORKFLOW_JOB_ID")
 PENDING="$(wait_history_state "$TRANSIENT_NAME" "$WORKFLOW_JOB_ID" approval pending)"
@@ -223,20 +270,20 @@ PENDING="$(wait_history_state "$TRANSIENT_NAME" "$WORKFLOW_JOB_ID" approval pend
 
 # Restart the producer after enqueue, then start a fresh worker while the target
 # is unavailable. The first attempt must become retrying rather than disappear.
-kubectl rollout restart -n "$NAMESPACE" "deployment/$RELEASE-scheduler" >/dev/null
+"${KUBECTL[@]}" rollout restart -n "$NAMESPACE" "deployment/$RELEASE-scheduler" >/dev/null
 wait_rollout "deployment/$RELEASE-scheduler"
-kubectl scale -n "$NAMESPACE" deployment/praetor-validation-notification-sink --replicas=0 >/dev/null
-kubectl scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=1 >/dev/null
+"${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$SINK_DEPLOYMENT" --replicas=0 >/dev/null
+"${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=1 >/dev/null
 wait_rollout "deployment/$RELEASE-consumer"
 RETRYING="$(wait_history_state "$TRANSIENT_NAME" "$WORKFLOW_JOB_ID" approval retrying)"
 [[ "$(jq -r .attempt_count <<<"$RETRYING")" == 1 ]] || die "transient delivery did not record one failed attempt"
 [[ "$(jq -r '.attempts | length' <<<"$RETRYING")" == 1 ]] || die "transient attempt history is incomplete"
 [[ "$(jq -r '.attempts[0].outcome' <<<"$RETRYING")" == transient_failure ]] || die "first transient attempt was misclassified"
 
-kubectl scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=0 >/dev/null
-kubectl scale -n "$NAMESPACE" deployment/praetor-validation-notification-sink --replicas=1 >/dev/null
-wait_rollout deployment/praetor-validation-notification-sink
-kubectl scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=1 >/dev/null
+"${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=0 >/dev/null
+"${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$SINK_DEPLOYMENT" --replicas=1 >/dev/null
+wait_rollout "deployment/$SINK_DEPLOYMENT"
+"${KUBECTL[@]}" scale -n "$NAMESPACE" "deployment/$RELEASE-consumer" --replicas=1 >/dev/null
 wait_rollout "deployment/$RELEASE-consumer"
 DELIVERED_RETRY="$(wait_history_state "$TRANSIENT_NAME" "$WORKFLOW_JOB_ID" approval delivered)"
 jq -e '
@@ -305,7 +352,8 @@ PHASE="history-rbac"
 OPERATOR_HISTORY="$(history "$OPERATOR_TOKEN" "$ORG_ID")"
 jq -e --argjson id "$(jq -r .id <<<"$DELIVERED_RETRY")" '.results | any(.id == $id)' \
   <<<"$OPERATOR_HISTORY" >/dev/null || die "assigned-team operator cannot inspect approval history"
-jq -e --argjson job "$JOB_ID" '.results | all(.subject_id != $job)' \
+jq -e --argjson job "$JOB_ID" \
+  '.results | all(.subject_kind != "job" or .subject_id != $job)' \
   <<<"$OPERATOR_HISTORY" >/dev/null || die "ordinary operator can inspect organization-scoped job history"
 OUTSIDER_HISTORY="$(history "$OUTSIDER_TOKEN" "$ORG_ID")"
 jq -e --argjson first "$WORKFLOW_JOB_ID" --argjson second "$PERMANENT_WORKFLOW_JOB_ID" \
@@ -313,16 +361,64 @@ jq -e --argjson first "$WORKFLOW_JOB_ID" --argjson second "$PERMANENT_WORKFLOW_J
   <<<"$OUTSIDER_HISTORY" >/dev/null || die "wrong-team user can inspect approval history"
 
 request "$ADMIN_TOKEN" POST organizations "$(jq -nc --arg name "$PREFIX Other Org" '{name:$name}')"
-[[ "$STATUS" == 201 ]] || die "create cross-organization fixture returned $STATUS: $RESPONSE"
-OTHER_ORG_ID="$(jq -er .id <<<"$RESPONSE")"
+if [[ "$STATUS" == 201 ]]; then
+  OTHER_ORG_ID="$(jq -er .id <<<"$RESPONSE")"
+  OTHER_ORG_CREATED=true
+elif [[ "$STATUS" == 403 ]]; then
+  # Organization administrators cannot create a second organization. A
+  # guaranteed-foreign sentinel exercises the same fail-closed history path.
+  OTHER_ORG_ID=$((ORG_ID + 1000000))
+else
+  die "create cross-organization fixture returned $STATUS: $RESPONSE"
+fi
 request "$OPERATOR_TOKEN" GET "notification-deliveries?organization_id=$OTHER_ORG_ID&limit=25"
 [[ "$STATUS" == 403 ]] || die "cross-organization history returned $STATUS, expected 403"
 
-PHASE="redaction-and-evidence"
+PHASE="redaction-cleanup-and-evidence"
 ALL_HISTORY="$(history "$ADMIN_TOKEN" "$ORG_ID")"
 for sensitive in "$SECRET_CANARY" '"config"' '"idempotency_key"' '"job_args"' '"credential"'; do
   ! grep -Fq "$sensitive" <<<"$ALL_HISTORY" || die "history exposed sensitive marker $sensitive"
 done
+
+# Remove every fixture-owned mutable resource before publishing a passing
+# result. Delivery history remains as the bounded audit record and has already
+# been proven not to contain target configuration or the canary.
+for policy_id in "${POLICY_IDS[@]}"; do
+  request "$ADMIN_TOKEN" DELETE "notification-policies/$policy_id"
+  [[ "$STATUS" == 204 || "$STATUS" == 404 ]] || die "cleanup policy $policy_id returned $STATUS: $RESPONSE"
+done
+POLICY_IDS=()
+for scope in \
+  "workflow_template:$WORKFLOW_ID" \
+  "job_template:$JOB_TEMPLATE_ID" \
+  "inventory_source:$SOURCE_ID"; do
+  resource_type="${scope%%:*}"
+  resource_id="${scope##*:}"
+  remaining_policies="$(get "$ADMIN_TOKEN" "notification-policies?resource_type=$resource_type&resource_id=$resource_id")"
+  jq -e --arg prefix "$PREFIX" 'all(.[]; (.notification_name | startswith($prefix) | not))' \
+    <<<"$remaining_policies" >/dev/null || die "fixture notification policies remain after cleanup"
+done
+request "$ADMIN_TOKEN" DELETE "inventories/$INVENTORY_ID"
+[[ "$STATUS" == 204 || "$STATUS" == 404 ]] || die "cleanup inventory returned $STATUS: $RESPONSE"
+INVENTORY_ID=""
+request "$ADMIN_TOKEN" DELETE "job-templates/$JOB_TEMPLATE_ID"
+[[ "$STATUS" == 204 || "$STATUS" == 404 ]] || die "cleanup job template returned $STATUS: $RESPONSE"
+JOB_TEMPLATE_ID=""
+for target_id in "${TARGET_IDS[@]}"; do
+  request "$ADMIN_TOKEN" DELETE "notification-templates/$target_id"
+  [[ "$STATUS" == 204 || "$STATUS" == 404 ]] || die "cleanup notification target $target_id returned $STATUS: $RESPONSE"
+done
+TARGET_IDS=()
+if [[ "$OTHER_ORG_CREATED" == true ]]; then
+  request "$ADMIN_TOKEN" DELETE "organizations/$OTHER_ORG_ID/"
+  [[ "$STATUS" == 204 || "$STATUS" == 404 ]] || die "cleanup organization returned $STATUS: $RESPONSE"
+fi
+OTHER_ORG_ID=""
+OTHER_ORG_CREATED=false
+
+remaining_targets="$(get "$ADMIN_TOKEN" "notification-templates?organization_id=$ORG_ID" | items)"
+jq -e --arg prefix "$PREFIX" 'all(.[]; (.name | startswith($prefix) | not))' \
+  <<<"$remaining_targets" >/dev/null || die "fixture notification targets remain after cleanup"
 
 EVIDENCE="$(jq -n \
   --argjson workflow_job_id "$WORKFLOW_JOB_ID" \
@@ -343,6 +439,7 @@ EVIDENCE="$(jq -n \
     },
     attempts:{transient:$retry_attempts,permanent:$permanent_attempts},
     checks:[
+      "target-test-delivery",
       "job-delivery",
       "inventory-sync-delivery",
       "workflow-approval-delivery",
@@ -355,6 +452,7 @@ EVIDENCE="$(jq -n \
       "wrong-team-history-denial",
       "cross-organization-history-denial",
       "notification-history-secret-redaction",
+      "fixture-resource-cleanup",
       "sanitized-machine-readable-evidence"
     ]
   }')"
