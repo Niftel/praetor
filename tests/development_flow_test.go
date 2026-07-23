@@ -296,6 +296,67 @@ fi
 	}
 }
 
+func TestDevelopmentFlowVerifiesRequiredPullRequestWorkflows(t *testing.T) {
+	root := repositoryRoot(t)
+	temp := t.TempDir()
+	config := filepath.Join(temp, "flow.json")
+	if err := os.WriteFile(config, []byte(`{
+		"owner":"Niftel",
+		"repository":"praetor",
+		"required_workflows":["CI","Image"]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeGH(t, temp, `#!/usr/bin/env bash
+if [[ "$1 $2" == "pr checks" ]]; then
+  printf '%s\n' "$FAKE_CHECKS"
+else
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+`)
+
+	tests := []struct {
+		name    string
+		checks  string
+		wantErr bool
+	}{
+		{
+			name:   "all required workflows succeeded",
+			checks: `[{"workflow":"CI","state":"SUCCESS"},{"workflow":"CI","state":"SKIPPED"},{"workflow":"Image","state":"SUCCESS"}]`,
+		},
+		{
+			name:    "required workflow missing",
+			checks:  `[{"workflow":"CI","state":"SUCCESS"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "required workflow contains failure",
+			checks:  `[{"workflow":"CI","state":"SUCCESS"},{"workflow":"Image","state":"SUCCESS"},{"workflow":"Image","state":"FAILURE"}]`,
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", `source scripts/development-flow.sh; required_pr_workflows_succeeded 340`)
+			cmd.Dir = root
+			cmd.Env = append(
+				os.Environ(),
+				"PATH="+temp+":"+os.Getenv("PATH"),
+				"PRAETOR_DEVELOPMENT_FLOW_CONFIG="+config,
+				"FAKE_CHECKS="+test.checks,
+			)
+			output, err := cmd.CombinedOutput()
+			if test.wantErr && err == nil {
+				t.Fatalf("invalid workflow state passed verification:\n%s", output)
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("valid workflow state failed verification: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
 func writeFakeGH(t *testing.T, directory, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(directory, "gh"), []byte(body), 0o700); err != nil {

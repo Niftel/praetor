@@ -376,25 +376,42 @@ verify_main() {
   [[ "${WORKFLOW_CONCLUSION:-success}" == success ]] || exit 0
   local sha="${VERIFIED_SHA:-${GITHUB_SHA:-}}" prs issue
   [[ -n "$sha" ]] || { echo "error: VERIFIED_SHA or GITHUB_SHA is required" >&2; exit 1; }
-  local runs required count result
-  runs="$(gh run list --repo "$REPOSITORY" --commit "$sha" --limit 100 --json name,status,conclusion)"
-  while IFS= read -r required; do
-    count="$(jq -r --arg required "$required" '[.[] | select(.name == $required)] | length' <<<"$runs")"
-    result="$(jq -r --arg required "$required" '[.[] | select(.name == $required)] | first | (.status + ":" + (.conclusion // ""))' <<<"$runs")"
-    if [[ "$count" == 0 || "$result" != "completed:success" ]]; then
-      echo "required workflow '$required' is not yet successful for $sha ($result)"
-      exit 0
-    fi
-  done < <(jq -r '.required_workflows[]' "$CONFIG")
   prs="$(gh api "repos/$REPOSITORY/commits/$sha/pulls" --jq '.[].number')"
   while IFS= read -r pr; do
     [[ -n "$pr" ]] || continue
+    if ! required_pr_workflows_succeeded "$pr"; then
+      echo "required pull-request workflows are not successful for PR #$pr"
+      exit 0
+    fi
     issue="$(linked_issue "$(gh pr view "$pr" --repo "$REPOSITORY" --json body --jq .body)")"
     [[ -n "$issue" ]] || continue
     set_flow_label "$issue" "Done"
     set_project_status "$(gh issue view "$issue" --repo "$REPOSITORY" --json url --jq .url)" "Done"
     gh issue close "$issue" --repo "$REPOSITORY" --comment "Verified on main commit \`$sha\`; required workflow completed successfully." >/dev/null 2>&1 || true
   done <<<"$prs"
+}
+
+required_pr_workflows_succeeded() {
+  local pr="$1" checks required successes failures
+  checks="$(gh pr checks "$pr" --repo "$REPOSITORY" --json workflow,state 2>/dev/null || true)"
+  [[ -n "$checks" ]] || {
+    echo "required workflow checks are unavailable for PR #$pr"
+    return 1
+  }
+  while IFS= read -r required; do
+    successes="$(jq -r --arg required "$required" \
+      '[.[] | select(.workflow == $required and .state == "SUCCESS")] | length' <<<"$checks")"
+    failures="$(jq -r --arg required "$required" '
+      [.[] | select(
+        .workflow == $required
+        and (.state != "SUCCESS" and .state != "SKIPPED" and .state != "NEUTRAL")
+      )] | length
+    ' <<<"$checks")"
+    if (( successes == 0 || failures != 0 )); then
+      echo "required workflow '$required' is not successful for PR #$pr (successes=$successes failures=$failures)"
+      return 1
+    fi
+  done < <(jq -r '.required_workflows[]' "$CONFIG")
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
