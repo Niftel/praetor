@@ -18,7 +18,6 @@ import (
 type AccessStore interface {
 	ObjectAccess(ctx context.Context, contentType string, objectID int64) ([]store.ObjectRoleAccess, error)
 	UserAccessRoles(ctx context.Context, userID int64) ([]store.UserAccessRole, error)
-	ActivityStream(ctx context.Context, resourceType, action string, limit int) ([]store.ActivityEntry, error)
 }
 
 // AccessResource is the self-contained access/audit domain — per-resource access,

@@ -28,7 +28,7 @@ func TestDelegatedWorkflowLaunchEnforcesScopeAndPersistsAttribution(t *testing.T
 		_, _ = db.Exec(`DELETE FROM users WHERE id=$1`, userID)
 	})
 
-	var principalID, credentialID, workflowID, inventoryID, hostA, hostB, hostOutside, groupID, teamID, grantID int64
+	var principalID, credentialID, workflowID, inventoryID, hostA, hostB, hostOutside, groupID, teamID, grantID, notificationTargetID, notificationPolicyID int64
 	mustGet := func(dest *int64, query string, args ...interface{}) {
 		t.Helper()
 		if err := db.Get(dest, query, args...); err != nil {
@@ -65,6 +65,13 @@ func TestDelegatedWorkflowLaunchEnforcesScopeAndPersistsAttribution(t *testing.T
 		VALUES ($1,$2,$3,$4,$5,2,$6,$7,now()+interval '1 hour',$8) RETURNING id`,
 		orgID, principalID, workflowID, inventoryID, pq.Array([]int64{groupID}),
 		pq.Array([]string{"change_ticket"}), teamID, userID)
+	mustGet(&notificationTargetID, `INSERT INTO notification_templates
+		(organization_id,name,notification_type) VALUES ($1,$2,'webhook') RETURNING id`,
+		orgID, fmt.Sprintf("delegated-launch-notification-%d", uniq))
+	mustGet(&notificationPolicyID, `INSERT INTO notification_policies
+		(organization_id,team_id,notification_template_id,resource_type,resource_id,event)
+		VALUES ($1,$2,$3,'workflow_template',$4,'approval') RETURNING id`,
+		orgID, teamID, notificationTargetID, workflowID)
 
 	resource := handlers.NewDelegatedLaunchResource(db)
 	principal := middleware.UserContext{
@@ -110,13 +117,30 @@ func TestDelegatedWorkflowLaunchEnforcesScopeAndPersistsAttribution(t *testing.T
 		len(stored.HostIDs) != 2 || !strings.Contains(stored.LaunchArgsString, `"limit": "app-01,app-02"`) {
 		t.Fatalf("incorrect delegated attribution or launch args: %+v", stored)
 	}
+	var routedPolicyID int64
+	if err := db.Get(&routedPolicyID, `
+		SELECT p.id
+		  FROM workflow_jobs wj
+		  JOIN notification_policies p
+		    ON p.organization_id=$1
+		   AND p.resource_type='workflow_template'
+		   AND p.resource_id=wj.workflow_template_id
+		   AND p.team_id=wj.approval_team_id
+		   AND p.event='approval'
+		 WHERE wj.id=$2`, orgID, response.WorkflowJobID); err != nil {
+		t.Fatalf("resolve delegated approval notification route: %v", err)
+	}
+	if routedPolicyID != notificationPolicyID {
+		t.Fatalf("delegated launch routed notification policy %d, want %d", routedPolicyID, notificationPolicyID)
+	}
 
 	var auditCount int
 	if err := db.Get(&auditCount, `SELECT count(*) FROM activity_stream
 		WHERE service_principal_id=$1 AND service_credential_id=$2
 		  AND delegated_launch_grant_id=$3 AND external_requester='customer-123'
-		  AND resource_type='workflow_template' AND resource_id=$4 AND action='launch'`,
-		principalID, credentialID, grantID, workflowID); err != nil || auditCount != 1 {
+		  AND resource_type='workflow_template' AND resource_id=$4 AND action='launch'
+		  AND principal_kind='service' AND organization_id=$5 AND outcome='success'`,
+		principalID, credentialID, grantID, workflowID, orgID); err != nil || auditCount != 1 {
 		t.Fatalf("delegated audit count=%d err=%v", auditCount, err)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,8 +54,9 @@ func TestActivityRecorderPersistsAfterRequestCancellation(t *testing.T) {
 
 	select {
 	case args := <-called:
-		resourceID, ok := args[4].(*int64)
-		if args[0] != int64(7) || args[1] != "operator" || args[2] != "launch" || !ok || *resourceID != 42 {
+		resourceID, ok := args[7].(*int64)
+		if args[0] != int64(7) || args[1] != "operator" || args[2] != HumanPrincipal ||
+			args[5] != "launch" || !ok || *resourceID != 42 || args[12] != "success" {
 			t.Fatalf("unexpected audit args: %#v", args)
 		}
 	case <-time.After(time.Second):
@@ -170,6 +172,66 @@ func TestActivityRecorderReportsUnavailableExecutor(t *testing.T) {
 		t.Fatal("missing executor was not reported")
 	}
 	closeActivityRecorder(t, recorder)
+}
+
+func TestActivityRecorderCapturesDeniedNotificationBoundary(t *testing.T) {
+	called := make(chan []interface{}, 1)
+	executor := activityExecutorFunc(func(_ context.Context, _ string, args ...interface{}) (sql.Result, error) {
+		called <- args
+		return nil, nil
+	})
+	recorder := newActivityRecorder(context.Background(), executor, time.Second, t.Logf)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/notification-templates/91/test", strings.NewReader(`{"config":{"url":"https://secret.invalid/token"}}`))
+	request = request.WithContext(context.WithValue(request.Context(), UserContextKey, UserContext{
+		Kind: HumanPrincipal, UserID: 12, Username: "auditor",
+	}))
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		SetActivityMetadata(r, ActivityMetadata{
+			OrganizationID: 8,
+			ResourceID:     91,
+			ResourceType:   "notification_template",
+			Action:         "test",
+			FailureCode:    "notification_admin_required",
+		})
+		w.WriteHeader(http.StatusForbidden)
+	})
+	recorder.Middleware(handler).ServeHTTP(httptest.NewRecorder(), request)
+
+	select {
+	case args := <-called:
+		orgID, orgOK := args[8].(*int64)
+		resourceID, resourceOK := args[7].(*int64)
+		if !orgOK || *orgID != 8 || !resourceOK || *resourceID != 91 ||
+			args[5] != "test" || args[6] != "notification_template" ||
+			args[12] != "denied" || args[13] != "notification_admin_required" {
+			t.Fatalf("unexpected denied notification audit args: %#v", args)
+		}
+		for _, arg := range args {
+			if strings.Contains(fmt.Sprint(arg), "secret.invalid") {
+				t.Fatalf("audit args exposed request secret: %#v", args)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("denied notification mutation was not audited")
+	}
+	closeActivityRecorder(t, recorder)
+}
+
+func TestNotificationMutationPathsIncludeLegacyAttachments(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/notification-templates",
+		"/api/v1/notification-templates/7/test",
+		"/api/v1/notification-policies/9",
+		"/api/v1/job-templates/2/notifications",
+		"/api/v1/workflow-templates/3/notifications/4/approval",
+	} {
+		if !isNotificationMutationPath(path) {
+			t.Errorf("notification mutation path was not recognized: %s", path)
+		}
+	}
+	if isNotificationMutationPath("/api/v1/workflow-templates/3/launch") {
+		t.Fatal("ordinary workflow launch classified as notification mutation")
+	}
 }
 
 func containsLog(logs []string, fragment string) bool {

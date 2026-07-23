@@ -291,11 +291,11 @@ func (rs *DelegatedLaunchResource) LaunchWorkflow(w http.ResponseWriter, r *http
 		INSERT INTO activity_stream
 		    (username, action, resource_type, resource_id, method, path, status_code,
 		     service_principal_id, service_credential_id, delegated_launch_grant_id,
-		     external_requester)
-		VALUES ($1,'launch','workflow_template',$2,$3,$4,201,$5,$6,$7,$8)`,
+		     external_requester, principal_kind, organization_id, outcome)
+		VALUES ($1,'launch','workflow_template',$2,$3,$4,201,$5,$6,$7,$8,'service',$9,'success')`,
 		principal.Username, workflowID, r.Method, r.URL.Path,
 		principal.ServicePrincipalID, principal.ServiceCredentialID, grant.ID,
-		body.ExternalRequester); err != nil {
+		body.ExternalRequester, principal.OrganizationID); err != nil {
 		render.ErrInternal(err).Render(w, r)
 		return
 	}

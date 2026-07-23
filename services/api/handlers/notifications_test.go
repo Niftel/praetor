@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
 	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/handlers"
 	"github.com/praetordev/praetor/services/api/middleware"
@@ -127,6 +129,193 @@ func TestCreateNotificationTargetRejectsUnsafeDestination(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe target: status %d (%s), want 400", rec.Code, rec.Body)
 	}
+}
+
+func TestNotificationRBACRedactionAndActivityBoundaries(t *testing.T) {
+	db := rbacTestDB(t)
+	defer db.Close()
+	t.Setenv("PRAETOR_ALLOW_INSECURE_DEFAULTS", "true")
+
+	var deliveries atomic.Int32
+	const secretCanary = "notification-secret-canary"
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		deliveries.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(receiver.Close)
+	parsed, err := url.Parse(receiver.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PRAETOR_NOTIFICATION_ALLOWED_HOSTS", parsed.Hostname())
+
+	uniq := time.Now().UnixNano()
+	orgID := createOrg(t, db, fmt.Sprintf("notification-boundary-org-%d", uniq))
+	adminID := createUser(t, db, fmt.Sprintf("notification-boundary-admin-%d", uniq))
+	auditorID := createUser(t, db, fmt.Sprintf("notification-boundary-auditor-%d", uniq))
+	memberID := createUser(t, db, fmt.Sprintf("notification-boundary-member-%d", uniq))
+	access := rbac.NewStore(db, testResourceTables)
+	grantObjectRole(t, access, rbac.Organization, orgID, rbac.AdminRole, adminID)
+	grantObjectRole(t, access, rbac.Organization, orgID, rbac.AuditorRole, auditorID)
+	grantObjectRole(t, access, rbac.Organization, orgID, rbac.MemberRole, memberID)
+	systemAuditor, err := access.RoleByName(context.Background(), rbac.SystemAuditor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := access.Assign(context.Background(), rbac.Assignment{
+		RoleDefinitionID: systemAuditor.ID,
+		PrincipalKind:    rbac.UserPrincipal,
+		PrincipalID:      auditorID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`, adminID, auditorID, memberID)
+		_, _ = db.Exec(`DELETE FROM organizations WHERE id=$1`, orgID)
+	})
+
+	resource := handlers.NewNotificationsResource(db, handlers.NewAuthorizer(db))
+	admin := middleware.UserContext{Kind: middleware.HumanPrincipal, UserID: adminID, Username: "notification-admin"}
+	auditor := middleware.UserContext{Kind: middleware.HumanPrincipal, UserID: auditorID, Username: "notification-auditor"}
+	member := middleware.UserContext{Kind: middleware.HumanPrincipal, UserID: memberID, Username: "notification-member"}
+	createBody := fmt.Sprintf(
+		`{"organization_id":%d,"name":"Boundary target","notification_type":"webhook","config":{"url":%q}}`,
+		orgID, receiver.URL+"/"+secretCanary,
+	)
+	rec := callAuditedJSON(t, db, resource.CreateNotificationTemplate, http.MethodPost,
+		"/api/v1/notification-templates", createBody, admin, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create target: status %d (%s)", rec.Code, rec.Body)
+	}
+	targetID := extractID(t, rec.Body.String())
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/?organization_id=%d", orgID), nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey, auditor))
+	rec = httptest.NewRecorder()
+	resource.ListNotificationTemplates(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("auditor list targets: status %d (%s)", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), secretCanary) || strings.Contains(rec.Body.String(), receiver.URL) ||
+		strings.Contains(rec.Body.String(), `"config"`) {
+		t.Fatalf("auditor response exposed target config: %s", rec.Body)
+	}
+
+	for name, principal := range map[string]middleware.UserContext{
+		"auditor": auditor,
+		"member":  member,
+		"service-principal": {
+			Kind: middleware.ServicePrincipal, OrganizationID: orgID, Username: "notification-service",
+		},
+	} {
+		t.Run(name+" cannot test target", func(t *testing.T) {
+			rec := callAuditedJSON(t, db, resource.TestNotificationTemplate, http.MethodPost,
+				fmt.Sprintf("/api/v1/notification-templates/%d/test", targetID), "", principal,
+				map[string]string{"id": fmt.Sprint(targetID)})
+			if rec.Code != http.StatusForbidden ||
+				!strings.Contains(rec.Body.String(), "notification_admin_required") {
+				t.Fatalf("test denial: status %d (%s)", rec.Code, rec.Body)
+			}
+		})
+	}
+	if got := deliveries.Load(); got != 0 {
+		t.Fatalf("unauthorized principals delivered %d test notifications", got)
+	}
+
+	var workflowID, teamID int64
+	if err := db.Get(&workflowID, `INSERT INTO workflow_templates (organization_id,name) VALUES ($1,$2) RETURNING id`,
+		orgID, fmt.Sprintf("notification-boundary-workflow-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&teamID, `INSERT INTO teams (organization_id,name) VALUES ($1,$2) RETURNING id`,
+		orgID, fmt.Sprintf("notification-boundary-team-%d", uniq)); err != nil {
+		t.Fatal(err)
+	}
+	policyBody := fmt.Sprintf(
+		`{"notification_template_id":%d,"resource_type":"workflow_template","resource_id":%d,"team_id":%d,"event":"approval"}`,
+		targetID, workflowID, teamID,
+	)
+	rec = callAuditedJSON(t, db, resource.CreateNotificationPolicy, http.MethodPost,
+		"/api/v1/notification-policies", policyBody, admin, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create notification policy: status %d (%s)", rec.Code, rec.Body)
+	}
+	policyID := extractID(t, rec.Body.String())
+	rec = callAuditedJSON(t, db, resource.DeleteNotificationPolicy, http.MethodDelete,
+		fmt.Sprintf("/api/v1/notification-policies/%d", policyID), "", auditor,
+		map[string]string{"id": fmt.Sprint(policyID)})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("auditor delete notification policy: status %d (%s)", rec.Code, rec.Body)
+	}
+
+	rec = callAuditedJSON(t, db, resource.TestNotificationTemplate, http.MethodPost,
+		fmt.Sprintf("/api/v1/notification-templates/%d/test", targetID), "", admin,
+		map[string]string{"id": fmt.Sprint(targetID)})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin test target: status %d (%s)", rec.Code, rec.Body)
+	}
+
+	activity := handlers.NewAccessResource(db, handlers.NewAuthorizer(db))
+	req = httptest.NewRequest(http.MethodGet, "/activity-stream?limit=30", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey, auditor))
+	rec = httptest.NewRecorder()
+	activity.ListActivityStream(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("system auditor activity stream: status %d (%s)", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	for _, required := range []string{
+		`"organization_id":`, `"outcome":"success"`, `"outcome":"denied"`,
+		`"failure_code":"notification_admin_required"`, `"failure_code":"permission_denied"`,
+		`"principal_kind":"service"`, `"resource_type":"notification_policy"`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("activity stream missing %s: %s", required, body)
+		}
+	}
+	for _, forbidden := range []string{secretCanary, receiver.URL, `"config"`} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("activity stream exposed %q: %s", forbidden, body)
+		}
+	}
+}
+
+func callAuditedJSON(t *testing.T, db *sqlx.DB, fn handlerFn, method, path, body string, uc middleware.UserContext, urlParams map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	var activityBefore int
+	if err := db.Get(&activityBefore, `SELECT count(*) FROM activity_stream`); err != nil {
+		t.Fatalf("count activity before request: %v", err)
+	}
+	recorder := middleware.NewActivityRecorder(context.Background(), db, time.Second)
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	routeContext := chi.NewRouteContext()
+	for key, value := range urlParams {
+		routeContext.URLParams.Add(key, value)
+	}
+	ctx := context.WithValue(request.Context(), chi.RouteCtxKey, routeContext)
+	ctx = context.WithValue(ctx, middleware.UserContextKey, uc)
+	rec := httptest.NewRecorder()
+	recorder.Middleware(http.HandlerFunc(fn)).ServeHTTP(rec, request.WithContext(ctx))
+	deadline := time.Now().Add(time.Second)
+	for {
+		var activityAfter int
+		if err := db.Get(&activityAfter, `SELECT count(*) FROM activity_stream`); err != nil {
+			t.Fatalf("count activity after request: %v", err)
+		}
+		if activityAfter > activityBefore {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("activity record was not persisted")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := recorder.Close(closeContext); err != nil {
+		t.Fatalf("close activity recorder: %v", err)
+	}
+	return rec
 }
 
 func TestNotificationDeliveryHistoryPaginationRBACAndRetention(t *testing.T) {
@@ -364,6 +553,9 @@ func TestNotificationPoliciesEnforceApprovalTeamAndOrganizationScope(t *testing.
 	rec = callJSON(t, resource.CreateNotificationPolicy, http.MethodPost, crossOrg, admin, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("cross-org approval policy: status %d (%s), want 400", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "notification_scope_invalid") {
+		t.Fatalf("cross-org approval policy returned unstable reason: %s", rec.Body)
 	}
 
 	valid := fmt.Sprintf(`{"notification_template_id":%d,"resource_type":"workflow_template","resource_id":%d,"team_id":%d,"event":"approval"}`, targetID, workflowID, teamID)
