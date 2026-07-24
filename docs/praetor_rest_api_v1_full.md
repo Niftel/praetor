@@ -1226,7 +1226,37 @@ Bulk operations:
 
 - `POST /api/v1/bulk/hosts/create` – bulk create hosts.  
 - `POST /api/v1/bulk/hosts/delete` – bulk delete hosts.  
-- `POST /api/v1/bulk/jobs/launch` – bulk launch jobs.  
+- `POST /api/v1/bulk/jobs/launch` – launch 1–25 jobs in stable input order.
+
+Bulk job launch requires an `Idempotency-Key` header (1–128 characters,
+`[A-Za-z0-9._:-]`, beginning with an alphanumeric character) and accepts:
+
+```json
+{
+  "items": [
+    {
+      "identifier": "deploy-web",
+      "unified_job_template_id": 42,
+      "name": "Deploy web",
+      "extra_vars": {"release": "2026.07.24"},
+      "limit": "web-*"
+    }
+  ]
+}
+```
+
+Every item passes through the canonical single-job launch checks, including
+template execute access, inventory use access, survey/prompt validation,
+client-supplied limit handling, relaunch validation, and the simultaneous-run
+guard. Results preserve input order. A fully accepted batch returns `201`; a
+completed batch containing rejections returns `207`. Missing and unauthorized
+templates deliberately share the `not_found_or_forbidden` result so the bulk
+surface cannot be used to enumerate inaccessible resources.
+
+The key is scoped to the authenticated user. Replaying an identical request
+returns the stored response without creating duplicate jobs. Reusing it for a
+different request returns `409`. The request body is capped at 256 KiB and
+accepted launches receive individual actor-attributed activity records.
 
 Exact payloads MAY mirror AWX’s, but must be documented in the OpenAPI schema.
 
