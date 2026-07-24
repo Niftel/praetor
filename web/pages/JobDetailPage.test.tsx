@@ -20,7 +20,7 @@ vi.mock('../services/api', () => ({
   api: { getJobs: vi.fn().mockResolvedValue([]), getTemplates: vi.fn().mockResolvedValue([]), getJobLogsSince: vi.fn() },
 }));
 
-import JobDetailPage from './JobDetailPage';
+import JobDetailPage, { renderAnsiLine } from './JobDetailPage';
 import { buildHostRows, buildTaskRows, failureGuidance } from '../lib/executionDiagnostics';
 
 describe('execution diagnostics job workspace', () => {
@@ -49,5 +49,14 @@ describe('execution diagnostics job workspace', () => {
     expect(buildHostRows(events)).toHaveLength(500);
     expect(JSON.stringify(buildHostRows(events))).not.toContain('event_data');
     expect(failureGuidance('unknown_code')).toContain('no more specific safe guidance');
+  });
+
+  it('renders ANSI styling without treating job output as HTML', () => {
+    const rendered = renderAnsiLine('\u001b[31mFAILED\u001b[0m <img src=x onerror=alert(1)>');
+
+    expect(rendered).toContain('FAILED');
+    expect(rendered).not.toContain('\u001b[');
+    expect(rendered).toContain('&lt;img');
+    expect(rendered).not.toContain('<img');
   });
 });
