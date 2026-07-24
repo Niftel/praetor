@@ -31,6 +31,60 @@ export interface ResourceCapabilities {
     add_workflow_template?: boolean;
 }
 
+export interface BulkOperationResult {
+    index: number;
+    identifier?: string;
+    status: string;
+    http_status: number;
+    code?: string;
+    error?: string;
+    job_id?: number;
+    host_id?: number;
+}
+
+export interface BulkOperationResponse {
+    idempotency_key: string;
+    complete: boolean;
+    results: BulkOperationResult[];
+}
+
+export interface BulkJobLaunchItem {
+    identifier?: string;
+    unified_job_template_id: number;
+    name: string;
+    extra_vars?: Record<string, unknown>;
+    limit?: string;
+}
+
+export interface BulkHostCreateItem {
+    identifier?: string;
+    inventory_id: number;
+    name: string;
+    description?: string;
+    variables?: Record<string, unknown>;
+    is_control_node?: boolean;
+}
+
+export interface BulkHostDeletePreviewResult extends BulkOperationResult {
+    name?: string;
+    inventory_id?: number;
+    blocking_relationships: Array<{ code: string; count: number }>;
+    affected_relationships: Array<{ code: string; count: number; effect: string }>;
+}
+
+export interface BulkHostDeletePreview {
+    confirmation_token: string;
+    expires_at: string;
+    results: BulkHostDeletePreviewResult[];
+}
+
+export const newIdempotencyKey = (scope: string) => {
+    const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return `${scope}-${suffix}`;
+};
+
 // Decode the logged-in user's identity from the JWT claims (no network call).
 // Returns null if there's no token or it can't be parsed.
 export const getCurrentUser = (): CurrentUser | null => {
@@ -186,6 +240,12 @@ export const api = {
     // Jobs
     getJobs: () => fetchWithAuth('/jobs').then(r => r.json()),
     launchJob: (data: any) => fetchWithAuth('/jobs', { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
+    bulkLaunchJobs: (items: BulkJobLaunchItem[], idempotencyKey: string) =>
+        fetchWithAuth('/bulk/jobs/launch', {
+            method: 'POST',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            body: JSON.stringify({ items }),
+        }).then(r => r.json() as Promise<BulkOperationResponse>),
     cancelJob: (id: number) => fetchWithAuth(`/jobs/${id}/cancel`, { method: 'POST' }).then(r => r.json()),
 
     // API tokens (personal access tokens for headless/CI auth)
@@ -342,6 +402,23 @@ export const api = {
     createHost: (inventoryId: number, data: any) => fetchWithAuth(`/inventories/${inventoryId}/hosts`, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json()),
     updateHost: (hostId: number, data: any) => fetchWithAuth(`/hosts/${hostId}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json()),
     deleteHost: (hostId: number) => fetchWithAuth(`/hosts/${hostId}`, { method: 'DELETE' }),
+    bulkCreateHosts: (items: BulkHostCreateItem[], idempotencyKey: string) =>
+        fetchWithAuth('/bulk/hosts/create', {
+            method: 'POST',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            body: JSON.stringify({ items }),
+        }).then(r => r.json() as Promise<BulkOperationResponse>),
+    previewBulkDeleteHosts: (items: Array<{ identifier?: string; host_id: number }>) =>
+        fetchWithAuth('/bulk/hosts/delete/preview', {
+            method: 'POST',
+            body: JSON.stringify({ items }),
+        }).then(r => r.json() as Promise<BulkHostDeletePreview>),
+    bulkDeleteHosts: (confirmationToken: string, idempotencyKey: string) =>
+        fetchWithAuth('/bulk/hosts/delete', {
+            method: 'POST',
+            headers: { 'Idempotency-Key': idempotencyKey },
+            body: JSON.stringify({ confirmation_token: confirmationToken }),
+        }).then(r => r.json() as Promise<BulkOperationResponse>),
     setRunnerHost: (hostId: number) => fetchWithAuth(`/hosts/${hostId}/set-runner`, { method: 'POST' }).then(r => r.json()),
 
     // Groups (nested under inventories)

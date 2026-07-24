@@ -2,6 +2,15 @@ export { default as Badge } from './Badge';
 export { default as Button } from './Button';
 export { default as Card } from './Card';
 export { DataTable, type DataColumn, type SortDirection, type SortState } from './DataTable';
+export {
+  BulkActionBar,
+  BulkResultPanel,
+  SelectionCheckbox,
+  useBulkSelection,
+  type BulkResult,
+  type BulkSelectionState,
+  type SelectionKey,
+} from './BulkSelection';
 export { DataValue, StatusValue, TimestampValue } from './DataValue';
 export { Input, Select, Textarea } from './Input';
 export { FormActions, FormErrorSummary, FormSection, SecretField, useDirtyFormGuard } from './Form';

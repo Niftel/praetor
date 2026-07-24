@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'pages/TemplatesPage.tsx'), 'utf8');
 const projectsSource = readFileSync(resolve(process.cwd(), 'pages/ProjectsPage.tsx'), 'utf8');
+const inventoriesSource = readFileSync(resolve(process.cwd(), 'pages/InventoriesPage.tsx'), 'utf8');
 const accessSources = ['OrganizationsPage.tsx', 'TeamsPage.tsx', 'UsersPage.tsx'].map(file => ({
   file,
   source: readFileSync(resolve(process.cwd(), `pages/${file}`), 'utf8'),
@@ -51,5 +52,20 @@ describe('Projects framework adoption', () => {
   it('does not restore the superseded local page frame or spinner', () => {
     expect(projectsSource).not.toContain('PageSpinner');
     expect(projectsSource).not.toContain('max-w-[1060px] w-full mx-auto px-8 pt-7 pb-16');
+  });
+});
+
+describe('Bulk-operation framework adoption', () => {
+  it('keeps templates and inventories on the shared selection and result primitives', () => {
+    for (const [file, pageSource] of [['TemplatesPage.tsx', source], ['InventoriesPage.tsx', inventoriesSource]] as const) {
+      for (const primitive of ['useBulkSelection', 'BulkActionBar', 'BulkResultPanel']) {
+        expect(pageSource, `${file} must use ${primitive}`).toContain(primitive);
+      }
+    }
+  });
+
+  it('opens inventory creation dialogs from normal click actions', () => {
+    expect(inventoriesSource).toContain('onClick={() => { setAddMenu(false); setShowBulkHostModal(true); }}');
+    expect(inventoriesSource).not.toContain('onMouseDown={() => setShowBulkHostModal(true)}');
   });
 });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { api, unwrap } from '../services/api';
+import { api, newIdempotencyKey, unwrap, type BulkOperationResult } from '../services/api';
 import { Template, Project, Inventory, Credential, SurveyQuestion, Workflow, Job, WorkflowRunSummary } from '../types';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -8,7 +8,21 @@ import Modal from '../components/ui/Modal';
 import { Plus, Search, Check, Trash2, Play, ArrowLeft, GitFork, FileText, Pencil } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import WorkflowLaunchModal, { WorkflowLaunchOptions } from '../components/WorkflowLaunchModal';
-import { DataTable, type DataColumn, FormErrorSummary, FormSection, LoadingState, Page, PageHeader, PageToolbar, StatusValue, TimestampValue } from '../components/ui';
+import {
+  BulkActionBar,
+  BulkResultPanel,
+  DataTable,
+  type DataColumn,
+  FormErrorSummary,
+  FormSection,
+  LoadingState,
+  Page,
+  PageHeader,
+  PageToolbar,
+  StatusValue,
+  TimestampValue,
+  useBulkSelection,
+} from '../components/ui';
 import NotificationPolicyManager, { NotificationPolicyEvent } from '../components/NotificationPolicyManager';
 
 type Editing = number | 'new' | null;
@@ -62,6 +76,9 @@ const TemplatesPage = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
   const [catalogType, setCatalogType] = useState<'all' | 'job' | 'workflow'>('all');
+  const [bulkLaunchBusy, setBulkLaunchBusy] = useState(false);
+  const [bulkLaunchResults, setBulkLaunchResults] = useState<BulkOperationResult[]>([]);
+  const [bulkSubmitted, setBulkSubmitted] = useState<Template[]>([]);
 
   const [editing, setEditing] = useState<Editing>(null);
   const [formData, setFormData] = useState<Partial<Template>>({});
@@ -194,6 +211,36 @@ const TemplatesPage = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [templates, workflows, jobs, workflowRuns, filter, catalogType]);
 
+  const selectableTemplateKeys = useMemo(() => templates
+    .filter(template => template.unified_job_template_id)
+    .map(template => `job-${template.id}`), [templates]);
+  const visibleTemplateKeys = useMemo(() => catalog
+    .filter(entry => entry.kind === 'job' && (entry.item as Template).unified_job_template_id)
+    .map(entry => entry.key), [catalog]);
+  const bulkSelection = useBulkSelection(selectableTemplateKeys, visibleTemplateKeys, 25);
+
+  const launchSelectedTemplates = async (targets?: Template[]) => {
+    const selected = targets ?? templates.filter(template => bulkSelection.selected.has(`job-${template.id}`));
+    if (selected.length === 0) return;
+    setBulkSubmitted(selected);
+    setBulkLaunchBusy(true);
+    setBulkLaunchResults([]);
+    try {
+      const response = await api.bulkLaunchJobs(selected.map(template => ({
+        identifier: template.name.slice(0, 64),
+        unified_job_template_id: template.unified_job_template_id!,
+        name: template.name,
+      })), newIdempotencyKey('ui-bulk-launch'));
+      setBulkLaunchResults(response.results);
+      const failed = response.results.filter(result => result.status !== 'launched').length;
+      failed ? toast.info(`Bulk launch completed with ${failed} failed item${failed === 1 ? '' : 's'}.`) : toast.success(`Launched ${response.results.length} templates.`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Bulk launch failed before results were returned');
+    } finally {
+      setBulkLaunchBusy(false);
+    }
+  };
+
   const set = (patch: Partial<Template>) => setFormData(f => ({ ...f, ...patch }));
 
   const catalogColumns: DataColumn<(typeof catalog)[number]>[] = [
@@ -259,8 +306,35 @@ const TemplatesPage = () => {
               <button onClick={startNew} className="h-8 px-3 rounded-md border border-line2 text-[11px] font-medium text-ink2 hover:text-ink hover:border-white/20 inline-flex items-center gap-1.5"><Plus size={13} /> New job template</button>
             </div>
           </PageToolbar>
+          <BulkActionBar selectedCount={bulkSelection.selectedCount} limit={25} busy={bulkLaunchBusy} busyLabel="Launching templates" onClear={bulkSelection.clear}>
+            <Button size="sm" icon={<Play size={12} />} disabled={bulkLaunchBusy} onClick={() => launchSelectedTemplates()}>Launch selected</Button>
+          </BulkActionBar>
+          <BulkResultPanel
+            title={bulkLaunchBusy ? 'Launching selected templates' : 'Bulk launch finished'}
+            running={bulkLaunchBusy}
+            results={bulkLaunchResults}
+            onRetryFailed={failed => launchSelectedTemplates(failed.map(result => bulkSubmitted[result.index]).filter(Boolean))}
+            onDismiss={() => setBulkLaunchResults([])}
+          />
           <div className="flex-1 overflow-auto scroll-tint">
-            <DataTable columns={catalogColumns} rows={catalog} rowKey={entry => entry.key} emptyTitle={filter ? 'No matching automation templates' : 'No automation templates yet'} emptyDescription={filter ? 'Change or clear the search and type filter.' : 'Create a job template or workflow to make automation reusable.'} className="border-t-0" />
+            <DataTable
+              columns={catalogColumns}
+              rows={catalog}
+              rowKey={entry => entry.key}
+              selection={{
+                selectedKeys: bulkSelection.selected,
+                allVisibleSelected: bulkSelection.allVisibleSelected,
+                someVisibleSelected: bulkSelection.someVisibleSelected,
+                onToggle: entry => bulkSelection.toggle(entry.key),
+                onToggleAllVisible: bulkSelection.toggleAllVisible,
+                isRowSelectable: entry => entry.kind === 'job' && Boolean((entry.item as Template).unified_job_template_id),
+                rowSelectionLabel: entry => entry.kind === 'job' ? `Select ${entry.name} for bulk launch` : `${entry.name} cannot be bulk launched`,
+                selectAllLabel: 'Select all visible job templates',
+              }}
+              emptyTitle={filter ? 'No matching automation templates' : 'No automation templates yet'}
+              emptyDescription={filter ? 'Change or clear the search and type filter.' : 'Create a job template or workflow to make automation reusable.'}
+              className="border-t-0"
+            />
           </div>
         </div>
       ) : (
