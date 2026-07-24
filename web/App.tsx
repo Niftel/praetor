@@ -35,6 +35,79 @@ const WorkflowsLanding = lazy(() => import('./pages/landings').then(module => ({
 const CredentialsLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.CredentialsLanding })));
 const SchedulesLanding = lazy(() => import('./pages/landings').then(module => ({ default: module.SchedulesLanding })));
 
+interface AppRoutesProps {
+  isAuthenticated: boolean;
+  onLogin: () => void;
+  onLogout: () => void;
+}
+
+export const AppRoutes: React.FC<AppRoutesProps> = ({ isAuthenticated, onLogin, onLogout }) => (
+  <Routes>
+    <Route
+      path="/login"
+      element={!isAuthenticated ? <LoginPage onLogin={onLogin} /> : <Navigate to="/" replace />}
+    />
+
+    {/* Dev-only visual check for WorkflowDag — no auth, no backend. Stripped
+        from production builds via import.meta.env.DEV. */}
+    {import.meta.env.DEV && (
+      <Route
+        path="/_preview/workflow-dag"
+        element={(
+          <Suspense fallback={<LoadingState label="Loading preview" />}>
+            <WorkflowDagPreview />
+          </Suspense>
+        )}
+      />
+    )}
+
+    <Route
+      path="/"
+      element={isAuthenticated ? <Shell onLogout={onLogout} /> : <Navigate to="/login" replace />}
+    >
+      <Route index element={<DashboardPage />} />
+      <Route path="jobs" element={<JobsPage />} />
+      <Route path="jobs/:jobId" element={<JobDetailPage />} />
+      {/* Org-first: each resource opens to the user's orgs, then drills in. */}
+      <Route path="templates" element={<TemplatesLanding />} />
+      <Route path="templates/org/:orgId" element={<TemplatesPage />} />
+      <Route path="workflows" element={<WorkflowsLanding />} />
+      <Route path="workflows/org/:orgId" element={<WorkflowsPage />} />
+      <Route path="workflows/org/:orgId/builder" element={<WorkflowBuilderPage />} />
+      <Route path="workflows/org/:orgId/builder/:workflowId" element={<WorkflowBuilderPage />} />
+      <Route path="workflows/runs/:jobId" element={<WorkflowRunPage />} />
+      <Route path="approvals" element={<ApprovalsPage />} />
+      <Route path="projects" element={<ProjectsLanding />} />
+      <Route path="projects/org/:orgId" element={<ProjectsPage />} />
+      <Route path="inventories" element={<InventoriesLanding />} />
+      <Route path="inventories/org/:orgId" element={<InventoriesPage />} />
+      <Route path="credentials" element={<CredentialsLanding />} />
+      <Route path="credentials/org/:orgId" element={<CredentialsPage />} />
+      <Route path="tokens" element={<TokensPage />} />
+      <Route path="service-principals" element={<ServicePrincipalsPage />} />
+      <Route path="execution-packs" element={<ExecutionPacksPage />} />
+      <Route path="schedules" element={<SchedulesLanding />} />
+      <Route path="schedules/org/:orgId" element={<SchedulesPage />} />
+
+      {/* RBAC Routes */}
+      <Route path="organizations" element={<OrganizationsPage />} />
+      <Route path="users" element={<UsersPage />} />
+      <Route path="teams" element={<TeamsPage />} />
+      <Route path="activity" element={<ActivityPage />} />
+
+      {/* Settings */}
+      <Route path="settings" element={<SettingsPage />} />
+      <Route path="settings/:section" element={<SettingsPage />} />
+      <Route path="settings/auth-providers" element={<AuthProvidersPage />} />
+      {/* Back-compat: the old top-level path now lives under Settings */}
+      <Route path="auth-providers" element={<Navigate to="/settings/auth-providers" replace />} />
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Route>
+  </Routes>
+);
+
 const App = () => {
   // Check if we have an existing token on initialization
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!getAuthToken());
@@ -48,70 +121,7 @@ const App = () => {
   return (
     <BrowserRouter>
       <ToastHost />
-      <Routes>
-        <Route
-          path="/login"
-          element={!isAuthenticated ? <LoginPage onLogin={handleLogin} /> : <Navigate to="/" replace />}
-        />
-
-        {/* Dev-only visual check for WorkflowDag — no auth, no backend. Stripped
-            from production builds via import.meta.env.DEV. */}
-        {import.meta.env.DEV && (
-          <Route
-            path="/_preview/workflow-dag"
-            element={(
-              <Suspense fallback={<LoadingState label="Loading preview" />}>
-                <WorkflowDagPreview />
-              </Suspense>
-            )}
-          />
-        )}
-
-        <Route
-          path="/"
-          element={isAuthenticated ? <Shell onLogout={handleLogout} /> : <Navigate to="/login" replace />}
-        >
-          <Route index element={<DashboardPage />} />
-          <Route path="jobs" element={<JobsPage />} />
-          <Route path="jobs/:jobId" element={<JobDetailPage />} />
-          {/* Org-first: each resource opens to the user's orgs, then drills in. */}
-          <Route path="templates" element={<TemplatesLanding />} />
-          <Route path="templates/org/:orgId" element={<TemplatesPage />} />
-          <Route path="workflows" element={<WorkflowsLanding />} />
-          <Route path="workflows/org/:orgId" element={<WorkflowsPage />} />
-          <Route path="workflows/org/:orgId/builder" element={<WorkflowBuilderPage />} />
-          <Route path="workflows/org/:orgId/builder/:workflowId" element={<WorkflowBuilderPage />} />
-          <Route path="workflows/runs/:jobId" element={<WorkflowRunPage />} />
-          <Route path="approvals" element={<ApprovalsPage />} />
-          <Route path="projects" element={<ProjectsLanding />} />
-          <Route path="projects/org/:orgId" element={<ProjectsPage />} />
-          <Route path="inventories" element={<InventoriesLanding />} />
-          <Route path="inventories/org/:orgId" element={<InventoriesPage />} />
-          <Route path="credentials" element={<CredentialsLanding />} />
-          <Route path="credentials/org/:orgId" element={<CredentialsPage />} />
-          <Route path="tokens" element={<TokensPage />} />
-          <Route path="service-principals" element={<ServicePrincipalsPage />} />
-          <Route path="execution-packs" element={<ExecutionPacksPage />} />
-          <Route path="schedules" element={<SchedulesLanding />} />
-          <Route path="schedules/org/:orgId" element={<SchedulesPage />} />
-
-          {/* RBAC Routes */}
-          <Route path="organizations" element={<OrganizationsPage />} />
-          <Route path="users" element={<UsersPage />} />
-          <Route path="teams" element={<TeamsPage />} />
-          <Route path="activity" element={<ActivityPage />} />
-
-          {/* Settings */}
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="settings/:section" element={<SettingsPage />} />
-          <Route path="settings/auth-providers" element={<AuthProvidersPage />} />
-          {/* Back-compat: the old top-level path now lives under Settings */}
-          <Route path="auth-providers" element={<Navigate to="/settings/auth-providers" replace />} />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+      <AppRoutes isAuthenticated={isAuthenticated} onLogin={handleLogin} onLogout={handleLogout} />
     </BrowserRouter>
   );
 };
