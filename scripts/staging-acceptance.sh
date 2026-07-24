@@ -88,6 +88,7 @@ Praetor staging acceptance plan
   negative checks:   frontend-team visibility/approval and requester self-approval are denied
   notifications:     digest-pinned staging-only sink; approval delivery asserted once
   delegated API:     complete fail-closed scope suite with no skipped cases
+  fleet operations:  deployed mixed create/launch/delete journey plus audit attribution
   evidence:          sanitized mode-0600 JSON below $EVIDENCE_ROOT
 EOF
 }
@@ -136,6 +137,13 @@ run_acceptance() {
   delivery_count="$(kubectl --context "$CONTEXT" -n "$NAMESPACE" logs deployment/praetor-staging-acceptance-sink --since=10m | jq -Rsc --argjson job "$(jq -r .workflow_job_id "$ldap_evidence")" '[split("\n")[] | fromjson? | select(.job_id == $job and .event == "approval")] | length')"
   [[ "$delivery_count" == 1 ]] || die "approval notification was delivered $delivery_count times, expected exactly 1"
 
+  PRAETOR_VALIDATION_CONTEXT="$CONTEXT" PRAETOR_VALIDATION_NAMESPACE="$NAMESPACE" \
+    PRAETOR_HELM_RELEASE="$RELEASE" PRAETOR_FLEET_USERNAME="${PRAETOR_FLEET_USERNAME:-demo-admin}" \
+    PRAETOR_FLEET_PASSWORD="${PRAETOR_FLEET_PASSWORD:-$PASSWORD}" \
+    PRAETOR_FLEET_LIVE_EVIDENCE_FILE="$EVIDENCE_ROOT/fleet-scale-live.json" \
+    "$ROOT/scripts/validate-fleet-scale-live.sh" >/dev/null
+  chmod 0600 "$EVIDENCE_ROOT/fleet-scale-live.json"
+
   kubectl --context "$CONTEXT" -n "$NAMESPACE" delete pod praetor-staging-delegated-db --ignore-not-found --wait=true >/dev/null
   kubectl --context "$CONTEXT" -n "$NAMESPACE" delete service praetor-staging-delegated-db --ignore-not-found >/dev/null
   kubectl --context "$CONTEXT" -n "$NAMESPACE" run praetor-staging-delegated-db \
@@ -158,7 +166,7 @@ run_acceptance() {
   DB_CREATED=false
   chmod 0600 "$EVIDENCE_ROOT/delegated-api.json"
   jq -n --arg recorded_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson notification_deliveries "$delivery_count" \
-    '{schema_version:1,journey:"staging-acceptance",result:"pass",recorded_at:$recorded_at,checks:["ldap-login","organization-team-mapping","inventory-host-scope","team-approval-isolation","requester-self-approval-denial","auditor-attribution","delegated-api-scope","notification-delivery"],notification_deliveries:$notification_deliveries}' \
+    '{schema_version:1,journey:"staging-acceptance",result:"pass",recorded_at:$recorded_at,checks:["ldap-login","organization-team-mapping","inventory-host-scope","team-approval-isolation","requester-self-approval-denial","auditor-attribution","delegated-api-scope","notification-delivery","fleet-scale-live"],notification_deliveries:$notification_deliveries}' \
     >"$EVIDENCE_ROOT/staging-acceptance.json"
   chmod 0600 "$EVIDENCE_ROOT/staging-acceptance.json"
   echo "scripted staging acceptance passed; sanitized evidence: $EVIDENCE_ROOT"

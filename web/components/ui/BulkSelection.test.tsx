@@ -45,7 +45,7 @@ describe('bulk operation surfaces', () => {
       <BulkResultPanel
         title="Bulk launch finished"
         results={[
-          { index: 0, identifier: 'Deploy web', status: 'launched', http_status: 201 },
+          { index: 0, identifier: 'Deploy web', status: 'accepted', http_status: 201 },
           { index: 1, identifier: 'Deploy db', status: 'rejected', http_status: 403, error: 'Launch not permitted' },
         ]}
         onRetryFailed={retry}

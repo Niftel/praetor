@@ -232,7 +232,7 @@ const TemplatesPage = () => {
         name: template.name,
       })), newIdempotencyKey('ui-bulk-launch'));
       setBulkLaunchResults(response.results);
-      const failed = response.results.filter(result => result.status !== 'launched').length;
+      const failed = response.results.filter(result => !['accepted', 'launched'].includes(result.status)).length;
       failed ? toast.info(`Bulk launch completed with ${failed} failed item${failed === 1 ? '' : 's'}.`) : toast.success(`Launched ${response.results.length} templates.`);
     } catch (err: any) {
       toast.error(err?.message || 'Bulk launch failed before results were returned');
