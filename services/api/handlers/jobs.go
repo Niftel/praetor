@@ -30,7 +30,7 @@ import (
 type JobStore interface {
 	// reads
 	ListRecent(ctx context.Context, limit int) ([]models.UnifiedJob, error)
-	ListReadable(ctx context.Context, tmplIDs []int64, limit int) ([]models.UnifiedJob, error)
+	ListReadableByScopes(ctx context.Context, tmplIDs, inventoryIDs []int64, limit int) ([]models.UnifiedJob, error)
 	GetRun(ctx context.Context, runID uuid.UUID) (models.ExecutionRun, error)
 	ListEvents(ctx context.Context, runID uuid.UUID) ([]models.JobEvent, error)
 	ListDiagnostics(ctx context.Context, runID uuid.UUID, query store.DiagnosticQuery) ([]store.DiagnosticEvent, error)
@@ -129,13 +129,20 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Regular users see only jobs whose governing template they can read.
-	ids, err := rs.readableIDs(r, rbac.JobTemplate)
+	// Regular users see jobs governed by job templates or inventory sources they
+	// can read. The two scopes are independently authorized; organization
+	// membership alone never contributes IDs to either set.
+	templateIDs, err := rs.readableIDs(r, rbac.JobTemplate)
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
 	}
-	jobs, err := rs.store.ListReadable(r.Context(), ids, 50)
+	inventoryIDs, err := rs.readableIDs(r, rbac.Inventory)
+	if err != nil {
+		render.Render(w, r, ErrInternal(err))
+		return
+	}
+	jobs, err := rs.store.ListReadableByScopes(r.Context(), templateIDs, inventoryIDs, 50)
 	if err != nil {
 		render.Render(w, r, ErrInternal(err))
 		return
