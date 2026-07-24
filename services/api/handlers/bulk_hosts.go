@@ -77,6 +77,11 @@ func (s *transactionalHostStore) Create(ctx context.Context, input models.Host) 
 	return created, err
 }
 
+func (s *transactionalHostStore) Delete(ctx context.Context, id int64) error {
+	_, err := s.tx.ExecContext(ctx, `DELETE FROM hosts WHERE id=$1`, id)
+	return err
+}
+
 // BulkCreateHosts handles POST /api/v1/bulk/hosts/create. Items are processed
 // sequentially so results are deterministic, bounded, and durably resumable.
 // Every item passes through CreateHost, including its inventory-admin check.

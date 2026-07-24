@@ -263,6 +263,8 @@ func NewRouter(db *sqlx.DB, cfg Config) (*chi.Mux, error) {
 		r.Mount("/jobs", jobs.Routes())
 		r.Post("/bulk/jobs/launch", jobs.BulkLaunchJobs)
 		r.Post("/bulk/hosts/create", hosts.BulkCreateHosts)
+		r.Post("/bulk/hosts/delete/preview", hosts.PreviewBulkDeleteHosts)
+		r.Post("/bulk/hosts/delete", hosts.BulkDeleteHosts)
 
 		// =======================================================================
 		// Job Templates

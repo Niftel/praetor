@@ -1225,7 +1225,8 @@ Praetor MAY offer AWX-like “unified” views:
 Bulk operations:
 
 - `POST /api/v1/bulk/hosts/create` – create 1–100 hosts in stable input order.
-- `POST /api/v1/bulk/hosts/delete` – bulk delete hosts.  
+- `POST /api/v1/bulk/hosts/delete/preview` – authorize and preview 1–100 host deletions.
+- `POST /api/v1/bulk/hosts/delete` – confirm a previewed host deletion batch.
 - `POST /api/v1/bulk/jobs/launch` – launch 1–25 jobs in stable input order.
 
 Bulk job launch requires an `Idempotency-Key` header (1–128 characters,
@@ -1283,6 +1284,26 @@ Identical replays return the stored response without duplicate hosts, while a
 changed request under the same key returns `409`. Requests are capped at 100
 items and 512 KiB, and every successful host receives an actor-attributed
 activity record.
+
+Bulk host deletion is deliberately two-step. Preview accepts host IDs and
+optional correlation identifiers, resolves inventory-admin access, and returns
+the exact visible hosts plus affected dependent records. Group membership,
+facts, and job summaries are reported as deletions; historical job and runner
+references are reported as detachments. Inventory runner assignments and
+delegated launch grants block deletion. Missing and unauthorized hosts return
+the same `not_found_or_forbidden` item without host details.
+
+The preview returns a user-bound, opaque confirmation token that expires after
+five minutes; Praetor stores only its SHA-256 digest. Confirmation supplies that
+token and an `Idempotency-Key`. Every ready host is re-resolved and
+re-authorized, and its host/relationship snapshot must still match. Changed
+state returns `stale_preview`, and a host removed since preview returns
+`already_deleted`; other valid items may still complete. A token cannot be used
+under another idempotency key. Exact retries return the durable original
+response, successful deletions use the canonical host delete path, and each
+deleted host receives an actor-attributed activity record. Neither operation
+automatically removes the related inventory, groups, grants, or runner
+resources.
 
 ---
 
