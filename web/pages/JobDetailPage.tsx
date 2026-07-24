@@ -39,6 +39,8 @@ const fmtDuration = (start?: string, finish?: string, now = Date.now()) => {
   return hours ? `${hours}:${pad(minutes)}:${pad(seconds % 60)}` : `${pad(minutes)}:${pad(seconds % 60)}`;
 };
 
+export const renderAnsiLine = (line: string) =>
+  line ? Anser.ansiToHtml(Anser.escapeForHtml(line), { use_classes: false }) : '&nbsp;';
 
 const JobDetailPage = () => {
   const { jobId } = useParams();
@@ -142,7 +144,7 @@ const JobDetailPage = () => {
   };
 
   const plainLogs = logs.replace(/\x1b\[[0-9;]*m/g, '');
-  const renderedLines = useMemo(() => logs.split('\n').map(line => line ? Anser.ansiToHtml(Anser.escapeForHtml(line), { use_classes: false }) : '&nbsp;'), [logs]);
+  const renderedLines = useMemo(() => logs.split('\n').map(renderAnsiLine), [logs]);
   const tabs: { id: View; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' }, { id: 'tasks', label: 'Tasks', count: taskRows.length },
     { id: 'hosts', label: 'Hosts', count: hostRows.length }, { id: 'failures', label: 'Failures', count: failures.length },
