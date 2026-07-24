@@ -144,10 +144,13 @@ func TestChangeAwareWorkflowsKeepStableGatesAndAvoidMainDuplication(t *testing.T
 
 	image := readWorkflow("image.yml")
 	for _, required := range []string{
+		"artifact-metadata: write",
 		"image_matrix: ${{ steps.plan.outputs.image_matrix }}",
 		"matrix: ${{ fromJSON(needs.classify.outputs.image_matrix) }}",
 		"if: needs.classify.outputs.run_images == 'true'",
 		"name: image-gate",
+		"push-to-registry: true",
+		"create-storage-record: true",
 	} {
 		if !strings.Contains(image, required) {
 			t.Errorf("Image workflow must contain %q", required)

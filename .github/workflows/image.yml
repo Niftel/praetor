@@ -22,6 +22,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
+  artifact-metadata: write
   attestations: write
   contents: read
   id-token: write
@@ -136,6 +137,7 @@ jobs:
           subject-name: ghcr.io/niftel/praetor-${{ matrix.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+          create-storage-record: true
 
   image-gate:
     name: image-gate
