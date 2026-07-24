@@ -127,4 +127,5 @@ container-authenticated checkout path.
 Major-version changes preserve the existing least-privilege workflow
 permissions. Pull requests build images without publishing or attesting them;
 the merged `main` image workflow is the controlled path that publishes the
-commit-addressed images and exercises registry attestation.
+commit-addressed images, exercises registry attestation, and writes linked
+artifact metadata records for the organization.
