@@ -14,7 +14,7 @@ for version in "${starting_versions[@]}"; do
 done
 
 echo "==> Proving the latest reversible boundary"
-go run ./cmd/migrationfixture rollback 77
+go run ./cmd/migrationfixture rollback 78
 go run ./cmd/migrator
 go run ./cmd/migrationfixture assert
 

@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 	"github.com/praetordev/models"
 	rbac "github.com/praetordev/praetor/pkg/accesscontrol"
 	"github.com/praetordev/praetor/services/api/dto"
@@ -144,6 +146,13 @@ func (rs *HostsResource) CreateHost(w http.ResponseWriter, r *http.Request) {
 
 	created, err := rs.store.Create(r.Context(), input)
 	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if renderErr := render.Render(w, r, ErrConflict(errors.New("a host with this name already exists in the inventory"))); renderErr != nil {
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+			return
+		}
 		render.ErrInternal(err).Render(w, r)
 		return
 	}
