@@ -102,6 +102,59 @@ func TestLocalDeploymentScriptsRejectMutableDefaults(t *testing.T) {
 	}
 }
 
+func TestLocalDevelopmentUpdatePreservesExternalImageOwnership(t *testing.T) {
+	root := repositoryRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "update-local-cluster.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	for _, required := range []string{
+		`go run ./cmd/compatcheck -output helm-values`,
+		`go run ./cmd/compatcheck -output images`,
+		`docker pull "$image"`,
+		`docker build --provenance=false -t "$local_image" -`,
+		`k3d image import -c "$CLUSTER" "$image"`,
+		`k3d reported success but '$expected' is absent from the node`,
+		`authenticate Docker to ghcr.io`,
+		`imageRegistries:`,
+		`api: ""`,
+		`migrator: ""`,
+		`scheduler: ""`,
+		`ui: ""`,
+		`-f "$PLATFORM_VALUES"`,
+		`-f "$LOCAL_IMAGE_VALUES"`,
+		`image: praetor-$image:$TAG`,
+		`--rawfile desired "$DESIRED_IMAGES"`,
+		`index($status.image)`,
+		`ErrImagePull`,
+		`ImagePullBackOff`,
+		`InvalidImageName`,
+		`CreateContainerConfigError`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("local update must contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`--set-string image.tag=`,
+		`--set image.tag=`,
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("local update must not contain global override %q", forbidden)
+		}
+	}
+
+	helperRaw, err := os.ReadFile(filepath.Join(root, "deployments", "helm", "praetor-v2", "templates", "_helpers.tpl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := string(helperRaw)
+	if !strings.Contains(helper, `hasKey ($root.Values.imageRegistries | default dict) .svc`) {
+		t.Fatal("chart image helper must distinguish an explicit empty per-service registry from an absent override")
+	}
+}
+
 func TestLocalDeploymentRunsStatefulSetPreflightBeforeHelm(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, name := range []string{"update-local-cluster.sh", "bootstrap-product-validation-base.sh"} {
