@@ -101,3 +101,30 @@ make shared-module-health-remote
 The `Shared module health` workflow runs this released-tag matrix when its
 inventory or checker changes. Remote platform release preflight repeats it after
 verifying component images, repository tags, and downloadable Go modules.
+
+## GitHub Actions runtime baseline
+
+Third-party actions are pinned to immutable 40-character commit SHAs. The
+readable release beside each pin is documentation only and must resolve to that
+exact commit.
+
+The current action baseline uses Node 24 releases:
+
+| Action | Release |
+| --- | --- |
+| `actions/checkout` | `v7.0.0` |
+| `actions/setup-go` | `v7.0.0` |
+| `actions/attest` | `v4.2.0` |
+| `azure/setup-helm` | `v5.0.1` |
+| `actions/upload-artifact` | `v7.0.1` |
+
+GitHub-hosted `ubuntu-latest` runners satisfy their runtime requirements.
+Self-hosted runners must run Actions Runner `v2.327.1` or newer. Workflows that
+run authenticated Git commands from a container after `actions/checkout` must
+use `v2.329.0` or newer. The repository's workflows do not currently use that
+container-authenticated checkout path.
+
+Major-version changes preserve the existing least-privilege workflow
+permissions. Pull requests build images without publishing or attesting them;
+the merged `main` image workflow is the controlled path that publishes the
+commit-addressed images and exercises registry attestation.
