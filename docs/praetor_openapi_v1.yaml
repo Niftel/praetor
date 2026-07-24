@@ -94,6 +94,50 @@ paths:
           description: Idempotency key was already used with a different request
         '413':
           description: Request body exceeds 256 KiB
+  /bulk/hosts/create:
+    post:
+      summary: Create a bounded batch of inventory hosts
+      description: |
+        Processes 1-100 hosts in input order. Each item passes through the same
+        inventory-admin authorization, field handling, uniqueness constraint,
+        and activity recording as POST /inventories/{inventoryId}/hosts. The
+        Idempotency-Key is scoped to the authenticated human user; replaying
+        the same request returns the stored response, while reusing the key
+        with a different body returns 409.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkHostCreateRequest'
+      responses:
+        '201':
+          description: Every host was created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkHostCreateResponse'
+        '207':
+          description: The bounded batch completed with one or more rejected items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkHostCreateResponse'
+        '400':
+          description: Invalid request shape, item count, or idempotency key
+        '409':
+          description: Idempotency key was already used with a different request
+        '413':
+          description: Request body exceeds 512 KiB
 
 components:
   schemas:
@@ -187,5 +231,75 @@ components:
         code:
           type: string
           enum: [not_found_or_forbidden, invalid_request, conflict, internal_error]
+        error:
+          type: string
+    BulkHostCreateRequest:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/BulkHostCreateItem'
+    BulkHostCreateItem:
+      type: object
+      required: [inventory_id, name]
+      additionalProperties: false
+      properties:
+        identifier:
+          type: string
+          maxLength: 64
+          description: Optional client correlation label echoed in the result.
+        inventory_id:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        variables:
+          type: object
+          additionalProperties: true
+        is_control_node:
+          type: boolean
+          default: false
+    BulkHostCreateResponse:
+      type: object
+      required: [idempotency_key, complete, results]
+      properties:
+        idempotency_key:
+          type: string
+        complete:
+          type: boolean
+          enum: [true]
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkHostCreateResult'
+    BulkHostCreateResult:
+      type: object
+      required: [index, status, http_status]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        identifier:
+          type: string
+        status:
+          type: string
+          enum: [created, rejected]
+        http_status:
+          type: integer
+        host_id:
+          type: integer
+          format: int64
+        code:
+          type: string
+          enum: [not_found_or_forbidden, invalid_request, duplicate, internal_error]
         error:
           type: string

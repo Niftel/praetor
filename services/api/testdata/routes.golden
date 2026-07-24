@@ -110,6 +110,7 @@ PATCH   /api/v1/service-principals/{id}
 PATCH   /metrics
 POST    /api/v1/access
 POST    /api/v1/auth/login
+POST    /api/v1/bulk/hosts/create
 POST    /api/v1/bulk/jobs/launch
 POST    /api/v1/credential-types/
 POST    /api/v1/credentials/

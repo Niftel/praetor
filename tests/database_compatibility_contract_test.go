@@ -28,7 +28,7 @@ func TestDatabaseCompatibilityMatrixIsRequiredByCI(t *testing.T) {
 	}
 	for _, required := range []string{
 		"55 62 65 67",
-		"migrationfixture rollback 77",
+		"migrationfixture rollback 78",
 		"go run ./cmd/migrator",
 	} {
 		if !strings.Contains(string(script), required) {

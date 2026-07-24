@@ -1224,7 +1224,7 @@ Praetor MAY offer AWX-like “unified” views:
 
 Bulk operations:
 
-- `POST /api/v1/bulk/hosts/create` – bulk create hosts.  
+- `POST /api/v1/bulk/hosts/create` – create 1–100 hosts in stable input order.
 - `POST /api/v1/bulk/hosts/delete` – bulk delete hosts.  
 - `POST /api/v1/bulk/jobs/launch` – launch 1–25 jobs in stable input order.
 
@@ -1258,7 +1258,31 @@ returns the stored response without creating duplicate jobs. Reusing it for a
 different request returns `409`. The request body is capped at 256 KiB and
 accepted launches receive individual actor-attributed activity records.
 
-Exact payloads MAY mirror AWX’s, but must be documented in the OpenAPI schema.
+Bulk host creation uses the same `Idempotency-Key` format and accepts:
+
+```json
+{
+  "items": [
+    {
+      "identifier": "web-01",
+      "inventory_id": 7,
+      "name": "web-01",
+      "description": "Canary web node",
+      "variables": {"ansible_host": "10.0.0.8"}
+    }
+  ]
+}
+```
+
+Every item passes through the canonical single-host inventory-admin check and
+host creation path. Results preserve input order and include the created host
+ID. Duplicate names return `duplicate`; missing and unauthorized inventories
+share `not_found_or_forbidden` to prevent inventory enumeration. A fully
+created batch returns `201`; a completed batch with rejections returns `207`.
+Identical replays return the stored response without duplicate hosts, while a
+changed request under the same key returns `409`. Requests are capped at 100
+items and 512 KiB, and every successful host receives an actor-attributed
+activity record.
 
 ---
 
