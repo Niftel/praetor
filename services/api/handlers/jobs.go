@@ -30,7 +30,7 @@ import (
 type JobStore interface {
 	// reads
 	ListRecent(ctx context.Context, limit int) ([]models.UnifiedJob, error)
-	ListReadable(ctx context.Context, tmplIDs []int64, limit int) ([]models.UnifiedJob, error)
+	ListReadableByScopes(ctx context.Context, tmplIDs, inventoryIDs []int64, limit int) ([]models.UnifiedJob, error)
 	GetRun(ctx context.Context, runID uuid.UUID) (models.ExecutionRun, error)
 	ListEvents(ctx context.Context, runID uuid.UUID) ([]models.JobEvent, error)
 	ListDiagnostics(ctx context.Context, runID uuid.UUID, query store.DiagnosticQuery) ([]store.DiagnosticEvent, error)
@@ -116,31 +116,44 @@ func (rs *JobsResource) Routes() chi.Router {
 func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) {
 	viewAll, verr := rs.canViewAll(r, rbac.JobTemplate)
 	if verr != nil {
-		render.Render(w, r, ErrInternal(verr))
+		rs.renderInternalError(w, r, verr)
 		return
 	}
 	if viewAll {
 		jobs, err := rs.store.ListRecent(r.Context(), 50)
 		if err != nil {
-			render.Render(w, r, ErrInternal(err))
+			rs.renderInternalError(w, r, err)
 			return
 		}
 		render.JSON(w, r, dto.FromUnifiedJobs(jobs))
 		return
 	}
 
-	// Regular users see only jobs whose governing template they can read.
-	ids, err := rs.readableIDs(r, rbac.JobTemplate)
+	// Regular users see jobs governed by job templates or inventory sources they
+	// can read. The two scopes are independently authorized; organization
+	// membership alone never contributes IDs to either set.
+	templateIDs, err := rs.readableIDs(r, rbac.JobTemplate)
 	if err != nil {
-		render.Render(w, r, ErrInternal(err))
+		rs.renderInternalError(w, r, err)
 		return
 	}
-	jobs, err := rs.store.ListReadable(r.Context(), ids, 50)
+	inventoryIDs, err := rs.readableIDs(r, rbac.Inventory)
 	if err != nil {
-		render.Render(w, r, ErrInternal(err))
+		rs.renderInternalError(w, r, err)
+		return
+	}
+	jobs, err := rs.store.ListReadableByScopes(r.Context(), templateIDs, inventoryIDs, 50)
+	if err != nil {
+		rs.renderInternalError(w, r, err)
 		return
 	}
 	render.JSON(w, r, dto.FromUnifiedJobs(jobs))
+}
+
+func (rs *JobsResource) renderInternalError(w http.ResponseWriter, r *http.Request, cause error) {
+	if err := render.Render(w, r, ErrInternal(cause)); err != nil {
+		rs.log.Error("render internal jobs response", "err", err)
+	}
 }
 
 // LaunchJob creates a new unified job with status 'pending'
