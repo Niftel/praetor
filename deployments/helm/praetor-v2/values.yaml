@@ -25,6 +25,11 @@ images:
   ui: praetor-ui
   migrator: praetor-migrator
 
+# Optional per-component registry overrides. A present empty value deliberately
+# disables image.registry for that component, which is how local/k3d deploys
+# combine imported development images with released images from GHCR.
+imageRegistries: {}
+
 # Per-component release versions. These are pinned by
 # platform-compatibility.yaml and take precedence over image.tag. The shared tag
 # remains a convenient override for local/k3d development.
