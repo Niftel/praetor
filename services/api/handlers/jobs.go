@@ -116,13 +116,13 @@ func (rs *JobsResource) Routes() chi.Router {
 func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) {
 	viewAll, verr := rs.canViewAll(r, rbac.JobTemplate)
 	if verr != nil {
-		render.Render(w, r, ErrInternal(verr))
+		rs.renderInternalError(w, r, verr)
 		return
 	}
 	if viewAll {
 		jobs, err := rs.store.ListRecent(r.Context(), 50)
 		if err != nil {
-			render.Render(w, r, ErrInternal(err))
+			rs.renderInternalError(w, r, err)
 			return
 		}
 		render.JSON(w, r, dto.FromUnifiedJobs(jobs))
@@ -134,20 +134,26 @@ func (rs *JobsResource) ListUnifiedJobs(w http.ResponseWriter, r *http.Request) 
 	// membership alone never contributes IDs to either set.
 	templateIDs, err := rs.readableIDs(r, rbac.JobTemplate)
 	if err != nil {
-		render.Render(w, r, ErrInternal(err))
+		rs.renderInternalError(w, r, err)
 		return
 	}
 	inventoryIDs, err := rs.readableIDs(r, rbac.Inventory)
 	if err != nil {
-		render.Render(w, r, ErrInternal(err))
+		rs.renderInternalError(w, r, err)
 		return
 	}
 	jobs, err := rs.store.ListReadableByScopes(r.Context(), templateIDs, inventoryIDs, 50)
 	if err != nil {
-		render.Render(w, r, ErrInternal(err))
+		rs.renderInternalError(w, r, err)
 		return
 	}
 	render.JSON(w, r, dto.FromUnifiedJobs(jobs))
+}
+
+func (rs *JobsResource) renderInternalError(w http.ResponseWriter, r *http.Request, cause error) {
+	if err := render.Render(w, r, ErrInternal(cause)); err != nil {
+		rs.log.Error("render internal jobs response", "err", err)
+	}
 }
 
 // LaunchJob creates a new unified job with status 'pending'
