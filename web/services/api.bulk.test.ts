@@ -16,14 +16,14 @@ describe('bulk API contracts', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
       idempotency_key: 'launch-1',
       complete: true,
-      results: [{ index: 0, identifier: 'Deploy', status: 'launched', http_status: 201, job_id: 42 }],
+      results: [{ index: 0, identifier: 'Deploy', status: 'accepted', http_status: 201, job_id: 42 }],
     }, 207));
 
     const response = await api.bulkLaunchJobs([
       { identifier: 'Deploy', unified_job_template_id: 7, name: 'Deploy' },
     ], 'launch-1');
 
-    expect(response.results[0]).toMatchObject({ status: 'launched', job_id: 42 });
+    expect(response.results[0]).toMatchObject({ status: 'accepted', job_id: 42 });
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/v1/bulk/jobs/launch');
     expect(new Headers(options?.headers).get('Idempotency-Key')).toBe('launch-1');

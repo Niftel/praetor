@@ -71,6 +71,8 @@ readiness-report-test:
 	go test ./internal/readiness ./cmd/readiness-report
 	bash -n ./scripts/generate-readiness-report.sh
 	bash -n ./scripts/validate-delegated-api-e2e.sh
+	bash -n ./scripts/validate-fleet-scale-e2e.sh
+	bash -n ./scripts/validate-fleet-scale-live.sh
 	bash -n ./scripts/wait-for-postgres.sh
 
 # Run the same pinned Go security scan locally and in CI. The complete report is

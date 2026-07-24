@@ -98,7 +98,7 @@ func TestGenerateNoGoForFailedAndMissingEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"journey-failed:ldap-operator", "missing-evidence:secrets-service", "missing-journey:dynamic-inventory", "missing-journey:execution-recovery"}
+	want := []string{"journey-failed:ldap-operator", "missing-evidence:secrets-service", "missing-journey:dynamic-inventory", "missing-journey:execution-recovery", "missing-journey:fleet-scale"}
 	if strings.Join(report.Decision.Reasons, ",") != strings.Join(want, ",") {
 		t.Fatalf("reasons = %v, want %v", report.Decision.Reasons, want)
 	}

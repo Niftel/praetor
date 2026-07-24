@@ -261,7 +261,7 @@ func TestProductValidationFixtureHasCleanEnvironmentGate(t *testing.T) {
 			t.Fatalf("clean fixture workflow acceleration contract must contain %q", required)
 		}
 	}
-	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "validate-notification-delivery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status", "statefulset/praetor-executor", "deployment/praetor-scheduler"} {
+	for _, required := range []string{"k3d cluster create praetor-validation", "bootstrap-product-validation-base.sh", "validate-ldap-operator-journey.sh", "validate-execution-recovery-e2e.sh", "validate-notification-delivery-e2e.sh", "test-secrets-execution-e2e.sh", "validate-delegated-api-e2e.sh", "validate-fleet-scale-e2e.sh", "generate-readiness-report.sh", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "product-validation-fixture.sh cleanup", "product-validation-fixture.sh status", "statefulset/praetor-executor", "deployment/praetor-scheduler"} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("clean fixture workflow must contain %q", required)
 		}
@@ -381,6 +381,7 @@ func TestProductValidationJourneyPlanner(t *testing.T) {
 		{"notification PR is focused", "pull_request", "all", "scripts/validate-notification-delivery-e2e.sh\n", map[string]string{"run_cluster": "true", "run_notification": "true", "run_dynamic": "false", "run_readiness": "false"}},
 		{"generic fixture PR is complete", "pull_request", "all", "deployments/product-validation/fixture.yaml\n", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_ldap": "true", "run_readiness": "true"}},
 		{"delegated manual avoids cluster", "workflow_dispatch", "delegated-api", "", map[string]string{"run_cluster": "false", "run_delegated": "true", "run_readiness": "false"}},
+		{"fleet manual includes deployed fixture", "workflow_dispatch", "fleet-scale", "", map[string]string{"run_cluster": "true", "run_fixture": "true", "run_fleet": "true", "run_readiness": "false"}},
 		{"release manual is complete", "workflow_dispatch", "all", "", map[string]string{"run_cluster": "true", "run_dynamic": "true", "run_delegated": "true", "run_readiness": "true"}},
 	}
 	for _, tc := range tests {
@@ -763,6 +764,7 @@ func TestStagingAcceptanceIsScopedRepeatableAndNonDestructive(t *testing.T) {
 		"praetor-staging-delegated-db",
 		"delete pod/praetor-staging-delegated-db service/praetor-staging-delegated-db",
 		"validate-delegated-api-e2e.sh",
+		"validate-fleet-scale-live.sh",
 		"notification-delivery",
 		"notification-policies?resource_type=workflow_template",
 		"team_id:$team",

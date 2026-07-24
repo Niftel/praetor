@@ -35,6 +35,7 @@ func allJourneys() []readiness.JourneyEvidence {
 		{Name: "delegated-api", Result: "pass", EvidenceSHA256: testDigest},
 		{Name: "execution-recovery", Result: "pass", EvidenceSHA256: testDigest},
 		{Name: "dynamic-inventory", Result: "pass", EvidenceSHA256: testDigest},
+		{Name: "fleet-scale", Result: "pass", EvidenceSHA256: testDigest},
 	}
 }
 

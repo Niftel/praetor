@@ -19,12 +19,22 @@ on:
       - 'scripts/validate-execution-recovery-e2e.sh'
       - 'scripts/validate-dynamic-inventory-e2e.sh'
       - 'scripts/validate-notification-delivery-e2e.sh'
+      - 'scripts/validate-fleet-scale-e2e.sh'
+      - 'scripts/validate-fleet-scale-live.sh'
       - 'cmd/readiness-report/**'
       - 'internal/readiness/**'
       - 'playbooks/validate-execution-recovery.yml'
       - 'tests/dynamic_inventory_staging_contract_test.go'
+      - 'tests/fleet_scale_validation_contract_test.go'
       - 'tests/inventory_sync_history_contract_test.go'
       - 'tests/notification_delivery_staging_contract_test.go'
+      - 'services/api/handlers/bulk*.go'
+      - 'services/api/handlers/delegated_launch*.go'
+      - 'web/components/ui/BulkSelection.tsx'
+      - 'web/components/ui/BulkSelection.test.tsx'
+      - 'web/pages/FleetScaleJourney.test.tsx'
+      - 'web/pages/TemplatesPage.tsx'
+      - 'web/services/api.bulk.test.ts'
   workflow_dispatch:
     inputs:
       journey:
@@ -41,6 +51,7 @@ on:
           - notification-delivery
           - secrets
           - delegated-api
+          - fleet-scale
 
 permissions:
   contents: read
@@ -65,6 +76,7 @@ jobs:
       run_notification: ${{ steps.scope.outputs.run_notification }}
       run_secrets: ${{ steps.scope.outputs.run_secrets }}
       run_delegated: ${{ steps.scope.outputs.run_delegated }}
+      run_fleet: ${{ steps.scope.outputs.run_fleet }}
       run_readiness: ${{ steps.scope.outputs.run_readiness }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -103,6 +115,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: needs.preflight.outputs.run_fleet == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with: {version: v3.18.4}
       - name: Install pinned k3d
@@ -189,14 +207,6 @@ jobs:
           kubectl exec -n praetor-secrets "$executor_pod" -- tar -czf "/tmp/ansible-runtime-linux-$executor_arch.tar.gz" -C /opt/praetor/packs ansible-runtime
           kubectl cp "praetor-secrets/$executor_pod:/tmp/ansible-runtime-linux-$executor_arch.tar.gz" "build/runtime/ansible-runtime-linux-$executor_arch.tar.gz"
           ./scripts/test-secrets-execution-e2e.sh
-      - name: Upload bounded journey diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: product-journeys-${{ github.sha }}
-          path: build/readiness-evidence/*.json
-          if-no-files-found: ignore
-          retention-days: 14
       - name: Capture delegated API evidence
         if: needs.preflight.outputs.run_delegated == 'true'
         timeout-minutes: 5
@@ -211,6 +221,31 @@ jobs:
           TEST_DATABASE_URL='postgres://postgres:postgres@localhost:55434/praetor?sslmode=disable' \
             PRAETOR_DELEGATED_EVIDENCE_FILE=build/readiness-evidence/delegated-api.json \
             ./scripts/validate-delegated-api-e2e.sh
+      - name: Capture fleet-scale evidence
+        if: needs.preflight.outputs.run_fleet == 'true'
+        timeout-minutes: 8
+        run: |
+          npm --prefix web ci
+          cleanup() { docker rm -f praetor-fleet-postgres >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name praetor-fleet-postgres \
+            -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=praetor \
+            -p 55435:5432 postgres:15 >/dev/null
+          POSTGRES_DB=praetor ./scripts/wait-for-postgres.sh praetor-fleet-postgres 60
+          DATABASE_URL='postgres://postgres:postgres@localhost:55435/praetor?sslmode=disable' go run ./cmd/migrator >/dev/null
+          TEST_DATABASE_URL='postgres://postgres:postgres@localhost:55435/praetor?sslmode=disable' \
+            PRAETOR_FLEET_EVIDENCE_FILE=build/readiness-evidence/fleet-scale.json \
+            ./scripts/validate-fleet-scale-e2e.sh
+          PRAETOR_FLEET_LIVE_EVIDENCE_FILE=build/readiness-evidence/fleet-scale-live.json \
+            ./scripts/validate-fleet-scale-live.sh
+      - name: Upload bounded journey diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: product-journeys-${{ github.sha }}
+          path: build/readiness-evidence/*.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Generate production-candidate decision
         if: needs.preflight.outputs.run_readiness == 'true'
         env:

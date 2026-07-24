@@ -12,6 +12,7 @@ run_recovery=false
 run_notification=false
 run_secrets=false
 run_delegated=false
+run_fleet=false
 run_readiness=false
 
 select_all() {
@@ -22,6 +23,7 @@ select_all() {
   run_notification=true
   run_secrets=true
   run_delegated=true
+  run_fleet=true
   run_readiness=true
 }
 
@@ -35,6 +37,7 @@ select_journey() {
     notification-delivery) run_fixture=true; run_notification=true ;;
     secrets) run_fixture=true; run_secrets=true ;;
     delegated-api) run_delegated=true ;;
+    fleet-scale) run_fixture=true; run_fleet=true ;;
     *) echo "error: unsupported product-validation journey '$1'" >&2; exit 2 ;;
   esac
 }
@@ -53,6 +56,7 @@ else
     grep -Eq '^(scripts/validate-notification-delivery-e2e\.sh|tests/notification_delivery_staging_contract_test\.go|web/components/NotificationDeliveryHistory\.test\.tsx)$' <<<"$paths" && { run_fixture=true; run_notification=true; }
     grep -Eq '^scripts/test-secrets-execution-e2e\.sh$' <<<"$paths" && { run_fixture=true; run_secrets=true; }
     grep -Eq '^scripts/validate-delegated-api-e2e\.sh$' <<<"$paths" && run_delegated=true
+    grep -Eq '^(scripts/validate-fleet-scale-(e2e|live)\.sh|tests/fleet_scale_validation_contract_test\.go|services/api/handlers/(bulk.*|delegated_launch.*)\.go|web/(components/ui/BulkSelection(\.test)?|pages/(FleetScaleJourney\.test|TemplatesPage)|services/api\.bulk\.test)\.tsx?)$' <<<"$paths" && { run_fixture=true; run_fleet=true; }
   fi
 fi
 
@@ -69,4 +73,5 @@ printf 'run_recovery=%s\n' "$run_recovery"
 printf 'run_notification=%s\n' "$run_notification"
 printf 'run_secrets=%s\n' "$run_secrets"
 printf 'run_delegated=%s\n' "$run_delegated"
+printf 'run_fleet=%s\n' "$run_fleet"
 printf 'run_readiness=%s\n' "$run_readiness"

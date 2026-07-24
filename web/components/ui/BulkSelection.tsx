@@ -154,7 +154,7 @@ export function BulkActionBar({
 }
 
 const resultTone = (result: BulkResult) => {
-  if (['launched', 'created', 'deleted', 'ready', 'successful'].includes(result.status)) return 'success';
+  if (['accepted', 'launched', 'created', 'deleted', 'ready', 'successful'].includes(result.status)) return 'success';
   if (result.status === 'pending' || result.status === 'running') return 'pending';
   return 'error';
 };
