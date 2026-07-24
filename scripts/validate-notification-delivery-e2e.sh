@@ -343,7 +343,10 @@ POLICY_IDS+=("$INVENTORY_POLICY")
 request "$ADMIN_TOKEN" POST "inventories/$INVENTORY_ID/sources/$SOURCE_ID/sync"
 [[ "$STATUS" == 201 ]] || die "inventory sync returned $STATUS: $RESPONSE"
 INVENTORY_JOB_ID="$(jq -er .job_id <<<"$RESPONSE")"
-wait_job "$INVENTORY_JOB_ID" successful
+# Inventory-source runs are not part of the regular user's job-template list.
+# Their success notification is emitted only after the sync reaches the
+# successful terminal state, so delivery is the authoritative completion
+# signal for this notification journey.
 INVENTORY_DELIVERY="$(wait_history_state "$SUCCESS_NAME" "$INVENTORY_JOB_ID" success delivered)"
 [[ "$(jq -r '.subject_kind' <<<"$INVENTORY_DELIVERY")" == "inventory sync" ]] ||
   die "inventory delivery identity is incorrect"
@@ -352,10 +355,10 @@ PHASE="history-rbac"
 OPERATOR_HISTORY="$(history "$OPERATOR_TOKEN" "$ORG_ID")"
 jq -e --argjson id "$(jq -r .id <<<"$DELIVERED_RETRY")" '.results | any(.id == $id)' \
   <<<"$OPERATOR_HISTORY" >/dev/null || die "assigned-team operator cannot inspect approval history"
+OUTSIDER_HISTORY="$(history "$OUTSIDER_TOKEN" "$ORG_ID")"
 jq -e --argjson job "$JOB_ID" \
   '.results | all(.subject_kind != "job" or .subject_id != $job)' \
-  <<<"$OPERATOR_HISTORY" >/dev/null || die "ordinary operator can inspect organization-scoped job history"
-OUTSIDER_HISTORY="$(history "$OUTSIDER_TOKEN" "$ORG_ID")"
+  <<<"$OUTSIDER_HISTORY" >/dev/null || die "unrelated-team operator can inspect organization-scoped job history"
 jq -e --argjson first "$WORKFLOW_JOB_ID" --argjson second "$PERMANENT_WORKFLOW_JOB_ID" \
   '.results | all(.subject_id != $first and .subject_id != $second)' \
   <<<"$OUTSIDER_HISTORY" >/dev/null || die "wrong-team user can inspect approval history"

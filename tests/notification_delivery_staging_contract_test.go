@@ -21,6 +21,7 @@ func TestNotificationDeliveryJourneyCoversDurabilityRBACAndRedaction(t *testing.
 		"notification-deliveries?organization_id=",
 		"job_template",
 		"inventory_source",
+		`wait_history_state "$SUCCESS_NAME" "$INVENTORY_JOB_ID" success delivered`,
 		"workflow_template",
 		"workflow approval",
 		`"deployment/$RELEASE-consumer" --replicas=0`,
@@ -33,6 +34,7 @@ func TestNotificationDeliveryJourneyCoversDurabilityRBACAndRedaction(t *testing.
 		".attempt_count == 1",
 		"duplicate workflow occurrence",
 		"wrong-team user",
+		"unrelated-team operator can inspect organization-scoped job history",
 		"cross-organization history returned",
 		"notification-history-secret-redaction",
 		"fixture-resource-cleanup",
@@ -46,6 +48,7 @@ func TestNotificationDeliveryJourneyCoversDurabilityRBACAndRedaction(t *testing.
 		"kubectl delete namespace",
 		"k3d cluster delete",
 		"helm uninstall",
+		`wait_job "$INVENTORY_JOB_ID"`,
 		`config:$`,
 		"idempotency_key:$",
 	} {
