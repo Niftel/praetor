@@ -39,4 +39,27 @@ describe('DataTable', () => {
     render(<DataTable columns={columns} rows={[]} rowKey={row => row.id} emptyTitle="No activity" emptyDescription="Actions will appear here." />);
     expect(screen.getByRole('heading', { name: 'No activity' })).toBeTruthy();
   });
+
+  it('supports keyboard-accessible visible-row selection', () => {
+    const toggle = vi.fn();
+    const toggleAll = vi.fn();
+    render(
+      <DataTable
+        columns={columns}
+        rows={[{ id: 1, name: 'Deploy' }]}
+        rowKey={row => row.id}
+        selection={{
+          selectedKeys: new Set([1]),
+          allVisibleSelected: true,
+          onToggle: toggle,
+          onToggleAllVisible: toggleAll,
+          rowSelectionLabel: row => `Select ${row.name}`,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Deploy' }));
+    expect(toggle).toHaveBeenCalledWith({ id: 1, name: 'Deploy' });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all visible rows' }));
+    expect(toggleAll).toHaveBeenCalledOnce();
+  });
 });

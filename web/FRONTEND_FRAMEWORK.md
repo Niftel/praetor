@@ -10,6 +10,15 @@ Praetor's frontend framework is the shared contract for building product surface
 4. Use the UI barrel (`components/ui`) for shared controls. A page-local control is appropriate only when its interaction is unique to that feature.
 5. Status must include readable text; color alone is never the status contract.
 6. New shared components require interaction and accessibility tests before adoption.
+7. Bulk operations use `useBulkSelection`, `SelectionCheckbox`, `BulkActionBar`, and `BulkResultPanel`. Keep selection limits visible, report per-item outcomes, and allow failed items to be retried without repeating successful work.
+
+## Bulk-operation contract
+
+- Selection is explicit and scoped to the current resource view. “Select all” means all visible eligible rows, never an unbounded server-side selection.
+- Destructive actions require a server-generated preview and a separate confirmation step. The client must show relationship effects and blockers returned by the API.
+- Every bulk mutation sends an idempotency key. Partial success is a normal result: successful and failed items remain distinguishable, and retry targets failed items only.
+- Permission checks remain server-authoritative. The UI may hide or disable controls for clarity, but it never treats that as authorization.
+- Resource-specific payloads and preview behavior stay in the page and API client; selection, action-bar, and result presentation stay in the shared framework.
 
 ## Page anatomy
 

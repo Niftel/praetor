@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { api, unwrap } from '../services/api';
+import {
+  api,
+  newIdempotencyKey,
+  unwrap,
+  type BulkHostDeletePreview,
+  type BulkOperationResult,
+} from '../services/api';
 import { Inventory, Host, Group, CredentialType, InventorySourceType } from '../types';
 import { Input, Textarea, Select } from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -13,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast, confirmDialog } from '../components/ui/toast';
 import { PageSpinner } from '../components/ui/PageSpinner';
+import { BulkActionBar, BulkResultPanel, SelectionCheckbox, useBulkSelection } from '../components/ui';
 import { useCapabilities } from '../lib/useCapabilities';
 import InventorySourceHistoryList from '../components/InventorySourceHistory';
 import NotificationPolicyManager, { NotificationPolicyEvent } from '../components/NotificationPolicyManager';
@@ -84,6 +91,15 @@ const InventoriesPage = () => {
   const [varsDraft, setVarsDraft] = useState('');
   const [newInventoryName, setNewInventoryName] = useState('');
   const [newHostName, setNewHostName] = useState('');
+  const [bulkHostNames, setBulkHostNames] = useState('');
+  const [showBulkHostModal, setShowBulkHostModal] = useState(false);
+  const [bulkHostBusy, setBulkHostBusy] = useState(false);
+  const [bulkHostResults, setBulkHostResults] = useState<BulkOperationResult[]>([]);
+  const [bulkHostResultTitle, setBulkHostResultTitle] = useState('');
+  const [bulkDeletePreview, setBulkDeletePreview] = useState<BulkHostDeletePreview | null>(null);
+  const [lastBulkHostOperation, setLastBulkHostOperation] = useState<
+    { kind: 'create'; names: string[] } | { kind: 'delete'; hosts: Host[] } | null
+  >(null);
   const [newHostConn, setNewHostConn] = useState<HostConnection>(emptyConnection());
   const [newGroupName, setNewGroupName] = useState('');
   const [importContent, setImportContent] = useState('');
@@ -214,6 +230,33 @@ const InventoriesPage = () => {
     try { await api.createHost(selectedInventoryId, { name: newHostName, enabled: true, variables: mergeConnection(newHostConn, {}) }); setNewHostName(''); setNewHostConn(emptyConnection()); setShowHostModal(false); refreshHosts(); }
     catch { toast.error('Failed to create host'); }
   };
+  const createHostsBulk = async (requestedNames?: string[]) => {
+    if (!selectedInventoryId) return;
+    const names = requestedNames ?? [...new Set(bulkHostNames.split(/\r?\n/).map(name => name.trim()).filter(Boolean))].slice(0, 100);
+    if (names.length === 0) return;
+    setBulkHostBusy(true);
+    setBulkHostResults([]);
+    setBulkHostResultTitle('Creating hosts');
+    setLastBulkHostOperation({ kind: 'create', names });
+    try {
+      const response = await api.bulkCreateHosts(names.map(name => ({
+        identifier: name.slice(0, 64),
+        inventory_id: selectedInventoryId,
+        name,
+        variables: {},
+      })), newIdempotencyKey('ui-bulk-host-create'));
+      setBulkHostResults(response.results);
+      setBulkHostResultTitle('Bulk host creation finished');
+      setShowBulkHostModal(false);
+      setBulkHostNames('');
+      refreshHosts();
+    } catch (err: any) {
+      toast.error(err?.message || 'Bulk host creation failed before results were returned');
+      setBulkHostResultTitle('Bulk host creation failed');
+    } finally {
+      setBulkHostBusy(false);
+    }
+  };
   const createGroup = async () => {
     if (!newGroupName.trim() || !selectedInventoryId) return;
     try { await api.createGroup(selectedInventoryId, { name: newGroupName }); setNewGroupName(''); setShowGroupModal(false); refreshHosts(); }
@@ -284,6 +327,64 @@ const InventoriesPage = () => {
     return { groupNodes, ungrouped };
   }, [groups, groupHosts, hosts, treeFilter]);
 
+  const visibleHostIds = useMemo(() => {
+    const ids = new Set<number>();
+    tree.groupNodes.forEach(node => node.members.forEach(host => ids.add(host.id)));
+    tree.ungrouped.forEach(host => ids.add(host.id));
+    return [...ids];
+  }, [tree]);
+  const bulkHostSelection = useBulkSelection(hosts.map(host => host.id), visibleHostIds, 100);
+
+  const previewSelectedHostDeletion = async (targets?: Host[]) => {
+    const selected = targets ?? hosts.filter(host => bulkHostSelection.selected.has(host.id));
+    if (selected.length === 0) return;
+    setBulkHostBusy(true);
+    setBulkHostResults([]);
+    setBulkHostResultTitle('Reviewing deletion impact');
+    setLastBulkHostOperation({ kind: 'delete', hosts: selected });
+    try {
+      const preview = await api.previewBulkDeleteHosts(selected.map(host => ({
+        identifier: host.name.slice(0, 64),
+        host_id: host.id,
+      })));
+      setBulkDeletePreview(preview);
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not review host deletion impact');
+    } finally {
+      setBulkHostBusy(false);
+    }
+  };
+
+  const confirmBulkHostDeletion = async () => {
+    if (!bulkDeletePreview) return;
+    setBulkHostBusy(true);
+    setBulkDeletePreview(null);
+    setBulkHostResultTitle('Deleting reviewed hosts');
+    try {
+      const response = await api.bulkDeleteHosts(bulkDeletePreview.confirmation_token, newIdempotencyKey('ui-bulk-host-delete'));
+      setBulkHostResults(response.results);
+      setBulkHostResultTitle('Bulk host deletion finished');
+      if (selectedHostId && response.results.some(result => result.host_id === selectedHostId && result.status === 'deleted')) {
+        setSelectedHostId(null);
+      }
+      refreshHosts();
+    } catch (err: any) {
+      toast.error(err?.message || 'Bulk host deletion failed before results were returned');
+      setBulkHostResultTitle('Bulk host deletion failed');
+    } finally {
+      setBulkHostBusy(false);
+    }
+  };
+
+  const retryFailedBulkHosts = (failed: BulkOperationResult[]) => {
+    if (!lastBulkHostOperation) return;
+    if (lastBulkHostOperation.kind === 'create') {
+      createHostsBulk(failed.map(result => lastBulkHostOperation.names[result.index]).filter(Boolean));
+      return;
+    }
+    previewSelectedHostDeletion(failed.map(result => lastBulkHostOperation.hosts[result.index]).filter(Boolean));
+  };
+
   const toggleCollapse = (key: number | 'ungrouped') =>
     setCollapsed(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
@@ -344,6 +445,16 @@ const InventoriesPage = () => {
           )}
         </div>}
       </div>
+      <BulkActionBar selectedCount={bulkHostSelection.selectedCount} limit={100} busy={bulkHostBusy} busyLabel="Reviewing hosts" onClear={bulkHostSelection.clear}>
+        <Button size="sm" variant="danger" icon={<Trash2 size={12} />} disabled={bulkHostBusy || !canManageInventory} onClick={() => previewSelectedHostDeletion()}>Review deletion</Button>
+      </BulkActionBar>
+      <BulkResultPanel
+        title={bulkHostResultTitle}
+        running={bulkHostBusy && !bulkDeletePreview}
+        results={bulkHostResults}
+        onRetryFailed={retryFailedBulkHosts}
+        onDismiss={() => setBulkHostResults([])}
+      />
 
       {!selectedInv ? (
         <div className="flex-1 grid place-items-center text-dim">
@@ -366,14 +477,25 @@ const InventoriesPage = () => {
               <input value={treeFilter} onChange={e => setTreeFilter(e.target.value)} placeholder="Filter hosts" className="flex-1 bg-transparent border-none outline-none text-[12.5px] text-ink placeholder:text-dim" />
             </div>
             <div className="flex items-center h-[34px] px-4 mt-1.5 shrink-0">
+              {canManageInventory && hosts.length > 0 && (
+                <span className="mr-2">
+                  <SelectionCheckbox
+                    checked={bulkHostSelection.allVisibleSelected}
+                    indeterminate={bulkHostSelection.someVisibleSelected}
+                    label="Select all visible hosts"
+                    onChange={bulkHostSelection.toggleAllVisible}
+                  />
+                </span>
+              )}
               <span className="font-mono text-[9px] tracking-[0.16em] uppercase text-dim">Structure</span>
               {canManageInventory && <div className="ml-auto relative">
                 <button onClick={() => setAddMenu(v => !v)} onBlur={() => setTimeout(() => setAddMenu(false), 150)} className="w-8 h-8 grid place-items-center text-dim hover:text-ink" title="Add"><Plus size={15} /></button>
                 {addMenu && (
                   <div className="absolute z-30 top-6 right-0 w-40 bg-panel border border-line2 rounded-lg shadow-2xl py-1.5">
-                    <button onMouseDown={() => setShowHostModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add host</button>
-                    <button onMouseDown={() => setShowGroupModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add group</button>
-                    <button onMouseDown={() => setShowSourceModal(true)} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add source</button>
+                    <button onClick={() => { setAddMenu(false); setShowHostModal(true); }} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add host</button>
+                    <button onClick={() => { setAddMenu(false); setShowBulkHostModal(true); }} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add hosts in bulk</button>
+                    <button onClick={() => { setAddMenu(false); setShowGroupModal(true); }} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add group</button>
+                    <button onClick={() => { setAddMenu(false); setShowSourceModal(true); }} className="w-full text-left px-3 py-1.5 text-[13px] text-ink2 hover:bg-white/5">Add source</button>
                   </div>
                 )}
               </div>}
@@ -390,7 +512,7 @@ const InventoriesPage = () => {
                     </button>
                     {!isCollapsed && (
                       <div className="relative mb-1 before:content-[''] before:absolute before:left-4 before:top-0.5 before:bottom-3.5 before:w-px before:bg-line">
-                        {members.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => { setSelectedHostId(h.id); setMobilePane('details'); }} />)}
+                        {members.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} bulkEnabled={canManageInventory} bulkSelected={bulkHostSelection.selected.has(h.id)} onToggleBulk={() => bulkHostSelection.toggle(h.id)} onClick={() => { setSelectedHostId(h.id); setMobilePane('details'); }} />)}
                         {members.length === 0 && <div className="pl-7 py-1 font-mono text-[11px] text-faint">empty</div>}
                       </div>
                     )}
@@ -406,7 +528,7 @@ const InventoriesPage = () => {
                   </button>
                   {!collapsed.has('ungrouped') && (
                     <div className="relative mb-1 before:content-[''] before:absolute before:left-4 before:top-0.5 before:bottom-3.5 before:w-px before:bg-line">
-                      {tree.ungrouped.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} onClick={() => { setSelectedHostId(h.id); setMobilePane('details'); }} />)}
+                      {tree.ungrouped.map(h => <HostRow key={h.id} host={h} sel={h.id === selectedHostId} bulkEnabled={canManageInventory} bulkSelected={bulkHostSelection.selected.has(h.id)} onToggleBulk={() => bulkHostSelection.toggle(h.id)} onClick={() => { setSelectedHostId(h.id); setMobilePane('details'); }} />)}
                     </div>
                   )}
                 </div>
@@ -560,6 +682,76 @@ const InventoriesPage = () => {
         </div>
       </Modal>
 
+      <Modal isOpen={canManageInventory && showBulkHostModal} onClose={() => setShowBulkHostModal(false)} title="Add hosts in bulk" size="lg">
+        <div className="space-y-4">
+          <Textarea
+            label="Hostnames"
+            hint="One hostname per line. Duplicate and blank lines are removed; each request is limited to 100 hosts."
+            rows={12}
+            className="font-mono text-xs"
+            value={bulkHostNames}
+            onChange={event => setBulkHostNames(event.target.value)}
+            placeholder={'web-01\nweb-02\ndb-01'}
+          />
+          <div className="flex items-center justify-between gap-4">
+            <span className="font-mono text-[10.5px] tabular-nums text-mut">
+              {[...new Set(bulkHostNames.split(/\r?\n/).map(name => name.trim()).filter(Boolean))].slice(0, 100).length} hosts ready
+            </span>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowBulkHostModal(false)} disabled={bulkHostBusy}>Cancel</Button>
+              <Button onClick={() => createHostsBulk()} disabled={bulkHostBusy || !bulkHostNames.trim()}>
+                {bulkHostBusy ? 'Creating…' : 'Create hosts'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={canManageInventory && !!bulkDeletePreview} onClose={() => setBulkDeletePreview(null)} title="Review host deletion impact" size="lg">
+        {bulkDeletePreview && (() => {
+          const ready = bulkDeletePreview.results.filter(result => result.status === 'ready');
+          const blocked = bulkDeletePreview.results.filter(result => result.status !== 'ready');
+          return (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-err/30 bg-err/[0.06] p-3">
+                <p className="text-[12.5px] font-medium text-ink">This permanently deletes {ready.length} reviewed host{ready.length === 1 ? '' : 's'}.</p>
+                <p className="mt-1 text-[11px] text-mut">The server rechecks authorization and relationships at confirmation. Blocked or changed hosts fail closed and are not deleted.</p>
+              </div>
+              <div className="max-h-72 overflow-auto border-y border-line scroll-tint">
+                {bulkDeletePreview.results.map(result => (
+                  <div key={`${result.index}-${result.host_id || result.identifier}`} className="border-b border-line px-3 py-2.5 last:border-b-0">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink2">{result.name || result.identifier || `Host ${result.index + 1}`}</span>
+                      <span className={`text-[10.5px] ${result.status === 'ready' ? 'text-ok' : 'text-err'}`}>{result.status}</span>
+                    </div>
+                    {result.affected_relationships.length > 0 && (
+                      <p className="mt-1 text-[10.5px] text-mut">
+                        Effects: {result.affected_relationships.map(effect => `${effect.count} ${effect.effect}`).join(', ')}
+                      </p>
+                    )}
+                    {result.blocking_relationships.length > 0 && (
+                      <p className="mt-1 text-[10.5px] text-err">
+                        Blocking: {result.blocking_relationships.map(blocker => `${blocker.count} ${blocker.code.replaceAll('_', ' ')}`).join(', ')}
+                      </p>
+                    )}
+                    {result.error && <p className="mt-1 text-[10.5px] text-mut">{result.error}</p>}
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-[10.5px] tabular-nums text-mut">{ready.length} ready · {blocked.length} blocked · preview expires {new Date(bulkDeletePreview.expires_at).toLocaleTimeString()}</span>
+                <div className="ml-auto flex gap-2">
+                  <Button variant="secondary" onClick={() => setBulkDeletePreview(null)} disabled={bulkHostBusy}>Cancel</Button>
+                  <Button variant="danger" onClick={confirmBulkHostDeletion} disabled={bulkHostBusy || ready.length === 0}>
+                    Delete {ready.length} reviewed host{ready.length === 1 ? '' : 's'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
       <Modal isOpen={canManageInventory && showGroupModal} onClose={() => setShowGroupModal(false)} title="New group">
         <div className="space-y-4">
           <Input label="Group name" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="webservers" />
@@ -638,11 +830,25 @@ function buildInventorySourceYAML(sourceType: InventorySourceType, values: Recor
 	return lines.join('\n') + '\n';
 }
 
-const HostRow: React.FC<{ host: Host; sel: boolean; onClick: () => void }> = ({ host, sel, onClick }) => (
-  <button onClick={onClick} className={`w-full flex items-center gap-2.5 h-7 pl-7 pr-2.5 rounded-lg max-[820px]:h-11 ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>
-    <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${sel ? 'bg-acc' : host.is_runner_host ? 'bg-violet' : host.enabled ? 'bg-faint' : 'bg-faint/50'}`} />
-    <span className={`font-mono text-[12px] truncate ${sel ? 'text-ink font-medium' : 'text-mut'}`}>{host.name}</span>
-  </button>
+const HostRow: React.FC<{
+  host: Host;
+  sel: boolean;
+  bulkEnabled: boolean;
+  bulkSelected: boolean;
+  onToggleBulk: () => void;
+  onClick: () => void;
+}> = ({ host, sel, bulkEnabled, bulkSelected, onToggleBulk, onClick }) => (
+  <div className={`flex w-full items-center rounded-lg ${sel ? 'bg-acc/[0.09]' : 'hover:bg-white/[0.028]'}`}>
+    {bulkEnabled && (
+      <span className="ml-6 grid h-7 w-5 shrink-0 place-items-center max-[820px]:h-11">
+        <SelectionCheckbox checked={bulkSelected} label={`Select ${host.name} for bulk action`} onChange={onToggleBulk} />
+      </span>
+    )}
+    <button onClick={onClick} className={`flex h-7 min-w-0 flex-1 items-center gap-2.5 pr-2.5 text-left max-[820px]:h-11 ${bulkEnabled ? 'pl-1.5' : 'pl-7'}`}>
+      <span className={`h-[5px] w-[5px] shrink-0 rounded-full ${sel ? 'bg-acc' : host.is_runner_host ? 'bg-violet' : host.enabled ? 'bg-faint' : 'bg-faint/50'}`} />
+      <span className={`truncate font-mono text-[12px] ${sel ? 'font-medium text-ink' : 'text-mut'}`}>{host.name}</span>
+    </button>
+  </div>
 );
 
 const HostActions: React.FC<{ host: Host; settingRunner: boolean; onRunner: () => void; onDelete: () => void }> = ({ host, settingRunner, onRunner, onDelete }) => {
