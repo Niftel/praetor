@@ -24,7 +24,7 @@ jobs:
       run_codeql: ${{ steps.plan.outputs.run_codeql }}
       codeql_matrix: ${{ steps.plan.outputs.codeql_matrix }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Plan affected languages
@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.classify.outputs.codeql_matrix) }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Initialize CodeQL
         uses: github/codeql-action/init@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
         with:
