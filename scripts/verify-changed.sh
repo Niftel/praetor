@@ -54,6 +54,14 @@ if [[ "$(plan_value run_ui)" == true ]]; then
   npm --prefix web run build:check
 fi
 
+if [[ "$(plan_value run_docs)" == true ]]; then
+  if [[ ! -d docs-site/node_modules ]]; then
+    npm --prefix docs-site ci
+  fi
+  npm --prefix docs-site run typecheck
+  npm --prefix docs-site run build
+fi
+
 if [[ "$(plan_value run_database)" == true ]]; then
   GOWORK=off go test -count=1 ./services/api/handlers ./services/api/middleware
   if [[ -z "${TEST_DATABASE_URL:-}" ]]; then

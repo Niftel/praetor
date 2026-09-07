@@ -7,6 +7,7 @@ set -euo pipefail
 
 run_go=false
 run_ui=false
+run_docs=false
 run_database=false
 run_deployment=false
 run_security=false
@@ -26,6 +27,7 @@ fi
 select_all_gates() {
   run_go=true
   run_ui=true
+  run_docs=true
   run_database=true
   run_deployment=true
   run_security=true
@@ -45,7 +47,11 @@ else
     saw_path=true
 
     case "$path" in
-      *.md|docs-site/*|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE*)
+      docs-site/*)
+        run_docs=true
+        continue
+        ;;
+      *.md|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE*)
         continue
         ;;
     esac
@@ -146,7 +152,7 @@ else
 
   # New non-documentation areas must not silently bypass CI. The Go gate is the
   # conservative fallback until the path is explicitly classified.
-  if [[ "$saw_path" == true && "$saw_non_docs" == true && "$run_go" == false && "$run_ui" == false && "$run_database" == false && "$run_deployment" == false && "$run_security" == false && "$run_product" == false ]]; then
+  if [[ "$saw_path" == true && "$saw_non_docs" == true && "$run_go" == false && "$run_ui" == false && "$run_docs" == false && "$run_database" == false && "$run_deployment" == false && "$run_security" == false && "$run_product" == false ]]; then
     run_go=true
   fi
 fi
@@ -196,6 +202,7 @@ run_codeql=false
 
 printf 'run_go=%s\n' "$run_go"
 printf 'run_ui=%s\n' "$run_ui"
+printf 'run_docs=%s\n' "$run_docs"
 printf 'run_database=%s\n' "$run_database"
 printf 'run_deployment=%s\n' "$run_deployment"
 printf 'run_security=%s\n' "$run_security"

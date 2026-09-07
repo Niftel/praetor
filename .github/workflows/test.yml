@@ -19,6 +19,7 @@ jobs:
     outputs:
       run_go: ${{ steps.plan.outputs.run_go }}
       run_ui: ${{ steps.plan.outputs.run_ui }}
+      run_docs: ${{ steps.plan.outputs.run_docs }}
       run_database: ${{ steps.plan.outputs.run_database }}
       run_deployment: ${{ steps.plan.outputs.run_deployment }}
     steps:
@@ -86,6 +87,27 @@ jobs:
         working-directory: web
         run: npm run build:check
 
+  docs:
+    needs: classify
+    if: needs.classify.outputs.run_docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+      - name: install documentation dependencies
+        working-directory: docs-site
+        run: npm ci
+      - name: documentation typecheck
+        working-directory: docs-site
+        run: npm run typecheck
+      - name: documentation production build
+        working-directory: docs-site
+        run: npm run build
+
   database-compatibility:
     needs: classify
     if: needs.classify.outputs.run_database == 'true'
@@ -122,7 +144,7 @@ jobs:
   # skipped by the shared planner, but any selected gate must succeed.
   test:
     if: always()
-    needs: [classify, go, deployment-contracts, ui, database-compatibility]
+    needs: [classify, go, deployment-contracts, ui, docs, database-compatibility]
     runs-on: ubuntu-latest
     steps:
       - name: Require every selected gate
@@ -131,10 +153,11 @@ jobs:
           GO_RESULT: ${{ needs.go.result }}
           DEPLOYMENT_RESULT: ${{ needs.deployment-contracts.result }}
           UI_RESULT: ${{ needs.ui.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
           DATABASE_RESULT: ${{ needs.database-compatibility.result }}
         run: |
           test "$CLASSIFY_RESULT" = success
-          for result in "$GO_RESULT" "$DEPLOYMENT_RESULT" "$UI_RESULT" "$DATABASE_RESULT"; do
+          for result in "$GO_RESULT" "$DEPLOYMENT_RESULT" "$UI_RESULT" "$DOCS_RESULT" "$DATABASE_RESULT"; do
             case "$result" in
               success|skipped) ;;
               *) echo "selected CI gate finished with $result" >&2; exit 1 ;;

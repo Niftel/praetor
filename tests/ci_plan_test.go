@@ -16,9 +16,9 @@ func TestCIPlannerSelectsSmallestSafeGateSet(t *testing.T) {
 		want  map[string]string
 	}{
 		{
-			name:  "documentation does not allocate build runners",
+			name:  "documentation site runs only documentation validation",
 			paths: "docs-site/docs/concepts/notifications.md\nREADME.md\n",
-			want:  map[string]string{"run_go": "false", "run_ui": "false", "run_security": "false", "run_images": "false", "run_codeql": "false"},
+			want:  map[string]string{"run_go": "false", "run_ui": "false", "run_docs": "true", "run_security": "false", "run_images": "false", "run_codeql": "false"},
 		},
 		{
 			name:  "API handler gets Go database security and API image gates",
@@ -58,7 +58,7 @@ func TestCIPlannerSelectsSmallestSafeGateSet(t *testing.T) {
 		{
 			name:  "planner changes exercise every validation family",
 			paths: "scripts/plan-ci.sh\n",
-			want:  map[string]string{"run_go": "true", "run_ui": "true", "run_database": "true", "run_deployment": "true", "run_security": "true", "run_product": "true", "images": "api,migrator,ui"},
+			want:  map[string]string{"run_go": "true", "run_ui": "true", "run_docs": "true", "run_database": "true", "run_deployment": "true", "run_security": "true", "run_product": "true", "images": "api,migrator,ui"},
 		},
 	}
 
@@ -131,7 +131,7 @@ func TestChangeAwareWorkflowsKeepStableGatesAndAvoidMainDuplication(t *testing.T
 	ci := readWorkflow("test.yml")
 	for _, required := range []string{
 		"./scripts/github-ci-plan.sh", "needs: classify", "test:",
-		"needs: [classify, go, deployment-contracts, ui, database-compatibility]",
+		"needs: [classify, go, deployment-contracts, ui, docs, database-compatibility]",
 		"success|skipped",
 	} {
 		if !strings.Contains(ci, required) {
