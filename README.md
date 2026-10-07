@@ -24,6 +24,11 @@ refuses a manifest still marked as development.
 Canonical cross-service JSON fixtures live under `tests/contracts`; run
 `make contract-test` to verify the released shared event types against them.
 
+For a laptop evaluation that needs no source checkout or toolchain, build the
+self-contained Docker Compose bundle with `make portable-demo`. See
+[`deployments/portable-demo/README.md`](deployments/portable-demo/README.md).
+Use `make portable-demo-offline PLATFORM=linux/amd64` for an air-gapped handoff.
+
 ## Architecture
 
 Praetor consists of decoupled services coordinated through PostgreSQL and NATS:

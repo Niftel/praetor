@@ -69,6 +69,8 @@ jobs:
         run: make workflow-lint
       - name: deployment probe contracts
         run: GOWORK=off make deployment-contract-test
+      - name: portable demo composition
+        run: docker compose --env-file deployments/portable-demo/.env.template -f deployments/portable-demo/compose.yaml config -q
 
   ui:
     needs: classify
