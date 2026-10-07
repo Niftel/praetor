@@ -17,7 +17,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const manifestPath = "platform-compatibility.yaml"
+const (
+	manifestPath = "platform-compatibility.yaml"
+	demoEnvPath  = "deployments/portable-demo/.env.template"
+)
 
 var (
 	versionPattern   = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
@@ -203,7 +206,7 @@ func main() {
 			problems = append(problems, fmt.Sprintf("Helm imageTags.%s %q does not match component version %s", name, values.ImageTags[name], component.Version))
 		}
 	}
-	demoEnv, err := readEnvFile("deployments/portable-demo/.env.template")
+	demoEnv, err := readDemoEnvFile()
 	if err != nil {
 		problems = append(problems, fmt.Sprintf("read portable demo environment: %v", err))
 	} else {
@@ -334,8 +337,8 @@ func main() {
 	}
 }
 
-func readEnvFile(path string) (map[string]string, error) {
-	raw, err := os.ReadFile(path)
+func readDemoEnvFile() (map[string]string, error) {
+	raw, err := os.ReadFile(demoEnvPath)
 	if err != nil {
 		return nil, err
 	}
