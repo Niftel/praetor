@@ -50,7 +50,7 @@ Praetor consists of decoupled services coordinated through PostgreSQL and NATS:
 
 ### Prerequisites
 
-- Go 1.26.5+
+- Go 1.26.6+
 - PostgreSQL 13+
 - NATS 2.10+
 - Docker with Compose for the full local stack
