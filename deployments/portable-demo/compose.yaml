@@ -1,0 +1,169 @@
+name: praetor-demo
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+x-database-environment: &database-environment
+  DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/praetor?sslmode=disable
+  PRAETOR_SECRET_KEY: ${PRAETOR_SECRET_KEY}
+  PRAETOR_ALLOW_INSECURE_DEFAULTS: "false"
+
+services:
+  db:
+    image: postgres:15-alpine
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: praetor
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d praetor"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nats:
+    image: nats:2.10-alpine
+    logging: *logging
+    restart: unless-stopped
+    command: [--jetstream, --store_dir=/data/jetstream, --http_port=8222]
+    volumes: [nats-data:/data]
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O - http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrator:
+    image: ${PRAETOR_REGISTRY}/praetor-migrator:${PRAETOR_MIGRATOR_TAG}
+    logging: *logging
+    environment:
+      <<: *database-environment
+      PRAETOR_BOOTSTRAP_ADMIN_USERNAME: ${PRAETOR_ADMIN_USERNAME}
+      PRAETOR_BOOTSTRAP_ADMIN_PASSWORD: ${PRAETOR_ADMIN_PASSWORD}
+      PRAETOR_BOOTSTRAP_ADMIN_EMAIL: ${PRAETOR_ADMIN_EMAIL}
+    depends_on:
+      db: {condition: service_healthy}
+    restart: on-failure
+
+  ingestion:
+    image: ${PRAETOR_REGISTRY}/praetor-ingestion:${PRAETOR_INGESTION_TAG}
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      INGESTION_PORT: "8081"
+      NATS_URL: nats://nats:4222
+      PRAETOR_INTERNAL_TOKEN: ${PRAETOR_INTERNAL_TOKEN}
+    ports: ["127.0.0.1:${PRAETOR_INGESTION_PORT:-8090}:8081"]
+    depends_on:
+      migrator: {condition: service_completed_successfully}
+      nats: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O - http://127.0.0.1:8081/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: ${PRAETOR_REGISTRY}/praetor-api:${PRAETOR_API_TAG}
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: "8080"
+      INGESTION_URL: http://ingestion:8081
+      PRAETOR_INTERNAL_TOKEN: ${PRAETOR_INTERNAL_TOKEN}
+      PRAETOR_RBAC_DECISION_AUDIT: "false"
+    ports: ["127.0.0.1:${PRAETOR_API_PORT:-8080}:8080"]
+    depends_on:
+      migrator: {condition: service_completed_successfully}
+      ingestion: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O - http://127.0.0.1:8080/api/v1/ping || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  scheduler:
+    image: ${PRAETOR_REGISTRY}/praetor-scheduler:${PRAETOR_SCHEDULER_TAG}
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      NATS_URL: nats://nats:4222
+      API_URL: http://api:8080
+      JOB_RETENTION_DAYS: "30"
+    depends_on:
+      migrator: {condition: service_completed_successfully}
+      nats: {condition: service_healthy}
+
+  executor:
+    image: ${PRAETOR_REGISTRY}/praetor-executor:${PRAETOR_EXECUTOR_TAG}
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      NATS_URL: nats://nats:4222
+      INGESTION_URL: http://ingestion:8081
+      PRAETOR_INTERNAL_TOKEN: ${PRAETOR_INTERNAL_TOKEN}
+      HOST_RUNNER_CALLBACK_URL: http://host.docker.internal:${PRAETOR_INGESTION_PORT:-8090}
+      EXECUTOR_WORKERS: "2"
+      ANSIBLE_FORKS: "2"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    shm_size: 1gb
+    volumes:
+      - executor-jobs:/var/lib/praetor
+      - executor-packs:/opt/praetor/packs
+      - executor-ssh:/home/praetor/.ssh
+    depends_on:
+      nats: {condition: service_healthy}
+      ingestion: {condition: service_healthy}
+
+  reconciler:
+    image: ${PRAETOR_REGISTRY}/praetor-reconciler:${PRAETOR_RECONCILER_TAG}
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      INGESTION_URL: http://ingestion:8081
+      PRAETOR_INTERNAL_TOKEN: ${PRAETOR_INTERNAL_TOKEN}
+      RECONCILE_INTERVAL: 30s
+    volumes: [executor-ssh:/home/praetor/.ssh]
+    depends_on:
+      migrator: {condition: service_completed_successfully}
+      ingestion: {condition: service_healthy}
+
+  consumer:
+    image: ${PRAETOR_REGISTRY}/praetor-consumer:${PRAETOR_CONSUMER_TAG}
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      NATS_URL: nats://nats:4222
+    depends_on:
+      migrator: {condition: service_completed_successfully}
+      nats: {condition: service_healthy}
+
+  ui:
+    image: ${PRAETOR_REGISTRY}/praetor-ui:${PRAETOR_UI_TAG}
+    logging: *logging
+    restart: unless-stopped
+    ports: ["127.0.0.1:${PRAETOR_UI_PORT:-3000}:80"]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O - http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
+  nats-data:
+  executor-jobs:
+  executor-packs:
+  executor-ssh:

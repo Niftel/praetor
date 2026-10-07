@@ -71,7 +71,7 @@ type chartValues struct {
 
 func main() {
 	release := flag.Bool("release", false, "enforce stable-release invariants")
-	output := flag.String("output", "summary", "output format: summary, images, helm-values, contracts, modules, or repositories")
+	output := flag.String("output", "summary", "output format: summary, images, helm-values, demo-env, contracts, modules, or repositories")
 	flag.Parse()
 
 	var problems []string
@@ -203,6 +203,20 @@ func main() {
 			problems = append(problems, fmt.Sprintf("Helm imageTags.%s %q does not match component version %s", name, values.ImageTags[name], component.Version))
 		}
 	}
+	demoEnv, err := readEnvFile("deployments/portable-demo/.env.template")
+	if err != nil {
+		problems = append(problems, fmt.Sprintf("read portable demo environment: %v", err))
+	} else {
+		expected := map[string]string{"PRAETOR_REGISTRY": strings.TrimSuffix(m.Image.Registry, "/")}
+		for name, component := range m.Components {
+			expected["PRAETOR_"+strings.ToUpper(name)+"_TAG"] = component.Version
+		}
+		for key, want := range expected {
+			if got := demoEnv[key]; got != want {
+				problems = append(problems, fmt.Sprintf("portable demo %s %q does not match manifest %q", key, got, want))
+			}
+		}
+	}
 
 	if len(problems) != 0 {
 		sort.Strings(problems)
@@ -241,6 +255,16 @@ func main() {
 		sort.Strings(names)
 		for _, name := range names {
 			fmt.Printf("  %s: %q\n", name, m.Components[name].Version)
+		}
+	case "demo-env":
+		fmt.Printf("PRAETOR_REGISTRY=%s\n", strings.TrimSuffix(m.Image.Registry, "/"))
+		names := make([]string, 0, len(m.Components))
+		for name := range m.Components {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Printf("PRAETOR_%s_TAG=%s\n", strings.ToUpper(name), m.Components[name].Version)
 		}
 	case "contracts":
 		modules := make([]string, 0, len(m.Contracts))
@@ -308,6 +332,25 @@ func main() {
 	default:
 		fatalf("unknown output format %q", *output)
 	}
+}
+
+func readEnvFile(path string) (map[string]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	return values, nil
 }
 
 func fatalf(format string, args ...any) {
